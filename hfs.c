@@ -1,3 +1,15 @@
+/**
+ * HiveFS
+ *
+ * Hive Mind Filesystem
+ * By K. B. Trotman
+ * License: GNU GPL as of 2023
+ *
+ */
+
+
+// This is the entry point for the entire FS in this file.
+// Though entry and mount point are different, they are both seperate functions.
 
 #include <linux/module.h>
 #include <linux/fs.h>
