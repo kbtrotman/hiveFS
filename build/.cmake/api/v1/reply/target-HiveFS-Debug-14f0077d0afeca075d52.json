@@ -11,7 +11,6 @@
 		"commands" : 
 		[
 			"add_executable",
-			"target_link_libraries",
 			"target_compile_options",
 			"target_include_directories"
 		],
@@ -33,17 +32,11 @@
 			{
 				"command" : 1,
 				"file" : 0,
-				"line" : 23,
-				"parent" : 0
-			},
-			{
-				"command" : 2,
-				"file" : 0,
 				"line" : 25,
 				"parent" : 0
 			},
 			{
-				"command" : 3,
+				"command" : 2,
 				"file" : 0,
 				"line" : 15,
 				"parent" : 0
@@ -59,33 +52,37 @@
 					"fragment" : "-g"
 				},
 				{
-					"backtrace" : 3,
+					"backtrace" : 2,
+					"fragment" : "-std=c99"
+				},
+				{
+					"backtrace" : 2,
 					"fragment" : "-Wall"
 				},
 				{
-					"backtrace" : 3,
-					"fragment" : "-pedantic-errors"
-				},
-				{
-					"fragment" : "-std=gnu11"
+					"fragment" : "-std=gnu99"
 				}
 			],
 			"includes" : 
 			[
 				{
-					"backtrace" : 4,
+					"backtrace" : 3,
 					"path" : "/home/trotmkeb/c/hiveFS"
 				},
 				{
-					"backtrace" : 4,
+					"backtrace" : 3,
 					"path" : "/usr/include/linux"
 				},
 				{
-					"backtrace" : 4,
+					"backtrace" : 3,
 					"path" : "/usr/src/kernels/4.18.0-425.13.1.el8_7.x86_64/include"
 				},
 				{
-					"backtrace" : 4,
+					"backtrace" : 3,
+					"path" : "/usr/src/kernels/4.18.0-425.13.1.el8_7.x86_64/arch/x86/include"
+				},
+				{
+					"backtrace" : 3,
 					"path" : "/usr/include/pq"
 				}
 			],
@@ -96,7 +93,7 @@
 				[
 					1
 				],
-				"standard" : "11"
+				"standard" : "99"
 			},
 			"sourceIndexes" : 
 			[
@@ -116,16 +113,6 @@
 			{
 				"fragment" : "-rdynamic",
 				"role" : "flags"
-			},
-			{
-				"backtrace" : 2,
-				"fragment" : "-lpq",
-				"role" : "libraries"
-			},
-			{
-				"backtrace" : 2,
-				"fragment" : "-lcrypto",
-				"role" : "libraries"
 			}
 		],
 		"language" : "C"
