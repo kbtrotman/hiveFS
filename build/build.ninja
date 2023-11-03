@@ -81,8 +81,8 @@ build cmake_object_order_depends_target_HiveFS: phony || CMakeFiles/HiveFS.dir
 
 build CMakeFiles/HiveFS.dir/hfs.c.o: C_COMPILER__HiveFS_Debug ../hfs.c || cmake_object_order_depends_target_HiveFS
   DEP_FILE = CMakeFiles/HiveFS.dir/hfs.c.o.d
-  FLAGS = -g -Wall -pedantic-errors -std=gnu11
-  INCLUDES = -I../ -I/usr/include/linux -I/usr/src/kernels/4.18.0-425.13.1.el8_7.x86_64/include -I/usr/include/pq
+  FLAGS = -g -std=c99 -Wall -std=gnu99
+  INCLUDES = -I../ -I/usr/include/linux -I/usr/src/kernels/4.18.0-425.13.1.el8_7.x86_64/include -I/usr/src/kernels/4.18.0-425.13.1.el8_7.x86_64/arch/x86/include -I/usr/include/pq
   OBJECT_DIR = CMakeFiles/HiveFS.dir
   OBJECT_FILE_DIR = CMakeFiles/HiveFS.dir
 
@@ -97,7 +97,6 @@ build CMakeFiles/HiveFS.dir/hfs.c.o: C_COMPILER__HiveFS_Debug ../hfs.c || cmake_
 build HiveFS: C_EXECUTABLE_LINKER__HiveFS_Debug CMakeFiles/HiveFS.dir/hfs.c.o
   FLAGS = -g
   LINK_FLAGS = -rdynamic
-  LINK_LIBRARIES = -lpq  -lcrypto
   OBJECT_DIR = CMakeFiles/HiveFS.dir
   POST_BUILD = :
   PRE_LINK = :
