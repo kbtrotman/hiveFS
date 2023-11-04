@@ -15,6 +15,9 @@
 #include <linux/fs.h>
 #include <linux/init.h>
 #include <linux/namei.h>
+#include <linux/stddef.h>
+
+#include "hfs.h"
 
 static struct file_system_type hfs_type = {
     .name = "hfs",
@@ -22,8 +25,7 @@ static struct file_system_type hfs_type = {
     .kill_sb = kill_block_super,
 };
 
-static int hfs_mount(struct file_system_type *fs_type, int flags,
-                      const char *dev_name, void *data)
+static int hfs_mount(struct file_system_type *fs_type, int flags, const char *dev_name, void *data)
 {
     // Allocate a superblock structure
     struct super_block *sb = get_sb_nodev(fs_type, flags, data, hfs_fill_super);
