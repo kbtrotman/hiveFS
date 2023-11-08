@@ -1,21 +1,21 @@
 #include <linux/uio.h>
 
-#include "hfs.h"
+#include "hifs.h"
 
-ssize_t hfs_get_loffset(struct dm_inode *di, loff_t off)
+ssize_t hifs_get_loffset(struct hifs_inode *hii, loff_t off)
 {
-	ssize_t ret = DM_EMPTY_ENTRY;
+	ssize_t ret = HIFS_EMPTY_ENTRY;
 	loff_t add = 0;
 	u32 i = 0;
 
-	if (off > HFS_DEFAULT_BSIZE)
-		add += HFS_DEFAULT_BSIZE % off;
+	if (off > HIFS_DEFAULT_BSIZE)
+		add += HIFS_DEFAULT_BSIZE % off;
 
-	for (i = 0; i < HFS_INODE_TSIZE; ++i) {
-		if (di->i_addrb[i] + off > di->i_addre[i]) {
-			off -= (di->i_addre[i] - di->i_addrb[i]);
+	for (i = 0; i < HIFS_INODE_TSIZE; ++i) {
+		if (hii->i_addrb[i] + off > hii->i_addre[i]) {
+			off -= (hii->i_addre[i] - hii->i_addrb[i]);
 		} else {
-			ret = di->i_addrb[i] + off;
+			ret = hii->i_addrb[i] + off;
 			break;
 		}
 	}
@@ -25,11 +25,11 @@ ssize_t hfs_get_loffset(struct dm_inode *di, loff_t off)
 	return ret;
 }
 
-ssize_t hfs_read(struct kiocb *iocb, struct iov_iter *to)
+ssize_t hifs_read(struct kiocb *iocb, struct iov_iter *to)
 {
 	struct super_block *sb;
 	struct inode *inode;
-	struct dm_inode *dinode;
+	struct hifs_inode *hiinode;
 	struct buffer_head *bh;
 	char *buffer;
 	void *buf = to->iov->iov_base;
@@ -42,21 +42,21 @@ ssize_t hfs_read(struct kiocb *iocb, struct iov_iter *to)
 
 	inode = iocb->ki_filp->f_path.dentry->d_inode;
 	sb = inode->i_sb;
-	dinode = inode->i_private;
+	hiinode = inode->i_private;
 	if (off) {
 		return 0;
 	}
 
 	/* calculate datablock number here */
-	blk = hfs_get_loffset(dinode, off);
+	blk = hifs_get_loffset(hiinode, off);
 	bh = sb_bread(sb, blk);
 	if (!bh) {
         printk(KERN_ERR "Failed to read data block %lu\n", blk);
 		return 0;
 	}
 
-	buffer = (char *)bh->b_data + (off % DM_DEFAULT_BSIZE);
-	nbytes = min((size_t)(dinode->i_size - off), count);
+	buffer = (char *)bh->b_data + (off % HIFS_DEFAULT_BSIZE);
+	nbytes = min((size_t)(hiinode->i_size - off), count);
 
 	if (copy_to_user(buf, buffer, nbytes)) {
 		brelse(bh);
@@ -71,19 +71,19 @@ ssize_t hfs_read(struct kiocb *iocb, struct iov_iter *to)
 	return nbytes;
 }
 
-ssize_t hfs_alloc_if_necessary(struct hfs_superblock *sb, struct hfs_inode *di, loff_t off, size_t cnt)
+ssize_t hifs_alloc_if_necessary(struct hifs_superblock *sb, struct hifs_inode *di, loff_t off, size_t cnt)
 {
 	// Mock it until using bitmap
 	return 0;
 }
 
-ssize_t hfs_write(struct kiocb *iocb, struct iov_iter *from)
+ssize_t hifs_write(struct kiocb *iocb, struct iov_iter *from)
 {
 	struct super_block *sb;
 	struct inode *inode;
-	struct hfs_inode *dinode;
+	struct hifs_inode *dinode;
 	struct buffer_head *bh;
-	struct hfs_superblock *dsb;
+	struct hifs_superblock *dsb;
 	void *buf = from->iov->iov_base; 
 	loff_t off = iocb->ki_pos;
 	size_t count = iov_iter_count(from);
@@ -104,16 +104,16 @@ ssize_t hfs_write(struct kiocb *iocb, struct iov_iter *from)
 	}
 	
 	/* calculate datablock to write alloc if necessary */
-	blk = hfs_alloc_if_necessary(dsb, dinode, off, count);
+	blk = hifs_alloc_if_necessary(dsb, dinode, off, count);
 	/* files are contigous so offset can be easly calculated */
-	boff = hfs_get_loffset(dinode, off);
+	boff = hifs_get_loffset(dinode, off);
 	bh = sb_bread(sb, boff);
 	if (!bh) {
 	    printk(KERN_ERR "Failed to read data block %lu\n", blk);
 	    return 0;
 	}
 	
-	buffer = (char *)bh->b_data + (off % HFS_DEFAULT_BSIZE);
+	buffer = (char *)bh->b_data + (off % HIFS_DEFAULT_BSIZE);
 	if (copy_from_user(buffer, buf, count)) {
 	    brelse(bh);
 	    printk(KERN_ERR "Error copying file content from userspace buffer to kernel space\n");
@@ -128,7 +128,7 @@ ssize_t hfs_write(struct kiocb *iocb, struct iov_iter *from)
 	
 	dinode->i_size = max((size_t)(dinode->i_size), count);
 
-	hfs_store_inode(sb, dinode);
+	hifs_store_inode(sb, dinode);
 	
 	return count;
 }

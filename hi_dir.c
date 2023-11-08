@@ -1,13 +1,13 @@
-#include "hfs.h"
+#include "hifs.h"
 
-int hfs_readdir(struct file *filp, struct dir_context *ctx)
+int hifs_readdir(struct file *filp, struct dir_context *ctx)
 {
 	loff_t pos = ctx->pos;
 	struct inode *inode = file_inode(filp);
 	struct super_block *sb = inode->i_sb;
 	struct buffer_head *bh;
-	struct hfs_inode *dinode;
-	struct hfs_dir_entry *dir_rec;
+	struct hifs_inode *dinode;
+	struct hifs_dir_entry *dir_rec;
 	u32 j = 0, i = 0;
 
 	dinode = inode->i_private;
@@ -17,14 +17,14 @@ int hfs_readdir(struct file *filp, struct dir_context *ctx)
 	WARN_ON(!S_ISDIR(dinode->i_mode));
 
 	/* For each extends from file */
-	for (i = 0; i < HFS_INODE_TSIZE; ++i) {
+	for (i = 0; i < HIFS_INODE_TSIZE; ++i) {
 		u32 b = dinode->i_addrb[i] , e = dinode->i_addre[i];
 		u32 blk = b;
 		while (blk < e) {
 
 			bh = sb_bread(sb, blk);
 			BUG_ON(!bh);
-			dir_rec = (struct dm_dir_entry *)(bh->b_data);
+			dir_rec = (struct hifs_dir_entry *)(bh->b_data);
 
 			for (j = 0; j < sb->s_blocksize; j += sizeof(*dir_rec)) {
 				/* We mark empty/free inodes */
