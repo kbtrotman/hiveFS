@@ -99,6 +99,13 @@ const struct super_operations hifs_sb_operationss = {
 
 static int __init hifs_init(void)
 {
+
+    int ret;
+
+    ret = genl_register_family(&doc_exmpl_gnl_family);
+    if (ret != 0)
+        goto failure;
+
     int ret = register_filesystem(&hifs_type);
     if (ret != 0) {
         printk(KERN_ERR "hifs: Failed to register filesystem\n");
@@ -107,12 +114,17 @@ static int __init hifs_init(void)
 
     printk(KERN_INFO "hifs: Filesystem registered\n");
 
+failure:
     return 0;
 }
 
 static void __exit hifs_exit(void)
 {
-    int ret = unregister_filesystem(&hifs_type);
+    int ret = genl_unregister_family(&doc_exmpl_gnl_family);
+    if (ret != 0)
+        printk("unregister failed: %i\n",ret);
+
+    ret = unregister_filesystem(&hifs_type);
     if (ret != 0) {
         printk(KERN_ERR "hifs: Failed to unregister filesystem\n");
     }
