@@ -32,11 +32,7 @@ MODULE_AUTHOR("Kevin Trotman");
 MODULE_DESCRIPTION("HiveFS - A Hive Mind Filesystem");
 MODULE_VERSION("0:0.01-001")
 
-static struct file_system_type hifs_type = {
-    .name = "hifs",
-    .mount = hifs_mount,
-    .kill_sb = kill_block_super,
-};
+
 
 static int hifs_mount(struct file_system_type *fs_type, int flags, const char *dev_name, void *data)
 {

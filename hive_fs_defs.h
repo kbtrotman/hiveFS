@@ -3,13 +3,38 @@
 /**
 #ifdef __KERNEL__
 #include <linux/types.h>
-#include <linux/magic.h>
 #endif
 **/
 
+/***********************
+ * Database Constants
+ ***********************/
+#define DATABASE "hiveFS"
+#define USER "postgres"
+#define PASSWORD "Postgres!909"
+#define HIVE "10.100.122.20"
+#define PORT "5432"
+#define NO_RECORDS 0x099
+#define DBSTRING "user=" USER " dbname=" DATABASE " password=" PASSWORD " hostaddr=" HOST " port=" PORT
+
+/* SQL Connect */
+struct {
+	static PGconn *hive_conn;	/* Connection to hive */
+	static PGresult   *last_qury; /* Last query result */
+	static PGresult   *last_ins; /* Last insert result */
+	static int  rec_count;     /* Number of records in last query */
+	static int  row;
+	static int  col;
+	bool *sql_init = false;
+} sql;
+
+/* Filesystem Settings */
+struct {
+	char mount_point[255];
+} settings;
+
 /* Layout version */
 #define hifs_LAYOUT_VER		1
-
 
 /* FS SIZE/OFFSET CONST */
 #define HIFS_INODE_TSIZE		3
@@ -34,16 +59,33 @@
 #define HIFS_NAME_LEN		255
 #define HIFS_DEF_ALLOC		4	/* By default alloc N blocks per extend */
 
-/*
+/**
  * Special inode numbers 
- */
+ **/
 #define HIFS_BAD_INO		1 /* Bad blocks inode */
 #define HIFS_ROOT_INO		2 /* Root inode nr */
 #define HIFS_LAF_INO		3 /* Lost and Found inode nr */
+#define EXT4_USR_QUOTA_INO	 3	/* User quota inode */
+#define EXT4_GRP_QUOTA_INO	 4	/* Group quota inode */
+#define EXT4_BOOT_LOADER_INO 5	/* Boot loader inode */
+#define EXT4_UNDEL_DIR_INO	 6	/* Undelete directory inode */
+#define EXT4_RESIZE_INO		 7	/* Reserved group descriptors inode */
+#define EXT4_JOURNAL_INO	 8	/* Journal inode */
+
+
+
+/** 
+ *Filesystem definition 
+ **/
+static struct file_system_type hifs_type = {
+    .name = "hifs",
+    .mount = hifs_mount,
+    .kill_sb = kill_block_super,
+};
 
 /**
- * The on-disk superblock
- */
+ * The on-disk superblock - last 3 vars synced w/ hive queen.
+ **/
 struct hifs_superblock {
 	uint32_t	s_magic;    	/* magic number */
 	uint32_t	s_version;    	/* fs version */
@@ -55,16 +97,16 @@ struct hifs_superblock {
 
 /**
  * Object Location Table
- */
+ **/
 struct hifs_olt {
 	uint32_t	inode_table;		/* inode_table block location */
 	uint32_t	inode_cnt;	     	/* number of inodes */
-	uint32_t	inode_bitmap;		/* inode bitmap block */
+	uint64_t	inode_bitmap;		/* inode bitmap block */
 };
 
 /**
  * The on Disk inode
- */
+ **/
 struct hifs_inode {
 	uint8_t		i_version;	/* inode version */
 	uint8_t		i_flags;	/* inode flags: TYPE */
@@ -86,4 +128,20 @@ struct hifs_dir_entry {
 	char name[256];			/* File name, up to HIFS_NAME_LEN */
 };
 
+ /*
+  * Turn on EXT_DEBUG to enable ext4_ext_show_path/leaf/move in extents.c
+  */
+#define EXT_DEBUG__
+
 #endif /* _LINUX_HIVEFS_H */
+
+#ifdef HIVEFS_DEBUG
+#define hifs_debug(f, a...)						\
+	do {								\
+		printk(KERN_DEBUG "hive-fs DEBUG (%s, %d): %s:",	\
+			__FILE__, __LINE__, __func__);			\
+		printk(KERN_DEBUG f, ## a);				\
+	} while (0)
+#else
+#define hifs_debug(fmt, ...)	no_printk(fmt, ##__VA_ARGS__)
+#endif /* _HIVEFS_DEBUG */
