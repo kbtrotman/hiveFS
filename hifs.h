@@ -11,9 +11,12 @@
 #include <linux/slab.h>
 #include <linux/time.h>
 #include <linux/version.h>
+#include <linux/magic.h>
 
+// Definitions Here:
 #include "hive_fs_defs.h"
 
+// Prototypes Here:
 extern const struct super_operations hifs_sb_operations;
 extern const struct inode_operations hifs_inode_operations;
 extern const struct file_operations hifs_dir_operations;

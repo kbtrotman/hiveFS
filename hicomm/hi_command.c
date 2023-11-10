@@ -7,11 +7,13 @@
 
 #define NETLINK_USER 31
 
-// Now that I've already written two C files for this, do I want to convert it to C++?
-// Being object based would have some good advantages, ehh......
+#include <netlink/netlink.h>
+#include <netlink/genl/genl.h>
 
 void handle_netlink_msg(int sock_fd) {
     struct nlmsghdr *nlh;
+    struct nlattr *attrs[HIFS_NETL_A_MAX + 1];
+    struct genlmsghdr *gnlh;
     struct sockaddr_nl dest_addr;
     struct iovec iov;
     struct msghdr msg;
@@ -39,31 +41,27 @@ void handle_netlink_msg(int sock_fd) {
     if (ret < 0) {
         printf("Error receiving message.\n");
     } else {
-        printf("Received message: %s\n", NLMSG_DATA(nlh));
-        execute_sql(NLMSG_DATA(nlh));
+        gnlh = nlmsg_data(nlh);
+        nla_parse(attrs, HIFS_NETL_A_MAX, genlmsg_attrdata(gnlh, 0), genlmsg_attrlen(gnlh, 0), NULL);
+
+        if (attrs[HIFS_NETL_A_IMODE]) {
+            printf("Received i_mode: %u\n", nla_get_u32(attrs[HIFS_NETL_A_IMODE]));
+        }
+
+        if (attrs[HIFS_NETL_A_IUID]) {
+            printf("Received i_uid: %u\n", nla_get_u32(attrs[HIFS_NETL_A_IUID]));
+        }
+
+        if (attrs[HIFS_NETL_A_IGID]) {
+            printf("Received i_gid: %u\n", nla_get_u32(attrs[HIFS_NETL_A_IGID]));
+        }
+
+        if (attrs[HIFS_NETL_A_ISIZE]) {
+            printf("Received i_size: %llu\n", nla_get_u64(attrs[HIFS_NETL_A_ISIZE]));
+        }
     }
 
     free(nlh);
-}
-
-void execute_sql(char* sql) {
-    PGconn *conn = PQconnectdb("dbname=test user=postgres password=secret hostaddr=127.0.0.1 port=5432");
-    if (PQstatus(conn) == CONNECTION_BAD) {
-        fprintf(stderr, "Connection to database failed: %s\n", PQerrorMessage(conn));
-        PQfinish(conn);
-        return;
-    }
-
-    PGresult *res = PQexec(conn, sql);
-    if (PQresultStatus(res) != PGRES_COMMAND_OK) {
-        fprintf(stderr, "SQL execution failed: %s\n", PQerrorMessage(conn));
-        PQclear(res);
-        PQfinish(conn);
-        return;
-    }
-
-    PQclear(res);
-    PQfinish(conn);
 }
 
 int main() {

@@ -1,37 +1,61 @@
-#include <net/genetlink.h>
 
-// Define the attributes (payload)
+#pragma GCC diagnostic ignored "-Wunknown-pragmas"
+#include <linux/kernel.h>
+#include <linux/skbuff.h>
+#include <linux/genetlink.h>
+#include <linux/string.h>
 
+// Define the payload
 enum {
-    DOC_EXMPL_A_UNSPEC,
-    DOC_EXMPL_A_MSG,
-    __DOC_EXMPL_A_MAX,
+    HIFS_NETL_A_UNSPEC,
+    HIFS_NETL_A_IMODE,
+    HIFS_NETL_A_IUID,
+    HIFS_NETL_A_IGID,
+    HIFS_NETL_A_ISIZE,
+    __HIFS_NETL_A_MAX,
 };
-#define DOC_EXMPL_A_MAX (__DOC_EXMPL_A_MAX - 1)
-
-// Define the commands
-enum {
-    DOC_EXMPL_C_UNSPEC,
-    DOC_EXMPL_C_ECHO,
-    __DOC_EXMPL_C_MAX,
-};
-#define DOC_EXMPL_C_MAX (__DOC_EXMPL_C_MAX - 1)
+#define HIFS_NETL_A_MAX (__HIFS_NETL_A_MAX - 1)
 
 // Define the policy
-static struct nla_policy doc_exmpl_genl_policy[DOC_EXMPL_A_MAX + 1] = {
-    [DOC_EXMPL_A_MSG] = { .type = NLA_NUL_STRING, .len = 128-1 },
+static struct nla_policy hifs_netl_genl_policy[HIFS_NETL_A_MAX + 1] = {
+    [HIFS_NETL_A_IMODE] = { .type = NLA_U32 },
+    [HIFS_NETL_A_IUID] = { .type = NLA_U32 },
+    [HIFS_NETL_A_IGID] = { .type = NLA_U32 },
+    [HIFS_NETL_A_ISIZE] = { .type = NLA_U64 },
+};
+// Define the commands
+enum {
+    HIFS_NETL_C_UNSPEC,
+    HIFS_NETL_C_ECHO,
+    __HIFS_NETL_C_MAX,
 };
 
+// Define the operations
+static struct genl_ops hifs_netl_ops[] = {
+    {
+        .cmd = HIFS_NETL_C_ACK,
+        .flags = 0,
+        .policy = hifs_netl_genl_policy,
+        .doit = hifs_netl_recv_ack,
+        .dumpit = NULL,
+    },
+    // Other operations...
+};
+
+#define HIFS_NETL_C_MAX (__HIFS_NETL_C_MAX - 1)
+
 // Define the family
-static struct genl_family doc_exmpl_gnl_family = {
+static struct genl_family hifs_netl_gnl_family = {
     .hdrsize = 0,
-    .name = "DOC_EXMPL",
+    .name = "HIFS_NETL",
     .version = 1,
-    .maxattr = DOC_EXMPL_A_MAX,
+    .maxattr = HIFS_NETL_A_MAX,
+    .ops = hifs_netl_ops,
+    .n_ops = ARRAY_SIZE(hifs_netl_ops),
 };
 
 // Function to send SQL request
-void send_sql_req(char *sql) {
+void send_sql_req(char *payload) {
     struct sk_buff *skb;
     void *msg_head;
     int rc;
@@ -42,19 +66,36 @@ void send_sql_req(char *sql) {
         return;
 
     // Add the message headers
-    msg_head = genlmsg_put(skb, 0, 0, &doc_exmpl_gnl_family, 0, DOC_EXMPL_C_ECHO);
+    msg_head = genlmsg_put(skb, 0, 0, &hifs_netl_gnl_family, 0, HIFS_NETL_C_ECHO);
     if (msg_head == NULL) {
         rc = -ENOMEM;
         goto failure;
     }
 
-    // Add the SQL request as an attribute
-    rc = nla_put_string(skb, DOC_EXMPL_A_MSG, sql);
+// Add the inode attributes
+    rc = nla_put_u32(skb, HIFS_NETL_A_IMODE, inode->i_mode);
+    if (rc != 0)
+        goto failure;
+
+    rc = nla_put_u32(skb, HIFS_NETL_A_IUID, inode->i_uid);
+    if (rc != 0)
+        goto failure;
+
+    rc = nla_put_u32(skb, HIFS_NETL_A_IGID, inode->i_gid);
+    if (rc != 0)
+        goto failure;
+
+    rc = nla_put_u64(skb, HIFS_NETL_A_ISIZE, inode->i_size);
     if (rc != 0)
         goto failure;
 
     // Finalize the message
     genlmsg_end(skb, msg_head);
+
+    // Send the message
+    rc = genlmsg_unicast(genl_info_net(info), skb, info->snd_portid);
+    if (rc != 0)
+        goto failure;
 
     // Send the message
     rc = genlmsg_unicast(genl_info_net(info), skb, info->snd_portid);
@@ -68,3 +109,12 @@ failure:
     nlmsg_free(skb);
 }
 
+// Define the callback function
+int hifs_netl_recv_ack(struct sk_buff *skb, struct genl_info *info) {
+    // Check if the acknowledgement attribute is present
+    if (info->attrs[HIFS_NETL_A_ACK]) {
+        // Process the acknowledgement...
+    }
+
+    return 0;
+}
