@@ -58,7 +58,8 @@ void cache_put_inode(struct hifs_inode **di);
 /** 
  *Filesystem definition 
  **/
-static struct file_system_type hifs_type = {
+static struct file_system_type hifs_type = 
+{
     .name = "hifs",
     .mount = hifs_mount,
     .kill_sb = kill_block_super,
@@ -67,7 +68,8 @@ static struct file_system_type hifs_type = {
 /**
  * The on-disk superblock - last 3 vars synced w/ hive queen.
  **/
-struct hifs_superblock {
+struct hifs_superblock 
+{
 	uint32_t	s_magic;    	/* magic number */
 	uint32_t	s_version;    	/* fs version */
 	uint32_t	s_blocksize;	/* fs block size */
@@ -79,7 +81,8 @@ struct hifs_superblock {
 /**
  * Object Location Table
  **/
-struct hifs_olt {
+struct hifs_olt 
+{
 	uint32_t	inode_table;		/* inode_table block location */
 	uint32_t	inode_cnt;	     	/* number of inodes */
 	uint64_t	inode_bitmap;		/* inode bitmap block */

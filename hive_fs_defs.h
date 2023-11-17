@@ -1,16 +1,16 @@
-#ifndef _LINUX_HIVEFS_H
-#define _LINUX_HIVEFS_H
+#ifndef _LINUX_HIVEFS_DEFS_H
+#define _LINUX_HIVEFS_DEFS_H
 /**
 #ifdef __KERNEL__
 #include <linux/types.h>
 #endif
 **/
 
+
 #include <linux/types.h>
 #include <linux/netlink.h>
 #include <linux/genetlink.h>
 #include <stdbool.h>
-#include <stdint.h>
 
 /***********************
  * Netlink Structures
@@ -19,7 +19,8 @@
 #define MAX_PAYLOAD 4296
 
 // Define the payload
-enum {
+extern enum 
+{
     HIFS_NETL_ATB_I_ID,
 	HIFS_NETL_ATB_INAME,
     HIFS_NETL_ATB_IMODE,
@@ -32,7 +33,8 @@ enum {
 #define HIFS_NETL_ATB_MAX (__HIFS_NETL_ATB_MAX - 1)
 
 // Define the Netlink commands
-enum {
+extern enum 
+{
 	HIFS_NETL_COM_SEND_ACK,			    // Hive Send Ack to/from User Space
     HIFS_NETL_COM_SET_LINK_UP,          // Hive Operational to/from User Space
     HIFS_NETL_COM_SET_LINK_DOWN,        // Hive Shutdown to/from User Space
@@ -55,7 +57,8 @@ enum {
 #define HIFS_NETL_COM_MAX (__HIFS_NETL_COM_MAX - 1)
 
 /* Filesystem Settings */
-struct {
+extern struct 
+{
 	char mount_point[255];
 } settings;
 
@@ -88,9 +91,8 @@ struct {
 /**
  * Special inode numbers 
  **/
-#define EXT4_BAD_INO		1 /* Bad blocks inode */
-#define EXT4_ROOT_INO		2 /* Root inode nr */
-#define EXT4_LAF_INO		3 /* Lost and Found inode nr */
+#define EXT4_BAD_INO	     1  /* Bad blocks inode */
+#define EXT4_LAF_INO		 2  /* Lost and Found inode nr */
 #define EXT4_USR_QUOTA_INO	 3	/* User quota inode */
 #define EXT4_GRP_QUOTA_INO	 4	/* Group quota inode */
 #define EXT4_BOOT_LOADER_INO 5	/* Boot loader inode */
@@ -105,7 +107,8 @@ struct {
 /**
  * The on Disk inode
  **/
-struct hifs_inode {
+struct hifs_inode 
+{
 	uint8_t		i_version;	/* inode version */
 	uint8_t		i_flags;	/* inode flags: TYPE */
 	uint32_t	i_mode;		/* File mode */
@@ -120,22 +123,19 @@ struct hifs_inode {
 	uint32_t	i_addre[HIFS_INODE_TSIZE];	/* End block of extend ranges */
 };
 
-struct hifs_dir_entry {
+struct hifs_dir_entry 
+{
 	uint32_t inode_nr;		/* inode number */
 	uint32_t name_len;		/* Name length */
 	char name[256];			/* File name, up to HIFS_NAME_LEN */
 };
 
- /*
-  * Turn on EXT_DEBUG to enable ext4_ext_show_path/leaf/move in extents.c
-  */
-#define EXT_DEBUG__
-
-#endif /* _LINUX_HIVEFS_H */
+#endif /* _LINUX_HIVEFS_DEFS_H */
 
 #ifdef HIVEFS_DEBUG
 #define hifs_debug(f, a...)						\
-	do {								\
+	do 
+	{								\
 		printk(KERN_DEBUG "hive-fs DEBUG (%s, %d): %s:",	\
 			__FILE__, __LINE__, __func__);			\
 		printk(KERN_DEBUG f, ## a);				\
