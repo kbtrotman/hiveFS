@@ -70,27 +70,31 @@ static int hifs_mount(struct file_system_type *fs_type, int flags, const char *d
     return 0;
 }
 
-static struct file_operations hifs_file_operations = {
+static struct file_operations hifs_file_operations = 
+{
     .read = hifs_read_file,
     .write = hifs_write_file,
     .open = hifs_open_file,
     .release = hifs_release_file,
 };
 
-static struct inode_operations hifs_inode_operations = {
+static struct inode_operations hifs_inode_operations = 
+{
     .create = hifs_create,
     .lookup = hifs_lookup,
     .mkdir = hifs_mkdir,
     .rmdir = hifs_rmdir,
 };
 
-static struct file_operations hifs_dir_operations = {
+static struct file_operations hifs_dir_operations = 
+{
     .readdir = hifs_readdir,
     .mkdir = hifs_mkdir,
     .rmdir = hifs_rmdir,
 };
 
-const struct super_operations hifs_sb_operationss = {
+const struct super_operations hifs_sb_operationss = 
+{
 	.destroy_inode = hifs_destroy_inode,
 	.put_super = hifs_put_super,
 };

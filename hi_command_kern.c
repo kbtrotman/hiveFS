@@ -7,7 +7,8 @@
 #include "hive_fs_defs.h"
 
 // Test Data
-struct inode {
+struct inode 
+{
     unsigned long id;
     char i_name[50];
     unsigned int i_mode;
@@ -25,7 +26,8 @@ struct inode {
 
 
 // Define the policy
-static struct nla_policy hifs_netl_genl_policy[HIFS_NETL_A_MAX + 1] = {
+static struct nla_policy hifs_netl_genl_policy[HIFS_NETL_ATB_MAX + 1] = 
+{
     [hive_payload.HIFS_NETL_ATB_I_ID] = { .type = NLA_U64 },
     [hive_payload.HIFS_NETL_ATB_INAME] = { .type = char(50) },
     [hive_payload.HIFS_NETL_ATB_IMODE] = { .type = NLA_U32 },
@@ -34,23 +36,21 @@ static struct nla_policy hifs_netl_genl_policy[HIFS_NETL_A_MAX + 1] = {
     [hive_payload.HIFS_NETL_ATB_ISIZE] = { .type = NLA_U64 },
 };
 
-
 // Define the operations
-static struct genl_ops hifs_netl_ops[] = {
+static struct genl_ops hifs_netl_ops[] = 
+{
     {
         .cmd = hive_commands.HIFS_NETL_COM_SEND_ACK,
         .flags = 0,
         .policy = hifs_netl_genl_policy,
-        .doit = hifs_netl_recv_ack,
+        .doit = hifs_netl_rcv_acknowledge_command,
         .dumpit = NULL,
     },
-    // Other operations...
 };
 
-
-
 // Define the family
-static struct genl_family hifs_netl_gnl_family = {
+static struct genl_family hifs_netl_gnl_family = 
+{
     .hdrsize = 0,
     .name = "HIFS_NETL",
     .version = 1,
@@ -60,17 +60,18 @@ static struct genl_family hifs_netl_gnl_family = {
 };
 
 // Function to send request
-void send_sql_req(char *hive_payload) {
+void hifs_netl_send_command_req(char *hive_payload)
+{
     struct sk_buff *skb;    /*  The Socket Buffer  */
     void *msg_head;
-    int rc;                /*  Return Code  */
+    int rc;                 /*  Return Code  */
 
     // Allocate a new message
     skb = genlmsg_new(NLMSG_GOODSIZE, GFP_KERNEL);
     if (skb == NULL) return;
 
     // Add the message headers
-    msg_head = genlmsg_put(skb, 0, 0, &hifs_netl_gnl_family, 0, HIFS_NETL_C_ECHO);
+    msg_head = genlmsg_put(skb, 0, 0, &hifs_netl_gnl_family, 0, HIFS_NETL_COM_SET_LINK_PULSE);
     if (msg_head == NULL) {
         rc = -ENOMEM;
         goto failure;
@@ -109,11 +110,10 @@ failure:
     nlmsg_free(skb);
 }
 
-// Define the callback function
-int hifs_netl_recv_ack(struct sk_buff *skb, struct genl_info *info) {
+void hifs_netl_rcv_acknowledge_command(struct sk_buff *skb, struct genl_info *info)
+{
     // Check if the acknowledgement attribute is present
     if (info->attrs[hive_payload.HIFS_NETL_ATB_ACK]) {
-        // Process the acknowledgement...
         printf("Recieved Acknowledgement\n");
     }
 

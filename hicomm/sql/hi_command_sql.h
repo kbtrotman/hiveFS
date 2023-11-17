@@ -20,4 +20,3 @@ static struct {
 	int  col;
 	bool *sql_init;
 } sql;
-
