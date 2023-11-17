@@ -1,55 +1,61 @@
 
-#include <pq.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
 
-void execute_sql(char* sql) 
+
+#include <libpq-fe.h>
+
+#include "sql/hi_command_sql.h"
+
+
+void execute_sql(char* sql_string) 
 {
-    PGconn *conn = PQconnectdb();
-    if (PQstatus(conn) == CONNECTION_BAD) {
-        fprintf(stderr, "Connection to database failed: %s\n", PQerrorMessage(conn));
-        PQfinish(conn);
-        return;
-    }
-
-    PGresult *res = PQexec(conn, sql);
+    PGresult *res = PQexec(sql.hive_conn, sql_string);
     if (PQresultStatus(res) != PGRES_COMMAND_OK) {
-        fprintf(stderr, "SQL execution failed: %s\n", PQerrorMessage(conn));
+        fprintf(stderr, "SQL execution failed: %s\n", PQerrorMessage(sql.hive_conn));
         PQclear(res);
-        PQfinish(conn);
+        //PQfinish(sql.hive_conn);
         return;
     }
 
     PQclear(res);
-    PQfinish(conn);
+    //PQfinish(sql.hive_conn);
 }
 
-init_hive_link() 
+void init_hive_link() 
 {
 
-    if (!sql_init) {
-        hive_conn = PQconnectdb(DBSTRING);
-        if (PQstatus(hive_conn) == CONNECTION_BAD) {
-            /*  ummm, bad mojo here. What'll we do?  */
+    if (!sql.sql_init) {
+        sql.hive_conn = PQconnectdb(DBSTRING);
+        if (PQstatus(sql.hive_conn) == CONNECTION_BAD) {
+            fprintf(stderr, "Connection to database failed: %s\n", PQerrorMessage(sql.hive_conn));
+            PQfinish(sql.hive_conn);
+            return;
         } else {
-            register_host(); 
-            sql_init = true;
+            register_hive_host(); 
+            *sql.sql_init = true;
         }
     }
+    return;
 }
 
 close_hive_link () 
 {
-    PQclear(last_qury);
-    PQclear(last_ins);
-    PQfinish(hive_conn);  //Close the DB connection gracefully before we shutdown.
+    PQclear(sql.last_qury);
+    PQclear(sql.last_ins);
+    PQfinish(sql.hive_conn);  //Close the DB connection gracefully before we shutdown.
 }
 
 int get_hive_vers() 
 {
-        int hi_psql_vers = PQserverVersion(hive_conn);
+        int hi_psql_vers = PQserverVersion(sql.hive_conn);
         return hi_psql_vers;
 }
 
-int send_binary_data(char *data_Block, )
+int save_binary_data(char *data_block, char *hash)
 {
     const char *paramValues[1];
     int paramLengths[1];
@@ -60,20 +66,37 @@ int send_binary_data(char *data_Block, )
     paramFormats[0] = 1; // 1 means binary format
     PGresult *res;
     int rows = 0;
+    char *ins_sql;
 
-    char *quoted_sql = (char *) malloc(strlen(ins_sql) + quoted_hash.length() + quoted_count.length() + 1);
-    //  std::sprintf(quoted_sql, ins_sql, quoted_hash.c_str(), 1 );
+    //char *quoted_sql = (char *) malloc(strlen(ins_sql) + quoted_hash.length() + quoted_count.length() + 1);
+    //res = PQexecParams(sql.hive_conn, quoted_sql, 1, NULL, paramValues, paramLengths, paramFormats, 0);
 
-    res = PQexecParams(conn, quoted_sql, 1, nullptr, paramValues, paramLengths, paramFormats, 0);
-
-    if (PQresultStatus(res) != PGRES_COMMAND_OK) {
-        rows = 0;
+    //if (PQresultStatus(res) != PGRES_COMMAND_OK) {
+    //    sql.rows = 0;
         /* PROBLEM */
-    } else {
-        rows = atoi(PQcmdTuples(res));
-        last_res = res;
-    }
+    //} else {
+    //    sql.rows = atoi(PQcmdTuples(res));
+    //    sql.last_res = res;
+    //}
 
 
-        PQclear(res);
+    //    PQclear(res);
+}
+
+int register_hive_host() 
+{
+    char *ins_sql = "INSERT INTO machines (host_name, host_ip, host_port, host_vers) VALUES ('%s', '%s', '%s', '%s');";
+    //char *quoted_sql = (char *) malloc(strlen(ins_sql) + quoted_host.length() + quoted_ip.length() + quoted_port.length() + quoted_vers.length() + 1);
+    //sprintf(quoted_sql, ins_sql, quoted_host.c_str(), quoted_ip.c_str(), quoted_port.c_str(), quoted_vers.c_str());
+    //PGresult *res = PQexec(sql.hive_conn, quoted_sql);
+    //if (PQresultStatus(res) != PGRES_COMMAND_OK) {
+    //    sql.rows = 0;
+        /* PROBLEM */
+    //} else {
+    //    sql.rows = atoi(PQcmdTuples(res));
+    //    sql.last_res = res;
+    //}
+
+    //PQclear(res);
+    return 0;
 }

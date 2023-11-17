@@ -1,18 +1,23 @@
+#include <stdint.h>
+#include <stddef.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
-#include <linux/netlink.h>
-#include <libpq-fe.h>
-
-#define NETLINK_USER 31
-
 #include <netlink/netlink.h>
 #include <netlink/genl/genl.h>
+#include <netlink/genl/ctrl.h>
+#include <libpq-fe.h>
 
-void handle_netlink_msg(int sock_fd) {
+
+#include "../hive_fs_defs.h"
+
+
+void handle_netlink_msg(int sock_fd) 
+{
     struct nlmsghdr *nlh;
-    struct nlattr *attrs[HIFS_NETL_A_MAX + 1];
+    struct nlattr *attrs[HIFS_NETL_ATB_MAX + 1];
     struct genlmsghdr *gnlh;
     struct sockaddr_nl dest_addr;
     struct iovec iov;
@@ -42,36 +47,36 @@ void handle_netlink_msg(int sock_fd) {
         printf("Error receiving message.\n");
     } else {
         gnlh = nlmsg_data(nlh);
-        nla_parse(attrs, HIFS_NETL_A_MAX, genlmsg_attrdata(gnlh, 0), genlmsg_attrlen(gnlh, 0), NULL);
+        nla_parse(attrs, HIFS_NETL_ATB_MAX, genlmsg_attrdata(gnlh, 0), genlmsg_attrlen(gnlh, 0), NULL);
 
-        if (attrs[HIFS_NETL_A_IMODE]) {
-            printf("Received i_mode: %u\n", nla_get_u32(attrs[HIFS_NETL_A_IMODE]));
+        if (attrs[HIFS_NETL_ATB_IMODE]) {
+            printf("Received i_mode: %u\n", nla_get_u32(attrs[HIFS_NETL_ATB_IMODE]));
         }
 
-        if (attrs[HIFS_NETL_A_IUID]) {
-            printf("Received i_uid: %u\n", nla_get_u32(attrs[HIFS_NETL_A_IUID]));
+        if (attrs[HIFS_NETL_ATB_IUID]) {
+            printf("Received i_uid: %u\n", nla_get_u32(attrs[HIFS_NETL_ATB_IUID]));
         }
 
-        if (attrs[HIFS_NETL_A_IGID]) {
-            printf("Received i_gid: %u\n", nla_get_u32(attrs[HIFS_NETL_A_IGID]));
+        if (attrs[HIFS_NETL_ATB_IGID]) {
+            printf("Received i_gid: %u\n", nla_get_u32(attrs[HIFS_NETL_ATB_IGID]));
         }
 
-        if (attrs[HIFS_NETL_A_ISIZE]) {
-            printf("Received i_size: %llu\n", nla_get_u64(attrs[HIFS_NETL_A_ISIZE]));
+        if (attrs[HIFS_NETL_ATB_ISIZE]) {
+            printf("Received i_size: %lu\n", nla_get_u64(attrs[HIFS_NETL_ATB_ISIZE]));
         }
     }
 
     free(nlh);
 }
 
-int main() {
+int main()
+{
     struct sockaddr_nl src_addr;
     int sock_fd;
 
     // Initialize netlink socket
-    sock_fd = socket(PF_NETLINK, SOCK_RAW, NETLINK_USER);
-    if (sock_fd < 0)
-        return -1;
+    sock_fd = socket(PF_NETLINK, SOCK_RAW, NETLINK__HIVE__USER);
+    if (sock_fd < 0) return -1;
 
     memset(&src_addr, 0, sizeof(src_addr));
     src_addr.nl_family = AF_NETLINK;

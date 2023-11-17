@@ -6,27 +6,53 @@
 #endif
 **/
 
-/***********************
- * Database Constants
- ***********************/
-#define DATABASE "hiveFS"
-#define USER "postgres"
-#define PASSWORD "Postgres!909"
-#define HIVE "10.100.122.20"
-#define PORT "5432"
-#define NO_RECORDS 0x099
-#define DBSTRING "user=" USER " dbname=" DATABASE " password=" PASSWORD " hostaddr=" HOST " port=" PORT
+#include <linux/types.h>
+#include <linux/netlink.h>
+#include <linux/genetlink.h>
+#include <stdbool.h>
+#include <stdint.h>
 
-/* SQL Connect */
-struct {
-	static PGconn *hive_conn;	/* Connection to hive */
-	static PGresult   *last_qury; /* Last query result */
-	static PGresult   *last_ins; /* Last insert result */
-	static int  rec_count;     /* Number of records in last query */
-	static int  row;
-	static int  col;
-	bool *sql_init = false;
-} sql;
+/***********************
+ * Netlink Structures
+ ***********************/
+#define NETLINK__HIVE__USER 27
+#define MAX_PAYLOAD 4296
+
+// Define the payload
+enum {
+    HIFS_NETL_ATB_I_ID,
+	HIFS_NETL_ATB_INAME,
+    HIFS_NETL_ATB_IMODE,
+    HIFS_NETL_ATB_IUID,
+    HIFS_NETL_ATB_IGID,
+    HIFS_NETL_ATB_ISIZE,
+    __HIFS_NETL_ATB_MAX,
+} hive_payload;
+
+#define HIFS_NETL_ATB_MAX (__HIFS_NETL_ATB_MAX - 1)
+
+// Define the Netlink commands
+enum {
+	HIFS_NETL_COM_SEND_ACK,			    // Hive Send Ack to/from User Space
+    HIFS_NETL_COM_SET_LINK_UP,          // Hive Operational to/from User Space
+    HIFS_NETL_COM_SET_LINK_DOWN,        // Hive Shutdown to/from User Space
+    HIFS_NETL_COM_SET_LINK_PULSE,       // Periodic I'm Alive Pulse, when needed
+    HIFS_NETL_COM_SET_LINK_RESET,       // Hive Reset to/from User Space
+    HIFS_NETL_COM_SYNC_SUPERBLOCK,      // Hive Sync Superblock to/from User Space
+    HIFS_NETL_COM_SEND_INODE_ONLY,      // Hive Send Inode Only to/from User Space
+    HIFS_NETL_COM_SEND_INODE_AND_BLOCK, // Hive Send Inode and Block to/from User Space
+    HIFS_NETL_COM_SEND_INODE_AND_FILE,  // Hive Send Inode and File to/from User Space
+    HIFS_NETL_COM_SEND_BLOCK_ONLY,      // Hive Send Block Only to/from User Space
+    HIFS_NETL_COM_SEND_FILE_ONLY,       // Hive Send File Only to/from User Space
+    HIFS_NETL_COM_REQ_INODE_ONLY,       // User Space Request Inode Only to Hive
+    HIFS_NETL_COM_REQ_INODE_AND_BLOCK,  // User Space Request Inode and Block to Hive
+    HIFS_NETL_COM_REQ_INODE_AND_FILE,   // User Space Req Inode and File to/from Hive
+    HIFS_NETL_COM_REQ_BLOCK_ONLY,       // User Space Request Block Only to/from Hive
+    HIFS_NETL_COM_REQ_FILE_ONLY,        // User Space Request File Only to/from Hive
+	__HIFS_NETL_COM_MAX,
+} hive_commands;
+
+#define HIFS_NETL_COM_MAX (__HIFS_NETL_COM_MAX - 1)
 
 /* Filesystem Settings */
 struct {
@@ -62,47 +88,19 @@ struct {
 /**
  * Special inode numbers 
  **/
-#define HIFS_BAD_INO		1 /* Bad blocks inode */
-#define HIFS_ROOT_INO		2 /* Root inode nr */
-#define HIFS_LAF_INO		3 /* Lost and Found inode nr */
+#define EXT4_BAD_INO		1 /* Bad blocks inode */
+#define EXT4_ROOT_INO		2 /* Root inode nr */
+#define EXT4_LAF_INO		3 /* Lost and Found inode nr */
 #define EXT4_USR_QUOTA_INO	 3	/* User quota inode */
 #define EXT4_GRP_QUOTA_INO	 4	/* Group quota inode */
 #define EXT4_BOOT_LOADER_INO 5	/* Boot loader inode */
 #define EXT4_UNDEL_DIR_INO	 6	/* Undelete directory inode */
 #define EXT4_RESIZE_INO		 7	/* Reserved group descriptors inode */
 #define EXT4_JOURNAL_INO	 8	/* Journal inode */
+#define EXT4_EXCLUDE_INO	 9	/* The "exclude" inode, for snapshots */
 
 
 
-/** 
- *Filesystem definition 
- **/
-static struct file_system_type hifs_type = {
-    .name = "hifs",
-    .mount = hifs_mount,
-    .kill_sb = kill_block_super,
-};
-
-/**
- * The on-disk superblock - last 3 vars synced w/ hive queen.
- **/
-struct hifs_superblock {
-	uint32_t	s_magic;    	/* magic number */
-	uint32_t	s_version;    	/* fs version */
-	uint32_t	s_blocksize;	/* fs block size */
-	uint32_t	s_block_olt;	/* Object location table block */
-	uint32_t	s_inode_cnt;	/* number of inodes in inode table */
-	uint32_t	s_last_blk;	    /* just move forward with allocation */
-};
-
-/**
- * Object Location Table
- **/
-struct hifs_olt {
-	uint32_t	inode_table;		/* inode_table block location */
-	uint32_t	inode_cnt;	     	/* number of inodes */
-	uint64_t	inode_bitmap;		/* inode bitmap block */
-};
 
 /**
  * The on Disk inode
