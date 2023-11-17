@@ -24,9 +24,14 @@ extern const struct file_operations hifs_file_operations;
 
 extern struct kmem_cache *hifs_inode_cache;
 
-struct dentry *hifs_mount(struct file_system_type *ft, int f, const char *dev, void *d);
 int hifs_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode);
 struct dentry *hifs_lookup(struct inode *dir, struct dentry *child_dentry, unsigned int flags);
+
+/* hi_superblock.c */
+static int hifs_fill_super(struct super_block *sb, void *data, int silent);
+void hifs_put_super(struct super_block *sb);
+void hifs_kill_superblock(struct super_block *sb);
+struct dentry *hifs_mount(struct file_system_type *ft, int f, const char *dev, void *d);
 
 /* hi_file.c */
 ssize_t hifs_read(struct kiocb *iocb, struct iov_iter *to);
@@ -47,8 +52,37 @@ void hifs_store_inode(struct super_block *sb, struct hifs_inode *dmi);
 struct hifs_inode *cache_get_inode(void);
 void cache_put_inode(struct hifs_inode **di);
 
-/* hi_superblock.c */
-void hifs_put_super(struct super_block *sb);
-void hifs_kill_superblock(struct super_block *sb);
+
+/* Definitions specific only tot he module */
+
+/** 
+ *Filesystem definition 
+ **/
+static struct file_system_type hifs_type = {
+    .name = "hifs",
+    .mount = hifs_mount,
+    .kill_sb = kill_block_super,
+};
+
+/**
+ * The on-disk superblock - last 3 vars synced w/ hive queen.
+ **/
+struct hifs_superblock {
+	uint32_t	s_magic;    	/* magic number */
+	uint32_t	s_version;    	/* fs version */
+	uint32_t	s_blocksize;	/* fs block size */
+	uint32_t	s_block_olt;	/* Object location table block */
+	uint32_t	s_inode_cnt;	/* number of inodes in inode table */
+	uint32_t	s_last_blk;	    /* just move forward with allocation */
+};
+
+/**
+ * Object Location Table
+ **/
+struct hifs_olt {
+	uint32_t	inode_table;		/* inode_table block location */
+	uint32_t	inode_cnt;	     	/* number of inodes */
+	uint64_t	inode_bitmap;		/* inode bitmap block */
+};
 
 #endif /* _KERN_HIVEFS_H */  

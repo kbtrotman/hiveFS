@@ -7,17 +7,19 @@
  *
  */
 
-// Shout Out!!!
-// Note that the original code is adapted from a Dublin Linux User's Group presentation
-// given by Maciej Grochowski on the topic of "Writing Linux Filesystems for Fun"
-// available at:  https://www.youtube.com/watch?v=sLR17lUjTpc
-// He's brillian and it's a good way to understand the VFS layer, which is difficult
-// to breech without some helpful documentation. It's a great intro to dev'ing simple
-// superblock/inode/dir/file structures when beginning a filesystem.
+//****************************       Shout Out!!!       ***********************************
+//* Note that the original code is adapted from a Dublin Linux User's Group presentation
+//* given by Maciej Grochowski on the topic of "Writing Linux Filesystems for Fun"
+//* available at:  https://www.youtube.com/watch?v=sLR17lUjTpc
+//* He's brilliant and it's a good way to understand the VFS layer, which is difficult
+//* to breech without some helpful documentation. It's a great intro to dev'ing simple
+//* superblock/inode/dir/file structures.
+//*****************************************************************************************
 
+
+// *********           HiveFS Entry          *********
 // This is the entry point for the entire FS in this file.
 // Though entry and mount point are different, they are both seperate functions.
-
 
 #include <linux/module.h>
 #include <linux/fs.h>
@@ -98,9 +100,8 @@ static int __init hifs_init(void)
 
     int ret;
 
-    ret = genl_register_family(&doc_exmpl_gnl_family);
-    if (ret != 0)
-        goto failure;
+    ret = genl_register_family(&hifs_netl_gnl_family);
+    if (ret != 0) goto failure;
 
     int ret = register_filesystem(&hifs_type);
     if (ret != 0) {
@@ -114,11 +115,12 @@ failure:
     return 0;
 }
 
+
 static void __exit hifs_exit(void)
 {
-    int ret = genl_unregister_family(&doc_exmpl_gnl_family);
+    int ret = genl_unregister_family(&hifs_netl_gnl_family);
     if (ret != 0)
-        printk("unregister failed: %i\n",ret);
+        printk("unregister of NetLink for HiveFS failed: %i\n",ret);
 
     ret = unregister_filesystem(&hifs_type);
     if (ret != 0) {
