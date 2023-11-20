@@ -132,3 +132,15 @@ ssize_t hifs_write(struct kiocb *iocb, struct iov_iter *from)
 	
 	return count;
 }
+
+int hifs_open_file(inode *inode, file *filp)
+{
+
+	return 0;
+}
+
+int hifs_release_file(inode *inode, file filp)
+{
+
+	return 0;
+}

@@ -6,7 +6,6 @@
 #endif
 **/
 
-
 #include <linux/types.h>
 #include <linux/netlink.h>
 #include <linux/genetlink.h>
@@ -100,7 +99,7 @@ extern struct
 #define EXT4_RESIZE_INO		 7	/* Reserved group descriptors inode */
 #define EXT4_JOURNAL_INO	 8	/* Journal inode */
 #define EXT4_EXCLUDE_INO	 9	/* The "exclude" inode, for snapshots */
-
+#define HIFS_ROOT_INODE      15  /* Root inode nbr */
 
 
 

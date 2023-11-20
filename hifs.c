@@ -26,6 +26,7 @@
 #include <linux/init.h>
 #include <linux/namei.h>
 #include <linux/stddef.h>
+#include <linux/slab_def.h>
 
 #include "hifs.h"
 
@@ -34,7 +35,42 @@ MODULE_AUTHOR("Kevin Trotman");
 MODULE_DESCRIPTION("HiveFS - A Hive Mind Filesystem");
 MODULE_VERSION("0:0.01-001")
 
+struct file_system_type hifs_type = 
+{
+    .name = "hifs",
+    .mount = hifs_mount,
+    .kill_sb = kill_block_super,
+};
 
+// Prototypes Here:
+struct file_operations hifs_file_operations = 
+{
+    .read_iter = hifs_read,
+    .write_iter = hifs_write,
+    .open = hifs_open_file,
+	.release = hifs_release_file,
+};
+
+struct inode_operations hifs_inode_operations = 
+{
+    .create = hifs_create,
+    .lookup = hifs_lookup,
+    .mkdir = hifs_mkdir,
+    .rmdir = hifs_rmdir,
+};
+
+struct file_operations hifs_dir_operations = 
+{
+    .iterate_shared = hifs_readdir,
+};
+
+struct super_operations hifs_sb_operations = 
+{
+	.destroy_inode = hifs_destroy_inode,
+	.put_super = hifs_put_super,
+};
+
+kmem_cache *hifs_inode_cache = NULL;
 
 static int hifs_mount(struct file_system_type *fs_type, int flags, const char *dev_name, void *data)
 {
@@ -69,35 +105,6 @@ static int hifs_mount(struct file_system_type *fs_type, int flags, const char *d
 
     return 0;
 }
-
-static struct file_operations hifs_file_operations = 
-{
-    .read = hifs_read_file,
-    .write = hifs_write_file,
-    .open = hifs_open_file,
-    .release = hifs_release_file,
-};
-
-static struct inode_operations hifs_inode_operations = 
-{
-    .create = hifs_create,
-    .lookup = hifs_lookup,
-    .mkdir = hifs_mkdir,
-    .rmdir = hifs_rmdir,
-};
-
-static struct file_operations hifs_dir_operations = 
-{
-    .readdir = hifs_readdir,
-    .mkdir = hifs_mkdir,
-    .rmdir = hifs_rmdir,
-};
-
-const struct super_operations hifs_sb_operationss = 
-{
-	.destroy_inode = hifs_destroy_inode,
-	.put_super = hifs_put_super,
-};
 
 static int __init hifs_init(void)
 {

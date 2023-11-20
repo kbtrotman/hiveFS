@@ -209,7 +209,7 @@ int hifs_create_inode(struct inode *dir, struct dentry *dentry, umode_t mode)
 	return hifs_add_ondir(inode, dir, dentry, mode);
 }
 
-int hifs_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode)
+int hifs_mkdir(struct mnt_idmap *idmap, struct inode *dir, struct dentry *dentry, umode_t mode)
 {
 	int ret = 0;
 
@@ -223,6 +223,11 @@ int hifs_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode)
 	dir->i_op = &hifs_inode_operations;
 	dir->i_fop = &hifs_dir_operations;
 
+	return 0;
+}
+
+int hifs_rmdir(struct inode *dir, struct dentry *dentry)
+{
 	return 0;
 }
 

@@ -48,7 +48,7 @@ static int hifs_fill_super(struct super_block *sb, void *data, int silent)
 	root_inode->i_atime = current_time(root_inode);
 	root_inode->i_ctime = current_time(root_inode);
 	root_inode->i_mtime = current_time(root_inode);
-	root_inode->i_ino = EXT4_ROOT_INO;
+	root_inode->i_ino = HIFS_ROOT_INODE;
 	root_inode->i_op = &hifs_inode_operations;
 	root_inode->i_fop = &hifs_dir_operations;
 	root_inode->i_private = root_hifsinode;
