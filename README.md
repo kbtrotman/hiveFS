@@ -9,10 +9,14 @@ First:
 The [Hive Applicance] hive software. This device is the hub that controls everything. It would be a blade host, similar to existing array controllers, attached to a huge blob of storage behind it, cpus, memory, etc. The hive will be an installable software image (ISO) built on that blade that helps the admin to automatically configure the hardware into a large pool of storage as one central hive. Once the storage is accessible, rather than serving luns, our hive has a unique purpose, which is to:
    1. Require certificates to prove the host/spoke is a valid hive member.
    2. A configured hive worker will then be given a confirmed spoke on the wheel, which initiates his filesystem at whatever place you mount it to.
+      
       i. We could also say the admin is doing a mkfs here, because in the hive a mkfs linux command will add a host as a spoke on that wheel.
+
    3. Transfer encrypted filesystem structures to the foreign host, his inode table. and de-duplicated block data.
+      
       i. I should add here that most hosts already have a large block of local storage, so a local cache is prabably a good idea here 
-         to increase performance and is feasible using existing disk space. 
+         to increase performance and is feasible using existing disk space.
+ 
    4. Store the remote worker's data as it comes in and as in any filesystem, add links to existing data instead of physical storage.
    5. And store n-number of copies of each block in it's global store. (Replicated/DR'd/ad-nauseum)
 
