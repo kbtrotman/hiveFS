@@ -1,14 +1,15 @@
+/**
+ * HiveFS
+ *
+ * Hive Mind Filesystem
+ * By K. B. Trotman
+ * License: GNU GPL as of 2023
+ *
+ */
 #ifndef _LINUX_HIVEFS_DEFS_H
 #define _LINUX_HIVEFS_DEFS_H
-/**
-#ifdef __KERNEL__
-#include <linux/types.h>
-#endif
-**/
 
 #include <linux/types.h>
-#include <linux/netlink.h>
-#include <linux/genetlink.h>
 #include <stdbool.h>
 
 /***********************
@@ -20,12 +21,19 @@
 // Define the payload
 extern enum 
 {
+	HIFS_NETL_ATB_IVERS,
+	HIFS_NETL_ATB_IFLAGS,
+	HIFS_NETL_ATB_IMODE,
     HIFS_NETL_ATB_I_ID,
+	HIFS_NETL_ATB_IUID,
+	HIFS_NETL_ATB_IGID,
+	HIFS_NETL_ATB_IHRD_LNK,
+	HIFS_NETL_ATB_ICTIME,
+	HIFS_NETL_ATB_IMTIME,
+	HIFS_NETL_ATB_ISIZE,
 	HIFS_NETL_ATB_INAME,
-    HIFS_NETL_ATB_IMODE,
-    HIFS_NETL_ATB_IUID,
-    HIFS_NETL_ATB_IGID,
-    HIFS_NETL_ATB_ISIZE,
+	HIFS_NETL_ATB_IADDRB,
+	HIFS_NETL_ATB_IADDRE,
     __HIFS_NETL_ATB_MAX,
 } hive_payload;
 
@@ -54,6 +62,11 @@ extern enum
 } hive_commands;
 
 #define HIFS_NETL_COM_MAX (__HIFS_NETL_COM_MAX - 1)
+
+
+/***********************
+ * HiveFS Structures
+ ***********************/
 
 /* Filesystem Settings */
 extern struct 
@@ -104,7 +117,7 @@ extern struct
 
 
 /**
- * The on Disk inode
+ * The on-Disk inode
  **/
 struct hifs_inode 
 {
@@ -113,10 +126,12 @@ struct hifs_inode
 	uint32_t	i_mode;		/* File mode */
 	uint32_t	i_ino;		/* inode number */
 	uint16_t	i_uid;		/* owner's user id */
+	uint16_t	i_gid;		/* owner's group id */
 	uint16_t	i_hrd_lnk;	/* number of hard links */
 	uint32_t 	i_ctime;	/* Creation time */
 	uint32_t	i_mtime;	/* Modification time*/
 	uint32_t	i_size;		/* Number of bytes in file */
+	char    	i_name[50];     /* File name */
 	/* address begin - end block, range exclusive: addres end (last block) does not belogs to extend! */
 	uint32_t	i_addrb[HIFS_INODE_TSIZE];	/* Start block of extend ranges */
 	uint32_t	i_addre[HIFS_INODE_TSIZE];	/* End block of extend ranges */

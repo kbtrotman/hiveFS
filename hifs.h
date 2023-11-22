@@ -1,64 +1,104 @@
+/**
+ * HiveFS
+ *
+ * Hive Mind Filesystem
+ * By K. B. Trotman
+ * License: GNU GPL as of 2023
+ *
+ */
 #ifndef _KERN_HIVEFS_H
 #define _KERN_HIVEFS_H
 
-#include <linux/blkdev.h>
-#include <linux/buffer_head.h>
+#include <linux/stddef.h>
+#include <linux/module.h>
+#include <linux/kernel.h>
 #include <linux/fs.h>
 #include <linux/init.h>
 #include <linux/namei.h>
-#include <linux/module.h>
+#include <linux/blkdev.h>
+#include <linux/buffer_head.h>
 #include <linux/random.h>
 #include <linux/slab.h>
 #include <linux/time.h>
 #include <linux/version.h>
 #include <linux/magic.h>
+#include <linux/types.h>
+#include <net/netlink.h>
+#include <net/genetlink.h>
 
-
-/* Definitions specific only to the module in this file! */
-
-// Definitions Here:
+// In the definitions file, those items are common to hi_command in both kernel-space and
+// in user-space.  The definitions file is included in both the kernel-space and user-space
+// hi_command files.
+// COMMON Definitions Here ONLY!
 #include "hive_fs_defs.h"
-// Definitions Here:
+// COMMON Definitions Here ONLY!
 
+
+/* Definitions past this point should be specific only to the kernel-space module! */
 
 // Prototypes Here:
+
+/* hifs.c */
+int hifs_init(void);
+void hifs_exit(void);
+static int hifs_mkfs(struct file_system_type *fs_type, int flags, const char *dev_name, void *data);
+
+/* hi_command_kern_netl.c */
+void hifs_netl_send_command_req(char *hive_payload);
+int hifs_netl_rcv_acknowledge_command(struct sk_buff *skb, struct genl_info *info);
+
 /* hi_superblock.c */
-static int hifs_fill_super(struct super_block *sb, void *data, int silent);
+void hifs_save_sb(struct super_block *sb);
 void hifs_put_super(struct super_block *sb);
 void hifs_kill_superblock(struct super_block *sb);
-struct dentry *hifs_mount(struct file_system_type *ft, int f, const char *dev, void *d);
+int hifs_fill_super(struct super_block *sb, void *data, int silent);
+struct dentry *hifs_mount(struct file_system_type *fs_type, int flags, const char *dev_name, void *data);
 
-/* hi_file.c */
-ssize_t hifs_read(struct kiocb *iocb, struct iov_iter *to);
-ssize_t hifs_write(struct kiocb *iocb, struct iov_iter *from);
-int hifs_open_file(struct inode *inode, struct file *filp);
-int hifs_release_file(struct inode *inode, struct file filp);
+/* hi_inode.c */
+void dump_hifsinode(struct hifs_inode *dmi);
+void hifs_destroy_inode(struct inode *inode);
+void hifs_store_inode(struct super_block *sb, struct hifs_inode *hii)
+int hifs_add_dir_record(struct super_block *sb, struct inode *dir, struct dentry *dentry, struct inode *inode);
+int alloc_inode(struct super_block *sb, struct hifs_inode *hii);
+struct inode *hifs_new_inode(struct inode *dir, struct dentry *dentry, umode_t mode);
+int hifs_add_ondir(struct inode *inode, struct inode *dir, struct dentry *dentry, umode_t mode);
+int hifs_create(struct inode *dir, struct dentry *dentry, umode_t mode, bool excl);
+int hifs_create_inode(struct inode *dir, struct dentry *dentry, umode_t mode);
+int hifs_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode);
+int hifs_rmdir(struct inode *dir, struct dentry *dentry);
+void hifs_put_inode(struct inode *inode);
+int isave_intable(struct super_block *sb, struct hifs_inode *hii, u32 i_block);
+struct hifs_inode *hifs_iget(struct super_block *sb, ino_t ino);
+void hifs_fill_inode(struct super_block *sb, struct inode *des, struct hifs_inode *src);
+struct dentry *hifs_lookup(struct inode *dir, struct dentry *child_dentry, unsigned int flags);
 
 /* hi_dir.c */
 int hifs_readdir(struct file *filp, struct dir_context *ctx);
 
-/* hi_inode.c */
-int isave_intable(struct super_block *sb, struct hifs_inode *dmi, u32 i_block);
-void hifs_destroy_inode(struct inode *inode);
-void hifs_fill_inode(struct super_block *sb, struct inode *des, struct hifs_inode *src);
-int hifs_create_inode(struct inode *dir, struct dentry *dentry, umode_t mode);
-int hifs_create(struct inode *dir, struct dentry *dentry, umode_t mode, bool excl);
-void hifs_store_inode(struct super_block *sb, struct hifs_inode *dmi);
-struct dentry *hifs_lookup(struct inode *dir, struct dentry *child_dentry, unsigned int flags);
-int hifs_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode);
-int hifs_rmdir(struct inode *dir, struct dentry *dentry);
+/* hi_file.c */
+ssize_t hifs_get_loffset(struct hifs_inode *hii, loff_t off);
+ssize_t hifs_read(struct kiocb *iocb, struct iov_iter *to);
+ssize_t hifs_write(struct kiocb *iocb, struct iov_iter *from);
+int hifs_open_file(struct inode *inode, struct file *filp);
+int hifs_release_file(struct inode *inode, struct file filp);
+ssize_t hifs_alloc_if_necessary(struct hifs_superblock *sb, struct hifs_inode *di, loff_t off, size_t cnt);
 
-/* inode cache */
+/* hi_cache */
 struct hifs_inode *cache_get_inode(void);
-void cache_put_inode(struct hifs_inode **di);
+void cache_put_inode(struct hifs_inode **hii);
+
 // Prototypes Here:
 
 
+
+
+
 // Globals Here:
+
 /** 
  *Filesystem definition 
  **/
-extern static struct file_system_type hifs_type = 
+extern struct file_system_type hifs_type;
 
 struct hifs_superblock 
 {
@@ -87,7 +127,11 @@ extern struct file_operations hifs_file_operations;
 extern struct inode_operations hifs_inode_operations;
 extern struct file_operations hifs_dir_operations;
 extern struct super_operations hifs_sb_operations;
-extern kmem_cache *hifs_inode_cache = NULL;
+
+/**
+ * Kernel Inode Cache
+ **/
+extern struct kmem_cache *hifs_inode_cache;
 // Globals Here:
 
 #endif /* _KERN_HIVEFS_H */  

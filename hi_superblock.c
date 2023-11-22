@@ -1,3 +1,11 @@
+/**
+ * HiveFS
+ *
+ * Hive Mind Filesystem
+ * By K. B. Trotman
+ * License: GNU GPL as of 2023
+ *
+ */
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/blkdev.h>
@@ -13,7 +21,7 @@
 
 #include "hifs.h"
 
-static int hifs_fill_super(struct super_block *sb, void *data, int silent)
+int hifs_fill_super(struct super_block *sb, void *data, int silent)
 {
 	struct hifs_superblock *h_sb;
 	struct buffer_head *bh;
@@ -85,7 +93,8 @@ void hifs_kill_superblock(struct super_block *sb)
 	kill_block_super(sb);
 }
 
-void hifs_save_sb(struct super_block *sb) {
+void hifs_save_sb(struct super_block *sb)
+{
 	struct buffer_head *bh;
 	struct hifs_superblock *d_sb = sb->s_fs_info;
 
@@ -98,6 +107,7 @@ void hifs_save_sb(struct super_block *sb) {
 	brelse(bh);
 }
 
-void hifs_put_super(struct super_block *sb) {
+void hifs_put_super(struct super_block *sb) 
+{
 	return;
 }

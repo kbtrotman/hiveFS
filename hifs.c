@@ -16,17 +16,10 @@
 //* superblock/inode/dir/file structures.
 //*****************************************************************************************
 
-
 // *********           HiveFS Entry          *********
 // This is the entry point for the entire FS in this file.
-// Though entry and mount point are different, they are both seperate functions.
+// Entry and mount point are different, and they are both seperate functions.
 
-#include <linux/module.h>
-#include <linux/fs.h>
-#include <linux/init.h>
-#include <linux/namei.h>
-#include <linux/stddef.h>
-#include <linux/slab_def.h>
 
 #include "hifs.h"
 
@@ -35,6 +28,8 @@ MODULE_AUTHOR("Kevin Trotman");
 MODULE_DESCRIPTION("HiveFS - A Hive Mind Filesystem");
 MODULE_VERSION("0:0.01-001")
 
+struct kmem_cache *hifs_inode_cache = NULL;
+
 struct file_system_type hifs_type = 
 {
     .name = "hifs",
@@ -42,7 +37,6 @@ struct file_system_type hifs_type =
     .kill_sb = kill_block_super,
 };
 
-// Prototypes Here:
 struct file_operations hifs_file_operations = 
 {
     .read_iter = hifs_read,
@@ -70,9 +64,7 @@ struct super_operations hifs_sb_operations =
 	.put_super = hifs_put_super,
 };
 
-kmem_cache *hifs_inode_cache = NULL;
-
-static int hifs_mount(struct file_system_type *fs_type, int flags, const char *dev_name, void *data)
+static int hifs_mkfs(struct file_system_type *fs_type, int flags, const char *dev_name, void *data)
 {
     // Allocate a superblock structure
     struct super_block *sb = get_sb_nodev(fs_type, flags, data, hifs_fill_super);
