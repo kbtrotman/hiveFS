@@ -1,3 +1,11 @@
+/**
+ * HiveFS
+ *
+ * Hive Mind Filesystem
+ * By K. B. Trotman
+ * License: GNU GPL as of 2023
+ *
+ */
 #include <linux/uio.h>
 
 #include "hifs.h"
@@ -36,7 +44,7 @@ ssize_t hifs_read(struct kiocb *iocb, struct iov_iter *to)
 	int nbytes;
 	size_t count = iov_iter_count(to);
 	loff_t off = iocb->ki_pos;
-	loff_t end = off + count;
+	//loff_t end = off + count;
 	size_t blk = 0;
 
 
@@ -133,13 +141,13 @@ ssize_t hifs_write(struct kiocb *iocb, struct iov_iter *from)
 	return count;
 }
 
-int hifs_open_file(inode *inode, file *filp)
+int hifs_open_file(struct inode *inode, struct file *filp)
 {
 
 	return 0;
 }
 
-int hifs_release_file(inode *inode, file filp)
+int hifs_release_file(struct inode *inode, struct file filp)
 {
 
 	return 0;

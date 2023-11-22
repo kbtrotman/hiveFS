@@ -4,5 +4,12 @@
 			"path": ".."
 		}
 	],
-	"settings": {}
+	"settings": {
+		"files.associations": {
+			"limits": "c",
+			"type_traits": "c",
+			"genetlink.h": "c",
+			"blkdev.h": "c"
+		}
+	}
 }

@@ -1,13 +1,14 @@
-
-#include <stddef.h>
-#include <stdint.h>
-#include <stdbool.h>
-#include <stdio.h>
-#include <stdlib.h>
-
+/**
+ * HiveFS
+ *
+ * Hive Mind Filesystem
+ * By K. B. Trotman
+ * License: GNU GPL as of 2023
+ *
+ */
 
 #include <libpq-fe.h>
-
+#include "hi_command.h"
 #include "sql/hi_command_sql.h"
 
 
@@ -25,7 +26,7 @@ void execute_sql(char* sql_string)
     //PQfinish(sql.hive_conn);
 }
 
-void init_hive_link() 
+void init_hive_link(void) 
 {
 
     if (!sql.sql_init) {
@@ -42,7 +43,7 @@ void init_hive_link()
     return;
 }
 
-close_hive_link () 
+void close_hive_link (void) 
 {
     PQclear(sql.last_qury);
     PQclear(sql.last_ins);
@@ -83,7 +84,7 @@ int save_binary_data(char *data_block, char *hash)
     //    PQclear(res);
 }
 
-int register_hive_host() 
+int register_hive_host(void) 
 {
     char *ins_sql = "INSERT INTO machines (host_name, host_ip, host_port, host_vers) VALUES ('%s', '%s', '%s', '%s');";
     //char *quoted_sql = (char *) malloc(strlen(ins_sql) + quoted_host.length() + quoted_ip.length() + quoted_port.length() + quoted_vers.length() + 1);

@@ -1,4 +1,11 @@
-#include <linux/fs.h>
+/**
+ * HiveFS
+ *
+ * Hive Mind Filesystem
+ * By K. B. Trotman
+ * License: GNU GPL as of 2023
+ *
+ */
 #include <linux/delay.h>
 #include <linux/uio.h>
 
@@ -25,24 +32,8 @@ void dump_hifsinode(struct hifs_inode *dmi)
 	printk(KERN_INFO "----------[end of dump]-------------");
 }
 
-struct hifs_inode *cache_get_inode(void)
+void hifs_destroy_inode(struct inode *inode)
 {
-	struct hifs_inode *hii;
-
-	hii = kmem_cache_alloc(hifs_inode_cache, GFP_KERNEL);
-	printk(KERN_INFO "#: hifs cache_get_inode : di=%p\n", hii);
-
-	return hii;
-}
-
-void cache_put_inode(struct hifs_inode **hii)
-{
-	printk(KERN_INFO "#: hifs cache_put_inode : di=%p\n", *hii);
-	kmem_cache_free(hifs_inode_cache, *hii);
-	*hii = NULL;
-}
-
-void hifs_destroy_inode(struct inode *inode) {
 	struct hifs_inode *hii = inode->i_private;
 
 	printk(KERN_INFO "#: hifs freeing private data of inode %p (%lu)\n",
@@ -209,7 +200,7 @@ int hifs_create_inode(struct inode *dir, struct dentry *dentry, umode_t mode)
 	return hifs_add_ondir(inode, dir, dentry, mode);
 }
 
-int hifs_mkdir(struct mnt_idmap *idmap, struct inode *dir, struct dentry *dentry, umode_t mode)
+int hifs_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode)
 {
 	int ret = 0;
 

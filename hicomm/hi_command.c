@@ -1,16 +1,21 @@
+/**
+ * HiveFS
+ *
+ * Hive Mind Filesystem
+ * By K. B. Trotman
+ * License: GNU GPL as of 2023
+ *
+ */
 #include <stddef.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
-#include <netlink/netlink.h>
-#include <netlink/genl/genl.h>
-#include <netlink/genl/ctrl.h>
 #include <libpq-fe.h>
 
+#include "hi_command.h"
 
-#include "../hive_fs_defs.h"
 
 
 void handle_netlink_msg(int sock_fd) 

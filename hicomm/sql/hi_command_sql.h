@@ -1,5 +1,14 @@
+/**
+ * HiveFS
+ *
+ * Hive Mind Filesystem
+ * By K. B. Trotman
+ * License: GNU GPL as of 2023
+ *
+ */
+
 /***********************
- * Database Constants
+ * Database  Definitions
  ***********************/
 #define HOST "10.100.122.20"
 #define DATABASE "hiveFS"
