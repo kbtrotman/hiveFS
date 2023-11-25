@@ -6,20 +6,9 @@
  * License: GNU GPL as of 2023
  *
  */
-#include <linux/module.h>
-#include <linux/kernel.h>
-#include <linux/blkdev.h>
-#include <linux/buffer_head.h>
-#include <linux/fs.h>
-#include <linux/init.h>
-#include <linux/namei.h>
-#include <linux/parser.h>
-#include <linux/random.h>
-#include <linux/slab.h>
-#include <linux/time.h>
-#include <linux/version.h>
 
 #include "hifs.h"
+
 
 int hifs_fill_super(struct super_block *sb, void *data, int silent)
 {
@@ -48,14 +37,20 @@ int hifs_fill_super(struct super_block *sb, void *data, int silent)
 	root_inode = new_inode(sb);
 
 	/* Fill inode */
+	struct timespec ts1, ts2, ts3;
+	ktime_t kt1, kt2, kt3 = ktime_get_real();
+	ktime_to_timespec(kt, &ts1);
+	ktime_to_timespec(kt, &ts2);
+	ktime_to_timespec(kt, &ts3);
+
 	root_inode->i_mode = root_hifsinode->i_mode;
 
 	root_inode->i_flags = root_hifsinode->i_flags;
 	root_inode->i_ino = root_hifsinode->i_ino;
 	root_inode->i_sb = sb;
-	root_inode->i_atime = current_time(root_inode);
-	root_inode->i_ctime = current_time(root_inode);
-	root_inode->i_mtime = current_time(root_inode);
+	root_inode->i_atime = ts1;
+	root_inode->i_ctime = ts2;
+	root_inode->i_mtime = ts3;
 	root_inode->i_ino = HIFS_ROOT_INODE;
 	root_inode->i_op = &hifs_inode_operations;
 	root_inode->i_fop = &hifs_dir_operations;
