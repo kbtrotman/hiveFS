@@ -32,7 +32,7 @@ void dump_hifsinode(struct hifs_inode *dmi)
 	printk(KERN_INFO "----------[end of dump]-------------");
 }
 
-void hifs_destroy_inode(struct inode *inode)
+void hifs_destroy_inode(struct hifs_inode *inode)
 {
 	struct hifs_inode *hii = inode->i_private;
 
@@ -63,7 +63,7 @@ void hifs_store_inode(struct super_block *sb, struct hifs_inode *hii)
 }
 
 /* Here introduce allocation for directory... */
-int hifs_add_dir_record(struct super_block *sb, struct inode *dir, struct dentry *dentry, struct inode *inode)
+int hifs_add_dir_record(struct super_block *sb, struct hifs_inode *dir, struct dentry *dentry, struct inode *inode)
 {
 	struct buffer_head *bh;
 	struct hifs_inode *parent, *hii;
@@ -131,12 +131,12 @@ int alloc_inode(struct super_block *sb, struct hifs_inode *hii)
 	return 0;
 }
 
-struct hifs_inode *hifs_new_inode(struct inode *dir, struct dentry *dentry, umode_t mode)
+struct hifs_inode *hifs_new_inode(struct hifs_inode *dir, struct dentry *dentry, umode_t mode)
 {
 	struct super_block *sb;
 	struct hifs_superblock *hisb;
 	struct hifs_inode *hii;
-	struct inode *inode;
+	struct hifs_inode *inode;
 	int ret;
 
 	sb = dir->i_sb;
@@ -169,7 +169,7 @@ struct hifs_inode *hifs_new_inode(struct inode *dir, struct dentry *dentry, umod
 	return inode;
 }
 
-int hifs_add_ondir(struct inode *inode, struct inode *dir, struct dentry *dentry, umode_t mode)
+int hifs_add_ondir(struct hifs_inode *inode, struct inode *dir, struct dentry *dentry, umode_t mode)
 {
 	inode_init_owner(inode, dir, mode);
 	d_add(dentry, inode);
@@ -177,14 +177,14 @@ int hifs_add_ondir(struct inode *inode, struct inode *dir, struct dentry *dentry
 	return 0;
 }
 
-int hifs_create(struct inode *dir, struct dentry *dentry, umode_t mode, bool excl)
+int hifs_create(struct hifs_inode *dir, struct dentry *dentry, umode_t mode, bool excl)
 {
 	return hifs_create_inode(dir, dentry, mode);
 }
 
-int hifs_create_inode(struct inode *dir, struct dentry *dentry, umode_t mode)
+int hifs_create_inode(struct hifs_inode *dir, struct dentry *dentry, umode_t mode)
 {
-	struct inode *inode;
+	struct hifs_inode *inode;
 
 	/* allocate space
 	 * create incore inode
@@ -200,7 +200,7 @@ int hifs_create_inode(struct inode *dir, struct dentry *dentry, umode_t mode)
 	return hifs_add_ondir(inode, dir, dentry, mode);
 }
 
-int hifs_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode)
+int hifs_mkdir(struct hifs_inode *dir, struct dentry *dentry, umode_t mode)
 {
 	int ret = 0;
 
@@ -217,12 +217,12 @@ int hifs_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode)
 	return 0;
 }
 
-int hifs_rmdir(struct inode *dir, struct dentry *dentry)
+int hifs_rmdir(struct hifs_inode *dir, struct dentry *dentry)
 {
 	return 0;
 }
 
-void hifs_put_inode(struct inode *inode)
+void hifs_put_inode(struct hifs_inode *inode)
 {
 	struct hifs_inode *ip = inode->i_private;
 
@@ -290,7 +290,7 @@ struct hifs_inode *hifs_iget(struct super_block *sb, ino_t ino)
 	return dinode;
 }
 
-void hifs_fill_inode(struct super_block *sb, struct inode *des, struct hifs_inode *src)
+void hifs_fill_inode(struct super_block *sb, struct hifs_inode *des, struct hifs_inode *src)
 {
 	struct timespec ts;
 	ktime_t kt;
@@ -316,7 +316,7 @@ void hifs_fill_inode(struct super_block *sb, struct inode *des, struct hifs_inod
 	WARN_ON(!des->i_fop);
 }
 
-struct dentry *hifs_lookup(struct inode *dir, struct dentry *child_dentry, unsigned int flags)
+struct dentry *hifs_lookup(struct hifs_inode *dir, struct dentry *child_dentry, unsigned int flags)
 {
 	struct hifs_inode *dparent = dir->i_private;
 	struct hifs_inode *dchild;
