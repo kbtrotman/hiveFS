@@ -131,7 +131,7 @@ int alloc_inode(struct super_block *sb, struct hifs_inode *hii)
 	return 0;
 }
 
-struct inode *hifs_new_inode(struct inode *dir, struct dentry *dentry, umode_t mode)
+struct hifs_inode *hifs_new_inode(struct inode *dir, struct dentry *dentry, umode_t mode)
 {
 	struct super_block *sb;
 	struct hifs_superblock *hisb;
@@ -229,7 +229,7 @@ void hifs_put_inode(struct inode *inode)
 	cache_put_inode(&ip);
 }
 
-int isave_intable(struct super_block *sb, struct hifs_inode *hii, u32 i_block) 
+int isave_intable(struct super_block *sb, struct hifs_inode *hii, u32 i_block)
 {
 	struct buffer_head *bh;
 	struct hifs_inode *itab;
