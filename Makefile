@@ -1,19 +1,14 @@
-#
-# HiveFS
-#
-# Hive Mind Filesystem
-# By K. B. Trotman
-# License: GNU GPL as of 2023
- 
-ccflags-y += -std=c11
+# Compiler and linker settings
+# For hiveFS.
+# Nov 2, 2023
+# Author: Kevin B Trotman
+ccflags-y += -std=gnu11 -Wno-declaration-after-statement
+obj-m += hifs.o
 
-obj-m = hifs.o
-KDIR = /lib/modules/`uname -r`/build
-SRCDIR = $(PWD)
-
-hifs-objs += hi_superblock.o hi_inode.o hi_dir.o hi_file.o hi_cache.o hi_command_kern_netl.o
+hifs-objs := hi_superblock.o hi_inode.o hi_dir.o hi_file.o hi_command_kern_netl.o hi_cache.o
 
 all:
-	$(MAKE) -C $(KDIR) M=$(SRCDIR) modules
+	make -C /lib/modules/$(shell uname -r)/build M=$(shell pwd) modules
+
 clean:
-	$(MAKE) -C $(KDIR) M=$(SRCDIR) clean
+	make -C /lib/modules/$(shell uname -r)/build M=$(shell pwd) clean
