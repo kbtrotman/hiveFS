@@ -58,9 +58,9 @@ struct dentry *hifs_mount(struct file_system_type *fs_type, int flags, const cha
 /* hi_inode.c */
 void dump_hifsinode(struct hifs_inode *dmi);
 void hifs_destroy_inode(struct inode *inode);
-void hifs_store_inode(struct super_block *sb, struct inode *hii);
+void hifs_store_inode(struct super_block *sb, struct hifs_inode *hii);
 int hifs_add_dir_record(struct super_block *sb, struct inode *dir, struct dentry *dentry, struct inode *inode);
-int alloc_inode(struct super_block *sb, struct inode *hii);
+int alloc_inode(struct super_block *sb, struct hifs_inode *hii);
 struct hifs_inode *hifs_new_inode(struct inode *dir, struct dentry *dentry, umode_t mode);
 int hifs_add_ondir(struct inode *inode, struct inode *dir, struct dentry *dentry, umode_t mode);
 int hifs_create(struct inode *dir, struct dentry *dentry, umode_t mode, bool excl);
@@ -68,9 +68,9 @@ int hifs_create_inode(struct inode *dir, struct dentry *dentry, umode_t mode);
 int hifs_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode);
 int hifs_rmdir(struct inode *dir, struct dentry *dentry);
 void hifs_put_inode(struct inode *inode);
-int isave_intable(struct super_block *sb, struct inode *hii, u32 i_block);
+int isave_intable(struct super_block *sb, struct hifs_inode *hii, u32 i_block);
 struct hifs_inode *hifs_iget(struct super_block *sb, ino_t ino);
-void hifs_fill_inode(struct super_block *sb, struct inode *des, struct inode *src);
+void hifs_fill_inode(struct super_block *sb, struct inode *des, struct hifs_inode *src);
 struct dentry *hifs_lookup(struct inode *dir, struct dentry *child_dentry, unsigned int flags);
 
 /* hi_dir.c */
@@ -86,7 +86,7 @@ ssize_t hifs_alloc_if_necessary(struct super_block *sb, struct inode *di, loff_t
 
 /* hi_cache */
 struct hifs_inode *cache_get_inode(void);
-void cache_put_inode(struct inode **hii);
+void cache_put_inode(struct hifs_inode **hii);
 
 // Prototypes Here:
 
