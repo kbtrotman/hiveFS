@@ -121,7 +121,7 @@ extern struct
  **/
 struct hifs_inode 
 {
-	uint32_t	*i_sb;      /* Superblock position */
+	struct super_block	*i_sb;      /* Superblock position */
     uint8_t     i_version;	/* inode version */
 	uint8_t		i_flags;	/* inode flags: TYPE */
 	uint32_t	i_mode;		/* File mode */
