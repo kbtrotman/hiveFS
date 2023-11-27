@@ -42,7 +42,7 @@
 /* hifs.c */
 int hifs_init(void);
 void hifs_exit(void);
-static int hifs_mkfs(struct file_system_type *fs_type, int flags, const char *dev_name, void *data);
+int hifs_mkfs(struct file_system_type *fs_type, int flags, const char *dev_name, void *data);
 
 /* hi_command_kern_netl.c */
 void hifs_netl_send_command_req(char *hive_payload);

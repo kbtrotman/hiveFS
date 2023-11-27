@@ -135,33 +135,33 @@ struct inode *hifs_new_inode(struct inode *dir, struct dentry *dentry, umode_t m
 {
 	struct super_block *sb;
 	struct hifs_superblock *hisb;
-	struct hifs_inode *hi;
+	struct hifs_inode *hii;
 	struct inode *inode;
 	int ret;
 
 	sb = dir->i_sb;
 	hisb = sb->s_fs_info;
 
-	hi = cache_get_inode();
+	hii = cache_get_inode();
 
 	/* allocate space:
  	 * sb has last block on it just use it
  	 */
-	ret = alloc_inode(sb, hi);
+	ret = alloc_inode(sb, hii);
 
 	if (ret) {
-		cache_put_inode(&hi);
+		cache_put_inode(&hii);
 		printk(KERN_ERR "Unable to allocate disk space for inode");
 		return NULL;
 	}
-	hi->i_mode = mode;
+	hii->i_mode = mode;
 
 	BUG_ON(!S_ISREG(mode) && !S_ISDIR(mode));
 
 	/* Create VFS inode */
 	inode = new_inode(sb);
 
-	hifs_fill_inode(sb, inode, hi);
+	hifs_fill_inode(sb, inode, hii);
 
 	/* Add new inode to parent dir */
 	ret = hifs_add_dir_record(sb, dir, dentry, inode);
@@ -292,10 +292,15 @@ struct hifs_inode *hifs_iget(struct super_block *sb, ino_t ino)
 
 void hifs_fill_inode(struct super_block *sb, struct inode *des, struct hifs_inode *src)
 {
+	struct timespec ts;
+	ktime_t kt;
+	kt = ktime_get_real();
+	ts = ktime_to_timespec(kt);
+
 	des->i_mode = src->i_mode;
 	des->i_flags = src->i_flags;
 	des->i_sb = sb;
-	des->i_atime = des->i_ctime = des->i_mtime = current_time(des);
+	des->i_atime = des->i_ctime = des->i_mtime = ts;
 	des->i_ino = src->i_ino;
 	des->i_private = src;
 	des->i_op = &hifs_inode_operations;

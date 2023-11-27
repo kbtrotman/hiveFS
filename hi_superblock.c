@@ -37,20 +37,19 @@ int hifs_fill_super(struct super_block *sb, void *data, int silent)
 	root_inode = new_inode(sb);
 
 	/* Fill inode */
-	struct timespec ts1, ts2, ts3;
-	ktime_t kt1, kt2, kt3 = ktime_get_real();
-	ktime_to_timespec(kt, &ts1);
-	ktime_to_timespec(kt, &ts2);
-	ktime_to_timespec(kt, &ts3);
+	struct timespec ts;
+	ktime_t kt;
+	kt = ktime_get_real();
+	ts = ktime_to_timespec(kt);
 
 	root_inode->i_mode = root_hifsinode->i_mode;
 
 	root_inode->i_flags = root_hifsinode->i_flags;
 	root_inode->i_ino = root_hifsinode->i_ino;
 	root_inode->i_sb = sb;
-	root_inode->i_atime = ts1;
-	root_inode->i_ctime = ts2;
-	root_inode->i_mtime = ts3;
+	root_inode->i_atime = ts;
+	root_inode->i_ctime = ts;
+	root_inode->i_mtime = ts;
 	root_inode->i_ino = HIFS_ROOT_INODE;
 	root_inode->i_op = &hifs_inode_operations;
 	root_inode->i_fop = &hifs_dir_operations;
