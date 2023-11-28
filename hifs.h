@@ -59,7 +59,7 @@ struct dentry *hifs_mount(struct file_system_type *fs_type, int flags, const cha
 void dump_hifsinode(struct hifs_inode *dmi);
 void hifs_destroy_inode(struct hifs_inode *inode);
 void hifs_store_inode(struct super_block *sb, struct hifs_inode *hii);
-int hifs_add_dir_record(struct super_block *sb, struct hifs_inode *dir, struct dentry *dentry, struct inode *inode);
+int hifs_add_dir_record(struct super_block *sb, struct hifs_inode *dir, struct dentry *dentry, struct hifs_inode *inode);
 int alloc_inode(struct super_block *sb, struct hifs_inode *hii);
 struct hifs_inode *hifs_new_inode(struct hifs_inode *dir, struct dentry *dentry, umode_t mode);
 int hifs_add_ondir(struct hifs_inode *inode, struct hifs_inode *dir, struct dentry *dentry, umode_t mode);

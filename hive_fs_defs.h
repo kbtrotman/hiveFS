@@ -125,18 +125,18 @@ struct hifs_inode
     uint8_t     i_version;	/* inode version */
 	uint8_t		i_flags;	/* inode flags: TYPE */
 	uint32_t	i_mode;		/* File mode */
-	uint32_t	i_ino;		/* inode number */
+	uint64_t	i_ino;		/* inode number */
 	uint16_t	i_uid;		/* owner's user id */
 	uint16_t	i_gid;		/* owner's group id */
 	uint16_t	i_hrd_lnk;	/* number of hard links */
-	uint32_t 	i_ctime;	/* Creation time */
-	uint32_t	i_mtime;	/* Modification time*/
-	uint32_t	i_atime;    /* Archival Time */
+	struct timespec64	i_atime; /* Archive Time */
+	struct timespec64	i_mtime; /* Modified Time */
+	struct timespec64	i_ctime; /* Creation Time */
 	uint32_t	i_size;		/* Number of bytes in file */
 	char    	i_name[50]; /* File name */
-	uint8_t		*i_private;  /* Private/Unpublished filesystrem member */
-	uint8_t		*i_op;       /* operation */
-	uint8_t     *i_fop;      /* file operation */
+	void		*i_private;  /* Private/Unpublished filesystrem member */
+	const struct inode_operations	*i_op;       /* operation */
+	const struct file_operations	*i_fop;	      /* file operation */
 	/* address begin - end block, range exclusive: addres end (last block) does not belogs to extend! */
 	uint32_t	i_addrb[HIFS_INODE_TSIZE];	/* Start block of extend ranges */
 	uint32_t	i_addre[HIFS_INODE_TSIZE];	/* End block of extend ranges */
