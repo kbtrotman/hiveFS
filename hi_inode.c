@@ -25,7 +25,7 @@ void dump_hifsinode(struct hifs_inode *dmi)
 	printk(KERN_INFO "hifs_inode->i_version: %u", dmi->i_version);
 	printk(KERN_INFO "hifs_inode->i_flags: %u", dmi->i_flags);
 	printk(KERN_INFO "hifs_inode->i_mode: %u", dmi->i_mode);
-	printk(KERN_INFO "hifs_inode->i_ino: %u", dmi->i_ino);
+	printk(KERN_INFO "hifs_inode->i_ino: %llu", dmi->i_ino);
 	printk(KERN_INFO "hifs_inode->i_hrd_lnk: %u", dmi->i_hrd_lnk);
 	printk(KERN_INFO "hifs_inode->i_addrb[0]: %u", dmi->i_addrb[0]);
 	printk(KERN_INFO "hifs_inode->i_addre[0]: %u", dmi->i_addre[0]);
@@ -34,9 +34,9 @@ void dump_hifsinode(struct hifs_inode *dmi)
 
 void hifs_destroy_inode(struct hifs_inode *inode)
 {
-	struct hifs_inode *hii = inode->i_private;
-
-	printk(KERN_INFO "#: hifs freeing private data of inode %p (%lu)\n",
+	//struct hifs_inode *hii = inode->i_private;
+	struct hifs_inode *hii;
+	printk(KERN_INFO "#: hifs freeing private data of inode %p (%llu)\n",
 		hii, inode->i_ino);
 	cache_put_inode(&hii);
 }
@@ -63,14 +63,14 @@ void hifs_store_inode(struct super_block *sb, struct hifs_inode *hii)
 }
 
 /* Here introduce allocation for directory... */
-int hifs_add_dir_record(struct super_block *sb, struct hifs_inode *dir, struct dentry *dentry, struct inode *inode)
+int hifs_add_dir_record(struct super_block *sb, struct hifs_inode *dir, struct dentry *dentry, struct hifs_inode *inode)
 {
 	struct buffer_head *bh;
 	struct hifs_inode *parent, *hii;
 	struct hifs_dir_entry *dir_rec;
 	u32 blk, j;
 
-	parent = dir->i_private;
+	//parent = dir->i_private;
 	hii = parent;
 
 	// Find offset, in dir in extends
@@ -159,7 +159,7 @@ struct hifs_inode *hifs_new_inode(struct hifs_inode *dir, struct dentry *dentry,
 	BUG_ON(!S_ISREG(mode) && !S_ISDIR(mode));
 
 	/* Create VFS inode */
-	inode = new_inode(sb);
+	//inode = new_inode(sb);
 
 	hifs_fill_inode(sb, inode, hii);
 
@@ -169,10 +169,10 @@ struct hifs_inode *hifs_new_inode(struct hifs_inode *dir, struct dentry *dentry,
 	return inode;
 }
 
-int hifs_add_ondir(struct hifs_inode *inode, struct inode *dir, struct dentry *dentry, umode_t mode)
+int hifs_add_ondir(struct hifs_inode *inode, struct hifs_inode *dir, struct dentry *dentry, umode_t mode)
 {
-	inode_init_owner(inode, dir, mode);
-	d_add(dentry, inode);
+	//inode_init_owner(inode, dir, mode);
+	//d_add(dentry, inode);
 
 	return 0;
 }
@@ -323,7 +323,7 @@ struct dentry *hifs_lookup(struct hifs_inode *dir, struct dentry *child_dentry, 
 	struct super_block *sb = dir->i_sb;
 	struct buffer_head *bh;
 	struct hifs_dir_entry *dir_rec;
-	struct inode *ichild;
+	struct hifs_inode *ichild;
 	u32 j = 0, i = 0;
 
 	/* Here we should use cache instead but dummyfs is doing stuff in dummy way.. */
@@ -348,8 +348,8 @@ struct dentry *hifs_lookup(struct hifs_inode *dir, struct dentry *child_dentry, 
 						return NULL;
 					}
 					hifs_fill_inode(sb, ichild, dchild);
-					inode_init_owner(ichild, dir, dchild->i_mode);
-					d_add(child_dentry, ichild);
+					//inode_init_owner(ichild, dir, dchild->i_mode);
+					//d_add(child_dentry, ichild);
 
 				}
 				dir_rec++;
