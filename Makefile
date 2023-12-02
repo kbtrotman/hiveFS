@@ -2,7 +2,7 @@
 # For hiveFS.
 # Nov 2, 2023
 # Author: Kevin B Trotman
-ccflags-y += -std=gnu11 -Wno-declaration-after-statement
+ccflags-y += -std=gnu11
 obj-m += hifs.o
 
 hifs-objs := hi_superblock.o hi_inode.o hi_dir.o hi_file.o hi_command_kern_netl.o hi_cache.o
