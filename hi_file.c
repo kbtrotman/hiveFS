@@ -7,6 +7,7 @@
  *
  */
 #include <linux/uio.h>
+#include <linux/aio.h>
 
 #include "hifs.h"
 
@@ -78,13 +79,13 @@ ssize_t hifs_read(struct kiocb *iocb, struct iov_iter *to)
 
 	return nbytes;
 }
-
+/*
 ssize_t hifs_alloc_if_necessary(struct hifs_superblock *sb, struct hifs_inode *di, loff_t off, size_t cnt)
 {
 	// Mock it until using bitmap
 	return 0;
 }
-
+*/
 ssize_t hifs_write(struct kiocb *iocb, struct iov_iter *from)
 {
 	struct super_block *sb;
@@ -105,14 +106,14 @@ ssize_t hifs_write(struct kiocb *iocb, struct iov_iter *from)
 	dinode = inode->i_private;
 	dsb = sb->s_fs_info;
 	
-	ret = generic_write_checks(iocb, from);
+	//ret = generic_write_checks(iocb, from);
 	if (ret <= 0) {
 	    printk(KERN_INFO "HiveFS: generic_write_checks Failed: %d", ret); 
 	    return ret;
 	}
 	
 	/* calculate datablock to write alloc if necessary */
-	blk = hifs_alloc_if_necessary(dsb, dinode, off, count);
+	//blk = hifs_alloc_if_necessary(dsb, dinode, off, count);
 	/* files are contigous so offset can be easly calculated */
 	boff = hifs_get_loffset(dinode, off);
 	bh = sb_bread(sb, boff);

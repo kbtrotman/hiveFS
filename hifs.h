@@ -12,7 +12,6 @@
 #include <linux/stddef.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
-#include <linux/fs.h>
 #include <linux/init.h>
 #include <linux/namei.h>
 #include <linux/blkdev.h>
@@ -26,6 +25,8 @@
 #include <linux/types.h>
 #include <net/netlink.h>
 #include <net/genetlink.h>
+#include <linux/types.h>
+#include <linux/fs.h>
 
 // In the definitions file, those items are common to hi_command in both kernel-space and
 // in user-space.  The definitions file is included in both the kernel-space and user-space
@@ -82,13 +83,13 @@ ssize_t hifs_read(struct kiocb *iocb, struct iov_iter *to);
 ssize_t hifs_write(struct kiocb *iocb, struct iov_iter *from);
 int hifs_open_file(struct hifs_inode *inode, struct file *filp);
 int hifs_release_file(struct hifs_inode *inode, struct file filp);
-ssize_t hifs_alloc_if_necessary(struct super_block *sb, struct hifs_inode *di, loff_t off, size_t cnt);
+//ssize_t hifs_alloc_if_necessary(struct hifs_superblock *sb, struct hifs_inode *di, loff_t off, size_t cnt);
 
 /* hi_cache */
 struct hifs_inode *cache_get_inode(void);
 void cache_put_inode(struct hifs_inode **hii);
 
-// Prototypes Here:
+// END: Prototypes Here:
 
 
 
@@ -133,6 +134,6 @@ extern struct super_operations hifs_sb_operations;
  * Kernel Inode Cache
  **/
 extern struct kmem_cache *hifs_inode_cache;
-// Globals Here:
+// END: Globals Here:
 
 #endif /* _KERN_HIVEFS_H */  

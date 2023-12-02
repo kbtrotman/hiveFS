@@ -1,11 +1,10 @@
-cmd_/home/ktrotman/c/hiveFS/hi_dir.o := gcc -Wp,-MD,/home/ktrotman/c/hiveFS/.hi_dir.o.d  -nostdinc -isystem /usr/lib/gcc/x86_64-redhat-linux/4.8.5/include -I./arch/x86/include -Iarch/x86/include/generated  -Iinclude -I./arch/x86/include/uapi -Iarch/x86/include/generated/uapi -I./include/uapi -Iinclude/generated/uapi -include ./include/linux/kconfig.h -D__KERNEL__ -Wall -Wundef -Wstrict-prototypes -Wno-trigraphs -fno-strict-aliasing -fno-common -Werror-implicit-function-declaration -Wno-format-security -fno-delete-null-pointer-checks -std=gnu89 -O2 -m64 -mno-mmx -mno-sse -mpreferred-stack-boundary=3 -mtune=generic -mno-red-zone -mcmodel=kernel -funit-at-a-time -maccumulate-outgoing-args -Wframe-larger-than=2048 -DCONFIG_AS_CFI=1 -DCONFIG_AS_CFI_SIGNAL_FRAME=1 -DCONFIG_AS_CFI_SECTIONS=1 -DCONFIG_AS_FXSAVEQ=1 -DCONFIG_AS_AVX=1 -DCONFIG_AS_AVX2=1 -DCONFIG_AS_AVX512=1 -DCONFIG_AS_SHA1_NI=1 -DCONFIG_AS_SHA256_NI=1 -pipe -Wno-sign-compare -fno-asynchronous-unwind-tables -mno-sse -mno-mmx -mno-sse2 -mno-3dnow -mno-avx -mindirect-branch=thunk-extern -mindirect-branch-register -mfunction-return=thunk-extern -DRETPOLINE -Wframe-larger-than=2048 -fstack-protector-strong -Wno-unused-but-set-variable -fno-omit-frame-pointer -fno-optimize-sibling-calls -g -pg -mfentry -DCC_USING_FENTRY -fno-inline-functions-called-once -Wdeclaration-after-statement -Wno-pointer-sign -fno-strict-overflow -fconserve-stack -DCC_HAVE_ASM_GOTO -std=gnu11  -DMODULE  -D"KBUILD_STR(s)=\#s" -D"KBUILD_BASENAME=KBUILD_STR(hi_dir)"  -D"KBUILD_MODNAME=KBUILD_STR(hifs)" -c -o /home/ktrotman/c/hiveFS/.tmp_hi_dir.o /home/ktrotman/c/hiveFS/hi_dir.c
+cmd_/home/ktrotman/c/hiveFS/hi_file.o := gcc -Wp,-MD,/home/ktrotman/c/hiveFS/.hi_file.o.d  -nostdinc -isystem /usr/lib/gcc/x86_64-redhat-linux/4.8.5/include -I./arch/x86/include -Iarch/x86/include/generated  -Iinclude -I./arch/x86/include/uapi -Iarch/x86/include/generated/uapi -I./include/uapi -Iinclude/generated/uapi -include ./include/linux/kconfig.h -D__KERNEL__ -Wall -Wundef -Wstrict-prototypes -Wno-trigraphs -fno-strict-aliasing -fno-common -Werror-implicit-function-declaration -Wno-format-security -fno-delete-null-pointer-checks -std=gnu89 -O2 -m64 -mno-mmx -mno-sse -mpreferred-stack-boundary=3 -mtune=generic -mno-red-zone -mcmodel=kernel -funit-at-a-time -maccumulate-outgoing-args -Wframe-larger-than=2048 -DCONFIG_AS_CFI=1 -DCONFIG_AS_CFI_SIGNAL_FRAME=1 -DCONFIG_AS_CFI_SECTIONS=1 -DCONFIG_AS_FXSAVEQ=1 -DCONFIG_AS_AVX=1 -DCONFIG_AS_AVX2=1 -DCONFIG_AS_AVX512=1 -DCONFIG_AS_SHA1_NI=1 -DCONFIG_AS_SHA256_NI=1 -pipe -Wno-sign-compare -fno-asynchronous-unwind-tables -mno-sse -mno-mmx -mno-sse2 -mno-3dnow -mno-avx -mindirect-branch=thunk-extern -mindirect-branch-register -mfunction-return=thunk-extern -DRETPOLINE -Wframe-larger-than=2048 -fstack-protector-strong -Wno-unused-but-set-variable -fno-omit-frame-pointer -fno-optimize-sibling-calls -g -pg -mfentry -DCC_USING_FENTRY -fno-inline-functions-called-once -Wdeclaration-after-statement -Wno-pointer-sign -fno-strict-overflow -fconserve-stack -DCC_HAVE_ASM_GOTO -std=gnu11  -DMODULE  -D"KBUILD_STR(s)=\#s" -D"KBUILD_BASENAME=KBUILD_STR(hi_file)"  -D"KBUILD_MODNAME=KBUILD_STR(hifs)" -c -o /home/ktrotman/c/hiveFS/.tmp_hi_file.o /home/ktrotman/c/hiveFS/hi_file.c
 
-source_/home/ktrotman/c/hiveFS/hi_dir.o := /home/ktrotman/c/hiveFS/hi_dir.c
+source_/home/ktrotman/c/hiveFS/hi_file.o := /home/ktrotman/c/hiveFS/hi_file.c
 
-deps_/home/ktrotman/c/hiveFS/hi_dir.o := \
-  /home/ktrotman/c/hiveFS/hifs.h \
-  include/linux/stddef.h \
-  include/uapi/linux/stddef.h \
+deps_/home/ktrotman/c/hiveFS/hi_file.o := \
+  include/linux/uio.h \
+  include/uapi/linux/uio.h \
   include/linux/compiler.h \
     $(wildcard include/config/sparse/rcu/pointer.h) \
     $(wildcard include/config/trace/branch/profiling.h) \
@@ -29,42 +28,37 @@ deps_/home/ktrotman/c/hiveFS/hi_dir.o := \
     $(wildcard include/config/64bit.h) \
   include/uapi/asm-generic/bitsperlong.h \
   include/uapi/linux/posix_types.h \
+  include/linux/stddef.h \
+  include/uapi/linux/stddef.h \
   arch/x86/include/asm/posix_types.h \
     $(wildcard include/config/x86/32.h) \
   arch/x86/include/uapi/asm/posix_types_64.h \
   include/uapi/asm-generic/posix_types.h \
-  include/linux/module.h \
-    $(wildcard include/config/sysfs.h) \
-    $(wildcard include/config/modules.h) \
-    $(wildcard include/config/livepatch.h) \
-    $(wildcard include/config/ftrace/mcount/record.h) \
-    $(wildcard include/config/x86/64.h) \
-    $(wildcard include/config/ppc64.h) \
-    $(wildcard include/config/dynamic/ftrace.h) \
-    $(wildcard include/config/unused/symbols.h) \
-    $(wildcard include/config/module/sig.h) \
-    $(wildcard include/config/generic/bug.h) \
-    $(wildcard include/config/kallsyms.h) \
-    $(wildcard include/config/smp.h) \
-    $(wildcard include/config/tracepoints.h) \
-    $(wildcard include/config/tracing.h) \
-    $(wildcard include/config/event/tracing.h) \
-    $(wildcard include/config/module/unload.h) \
-    $(wildcard include/config/constructors.h) \
-    $(wildcard include/config/debug/set/module/ronx.h) \
-  include/linux/list.h \
-    $(wildcard include/config/debug/list.h) \
   include/linux/types.h \
     $(wildcard include/config/uid16.h) \
     $(wildcard include/config/lbdaf.h) \
     $(wildcard include/config/arch/dma/addr/t/64bit.h) \
     $(wildcard include/config/phys/addr/t/64bit.h) \
+  include/linux/aio.h \
+    $(wildcard include/config/aio.h) \
+  include/linux/list.h \
+    $(wildcard include/config/debug/list.h) \
   include/linux/poison.h \
     $(wildcard include/config/illegal/pointer/value.h) \
   include/uapi/linux/const.h \
-  include/linux/stat.h \
-  arch/x86/include/uapi/asm/stat.h \
-  include/uapi/linux/stat.h \
+  include/linux/workqueue.h \
+    $(wildcard include/config/debug/objects/work.h) \
+    $(wildcard include/config/lockdep.h) \
+    $(wildcard include/config/smp.h) \
+    $(wildcard include/config/freezer.h) \
+    $(wildcard include/config/sysfs.h) \
+    $(wildcard include/config/wq/watchdog.h) \
+  include/linux/timer.h \
+    $(wildcard include/config/timer/stats.h) \
+    $(wildcard include/config/debug/objects/timers.h) \
+    $(wildcard include/config/no/hz/common.h) \
+  include/linux/ktime.h \
+    $(wildcard include/config/ktime/scalar.h) \
   include/linux/time.h \
     $(wildcard include/config/arch/uses/gettimeoffset.h) \
   include/linux/cache.h \
@@ -75,13 +69,18 @@ deps_/home/ktrotman/c/hiveFS/hi_dir.o := \
     $(wildcard include/config/prove/locking.h) \
     $(wildcard include/config/panic/timeout.h) \
     $(wildcard include/config/ring/buffer.h) \
+    $(wildcard include/config/tracing.h) \
+    $(wildcard include/config/ftrace/mcount/record.h) \
   /usr/lib/gcc/x86_64-redhat-linux/4.8.5/include/stdarg.h \
   include/linux/linkage.h \
   include/linux/stringify.h \
   include/linux/export.h \
     $(wildcard include/config/have/underscore/symbol/prefix.h) \
+    $(wildcard include/config/modules.h) \
     $(wildcard include/config/modversions.h) \
+    $(wildcard include/config/unused/symbols.h) \
   arch/x86/include/asm/linkage.h \
+    $(wildcard include/config/x86/64.h) \
     $(wildcard include/config/x86/alignment/16.h) \
     $(wildcard include/config/retpoline.h) \
   include/linux/bitops.h \
@@ -233,6 +232,7 @@ deps_/home/ktrotman/c/hiveFS/hi_dir.o := \
     $(wildcard include/config/have/arch/within/stack/frames.h) \
     $(wildcard include/config/hardened/usercopy.h) \
   include/linux/bug.h \
+    $(wildcard include/config/generic/bug.h) \
   arch/x86/include/asm/bug.h \
     $(wildcard include/config/bug.h) \
     $(wildcard include/config/debug/bugverbose.h) \
@@ -332,7 +332,6 @@ deps_/home/ktrotman/c/hiveFS/hi_dir.o := \
     $(wildcard include/config/s390.h) \
   include/linux/spinlock_types.h \
   include/linux/lockdep.h \
-    $(wildcard include/config/lockdep.h) \
     $(wildcard include/config/lock/stat.h) \
     $(wildcard include/config/prove/rcu.h) \
   include/linux/rwlock_types.h \
@@ -379,6 +378,57 @@ deps_/home/ktrotman/c/hiveFS/hi_dir.o := \
   include/generated/qrwlock_api_smp.h \
   include/linux/time64.h \
   include/uapi/linux/time.h \
+  include/linux/jiffies.h \
+  include/linux/timex.h \
+  include/uapi/linux/timex.h \
+  include/uapi/linux/param.h \
+  arch/x86/include/uapi/asm/param.h \
+  include/asm-generic/param.h \
+    $(wildcard include/config/hz.h) \
+  include/uapi/asm-generic/param.h \
+  arch/x86/include/asm/timex.h \
+  arch/x86/include/asm/tsc.h \
+    $(wildcard include/config/x86/tsc.h) \
+  include/linux/timekeeping.h \
+  include/linux/debugobjects.h \
+    $(wildcard include/config/debug/objects.h) \
+    $(wildcard include/config/debug/objects/free.h) \
+  include/linux/sysctl.h \
+    $(wildcard include/config/sysctl.h) \
+  include/linux/rcupdate.h \
+    $(wildcard include/config/rcu/torture/test.h) \
+    $(wildcard include/config/tree/rcu.h) \
+    $(wildcard include/config/tree/preempt/rcu.h) \
+    $(wildcard include/config/rcu/trace.h) \
+    $(wildcard include/config/preempt/rcu.h) \
+    $(wildcard include/config/rcu/stall/common.h) \
+    $(wildcard include/config/rcu/user/qs.h) \
+    $(wildcard include/config/rcu/nocb/cpu.h) \
+    $(wildcard include/config/tiny/rcu.h) \
+    $(wildcard include/config/tiny/preempt/rcu.h) \
+    $(wildcard include/config/debug/objects/rcu/head.h) \
+  include/linux/completion.h \
+  include/linux/wait.h \
+  include/uapi/linux/wait.h \
+  include/linux/rcutree.h \
+  include/linux/rbtree.h \
+  include/uapi/linux/sysctl.h \
+  include/uapi/linux/aio_abi.h \
+  /home/ktrotman/c/hiveFS/hifs.h \
+  include/linux/module.h \
+    $(wildcard include/config/livepatch.h) \
+    $(wildcard include/config/ppc64.h) \
+    $(wildcard include/config/dynamic/ftrace.h) \
+    $(wildcard include/config/module/sig.h) \
+    $(wildcard include/config/kallsyms.h) \
+    $(wildcard include/config/tracepoints.h) \
+    $(wildcard include/config/event/tracing.h) \
+    $(wildcard include/config/module/unload.h) \
+    $(wildcard include/config/constructors.h) \
+    $(wildcard include/config/debug/set/module/ronx.h) \
+  include/linux/stat.h \
+  arch/x86/include/uapi/asm/stat.h \
+  include/uapi/linux/stat.h \
   include/linux/uidgid.h \
     $(wildcard include/config/uidgid/strict/type/checks.h) \
     $(wildcard include/config/user/ns.h) \
@@ -414,8 +464,6 @@ deps_/home/ktrotman/c/hiveFS/hi_dir.o := \
     $(wildcard include/config/have/arch/pfn/valid.h) \
     $(wildcard include/config/holes/in/zone.h) \
     $(wildcard include/config/arch/has/holes/memorymodel.h) \
-  include/linux/wait.h \
-  include/uapi/linux/wait.h \
   include/linux/nodemask.h \
     $(wildcard include/config/movable/node.h) \
   include/linux/pageblock-flags.h \
@@ -438,49 +486,6 @@ deps_/home/ktrotman/c/hiveFS/hi_dir.o := \
     $(wildcard include/config/rwsem/generic/spinlock.h) \
   arch/x86/include/asm/rwsem.h \
   include/linux/srcu.h \
-  include/linux/rcupdate.h \
-    $(wildcard include/config/rcu/torture/test.h) \
-    $(wildcard include/config/tree/rcu.h) \
-    $(wildcard include/config/tree/preempt/rcu.h) \
-    $(wildcard include/config/rcu/trace.h) \
-    $(wildcard include/config/preempt/rcu.h) \
-    $(wildcard include/config/rcu/stall/common.h) \
-    $(wildcard include/config/rcu/user/qs.h) \
-    $(wildcard include/config/rcu/nocb/cpu.h) \
-    $(wildcard include/config/tiny/rcu.h) \
-    $(wildcard include/config/tiny/preempt/rcu.h) \
-    $(wildcard include/config/debug/objects/rcu/head.h) \
-  include/linux/completion.h \
-  include/linux/debugobjects.h \
-    $(wildcard include/config/debug/objects.h) \
-    $(wildcard include/config/debug/objects/free.h) \
-  include/linux/rcutree.h \
-  include/linux/workqueue.h \
-    $(wildcard include/config/debug/objects/work.h) \
-    $(wildcard include/config/freezer.h) \
-    $(wildcard include/config/wq/watchdog.h) \
-  include/linux/timer.h \
-    $(wildcard include/config/timer/stats.h) \
-    $(wildcard include/config/debug/objects/timers.h) \
-    $(wildcard include/config/no/hz/common.h) \
-  include/linux/ktime.h \
-    $(wildcard include/config/ktime/scalar.h) \
-  include/linux/jiffies.h \
-  include/linux/timex.h \
-  include/uapi/linux/timex.h \
-  include/uapi/linux/param.h \
-  arch/x86/include/uapi/asm/param.h \
-  include/asm-generic/param.h \
-    $(wildcard include/config/hz.h) \
-  include/uapi/asm-generic/param.h \
-  arch/x86/include/asm/timex.h \
-  arch/x86/include/asm/tsc.h \
-    $(wildcard include/config/x86/tsc.h) \
-  include/linux/timekeeping.h \
-  include/linux/sysctl.h \
-    $(wildcard include/config/sysctl.h) \
-  include/linux/rbtree.h \
-  include/uapi/linux/sysctl.h \
   arch/x86/include/asm/mmzone.h \
   arch/x86/include/asm/mmzone_64.h \
   arch/x86/include/asm/smp.h \
@@ -684,7 +689,6 @@ deps_/home/ktrotman/c/hiveFS/hi_dir.o := \
     $(wildcard include/config/have/cmpxchg/double.h) \
     $(wildcard include/config/have/aligned/struct/page.h) \
     $(wildcard include/config/userfaultfd.h) \
-    $(wildcard include/config/aio.h) \
     $(wildcard include/config/mmu/notifier.h) \
     $(wildcard include/config/spapr/tce/iommu.h) \
     $(wildcard include/config/hmm.h) \
@@ -967,8 +971,6 @@ deps_/home/ktrotman/c/hiveFS/hi_dir.o := \
   arch/x86/include/uapi/asm/sockios.h \
   include/uapi/asm-generic/sockios.h \
   include/uapi/linux/sockios.h \
-  include/linux/uio.h \
-  include/uapi/linux/uio.h \
   include/uapi/linux/socket.h \
   include/linux/net.h \
   include/uapi/linux/net.h \
@@ -1103,6 +1105,6 @@ deps_/home/ktrotman/c/hiveFS/hi_dir.o := \
   /home/ktrotman/c/hiveFS/hive_fs_defs.h \
   /usr/lib/gcc/x86_64-redhat-linux/4.8.5/include/stdbool.h \
 
-/home/ktrotman/c/hiveFS/hi_dir.o: $(deps_/home/ktrotman/c/hiveFS/hi_dir.o)
+/home/ktrotman/c/hiveFS/hi_file.o: $(deps_/home/ktrotman/c/hiveFS/hi_file.o)
 
-$(deps_/home/ktrotman/c/hiveFS/hi_dir.o):
+$(deps_/home/ktrotman/c/hiveFS/hi_file.o):

@@ -35,8 +35,7 @@ void dump_hifsinode(struct hifs_inode *dmi)
 
 void hifs_destroy_inode(struct hifs_inode *inode)
 {
-	//struct hifs_inode *hii = inode->i_private;
-	struct hifs_inode *hii;
+	struct hifs_inode *hii = inode->i_private;
 	printk(KERN_INFO "#: hifs freeing private data of inode %p (%llu)\n",
 		hii, inode->i_ino);
 	cache_put_inode(&hii);
@@ -71,7 +70,7 @@ int hifs_add_dir_record(struct super_block *sb, struct hifs_inode *dir, struct d
 	struct hifs_dir_entry *dir_rec;
 	u32 blk, j;
 
-	//parent = dir->i_private;
+	parent = dir->i_private;
 	hii = parent;
 
 	// Find offset, in dir in extends
@@ -344,7 +343,7 @@ struct dentry *hifs_lookup(struct hifs_inode *dir, struct dentry *child_dentry, 
 
 				if (0 == strcmp(dir_rec->name, child_dentry->d_name.name)) {
 					dchild = hifs_iget(sb, dir_rec->inode_nr);
-					ichild = new_inode(sb);
+					//ichild = new_inode(sb);
 					if (!dchild) {
 						return NULL;
 					}
