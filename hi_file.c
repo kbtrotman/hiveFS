@@ -11,6 +11,7 @@
 
 #include "hifs.h"
 
+
 ssize_t hifs_get_loffset(struct hifs_inode *hii, loff_t off)
 {
 	ssize_t ret = HIFS_EMPTY_ENTRY;

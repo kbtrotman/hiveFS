@@ -125,10 +125,10 @@ struct hifs_olt
 /**
  * Operations Tables
  **/
-extern struct file_operations hifs_file_operations;
-extern struct inode_operations hifs_inode_operations;
-extern struct file_operations hifs_dir_operations;
-extern struct super_operations hifs_sb_operations;
+extern const struct file_operations hifs_file_operations;
+extern const struct inode_operations hifs_inode_operations;
+extern const struct file_operations hifs_dir_operations;
+extern const struct super_operations hifs_sb_operations;
 
 /**
  * Kernel Inode Cache

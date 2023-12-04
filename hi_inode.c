@@ -19,6 +19,7 @@ _ix < HIFS_INODE_TSIZE;							\
 ++_ix, b = dmi->i_addrb[_ix], e = dmi->i_addre[_ix], blk = b-1)		\
 	while (++blk < e)
 
+
 void dump_hifsinode(struct hifs_inode *dmi)
 {
 	printk(KERN_INFO "----------dump_hifs_inode-------------");

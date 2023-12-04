@@ -28,16 +28,15 @@ MODULE_AUTHOR("Kevin Trotman");
 MODULE_DESCRIPTION("HiveFS - A Hive Mind Filesystem");
 MODULE_VERSION("0:0.01-001")
 
-struct kmem_cache *hifs_inode_cache = NULL;
 
-struct file_system_type hifs_type = 
+const struct file_system_type hifs_type = 
 {
     .name = "hifs",
     .mount = hifs_mount,
     .kill_sb = kill_block_super,
 };
 
-struct file_operations hifs_file_operations = 
+const struct file_operations hifs_file_operations = 
 {
     .read_iter = hifs_read,
     .write_iter = hifs_write,
@@ -45,7 +44,7 @@ struct file_operations hifs_file_operations =
 	.release = hifs_release_file,
 };
 
-struct inode_operations hifs_inode_operations = 
+const struct inode_operations hifs_inode_operations = 
 {
     .create = hifs_create,
     .lookup = hifs_lookup,
@@ -53,16 +52,18 @@ struct inode_operations hifs_inode_operations =
     .rmdir = hifs_rmdir,
 };
 
-struct file_operations hifs_dir_operations = 
+const struct file_operations hifs_dir_operations = 
 {
     .iterate_shared = hifs_readdir,
 };
 
-struct super_operations hifs_sb_operations = 
+const struct super_operations hifs_sb_operations = 
 {
 	.destroy_inode = hifs_destroy_inode,
 	.put_super = hifs_put_super,
 };
+
+
 
 static int hifs_mkfs(struct file_system_type *fs_type, int flags, const char *dev_name, void *data)
 {
