@@ -9,6 +9,8 @@
 
 #include "hifs.h"
 
+struct kmem_cache *hifs_inode_cache = NULL;
+
 struct hifs_inode *cache_get_inode(void)
 {
 	struct hifs_inode *hii;

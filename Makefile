@@ -5,7 +5,7 @@
 ccflags-y += -std=gnu11
 obj-m += hifs.o
 
-hifs-objs := hi_superblock.o hi_inode.o hi_dir.o hi_file.o hi_command_kern_netl.o hi_cache.o
+hifs-objs := hifs.o hi_superblock.o hi_inode.o hi_dir.o hi_file.o hi_command_kern_netl.o hi_cache.o
 
 all:
 	make -C /lib/modules/$(shell uname -r)/build M=$(shell pwd) modules
