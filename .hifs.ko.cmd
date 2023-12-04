@@ -1,1 +1,0 @@
-cmd_/home/trotmkeb/c/hiveFS/hifs.ko := ld -r -m elf_x86_64  -z max-page-size=0x200000 -T ./scripts/module-common.lds  --build-id  -o /home/trotmkeb/c/hiveFS/hifs.ko /home/trotmkeb/c/hiveFS/hifs.o /home/trotmkeb/c/hiveFS/hifs.mod.o ;  true
