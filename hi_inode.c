@@ -300,7 +300,7 @@ void hifs_fill_inode(struct super_block *sb, struct hifs_inode *des, struct hifs
 	des->i_mode = src->i_mode;
 	des->i_flags = src->i_flags;
 	des->i_sb = sb;
-	des->i_atime = des->i_ctime = des->i_mtime = ts;
+//	des->i_atime = des->i_ctime = des->i_mtime = ts;
 	des->i_ino = src->i_ino;
 	des->i_private = src;
 	des->i_op = &hifs_inode_operations;

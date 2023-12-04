@@ -47,9 +47,9 @@ int hifs_fill_super(struct super_block *sb, void *data, int silent)
 	root_inode->i_flags = root_hifsinode->i_flags;
 	root_inode->i_ino = root_hifsinode->i_ino;
 	root_inode->i_sb = sb;
-	root_inode->i_atime = ts;
-	root_inode->i_ctime = ts;
-	root_inode->i_mtime = ts;
+//	root_inode->i_atime = ts;
+//	root_inode->i_ctime = ts;
+//	root_inode->i_mtime = ts;
 	root_inode->i_ino = HIFS_ROOT_INODE;
 	root_inode->i_op = &hifs_inode_operations;
 	root_inode->i_fop = &hifs_dir_operations;

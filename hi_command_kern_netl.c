@@ -20,8 +20,8 @@ struct hifs_inode  test_inode =
 	.i_ino = 1,		    /* inode number */
 	.i_uid = 10,		    /* owner's user id */
 	.i_hrd_lnk = 1,	    /* number of hard links */
-	.i_ctime = 23333333,	/* Creation time */
-	.i_mtime = 23333333,	/* Modification time*/
+	.i_ctime = {23333333},	/* Creation time */
+	.i_mtime = {23333333},	/* Modification time*/
 	.i_size = 12,	
     .i_name = "test",
     .i_addrb = {4},
@@ -112,11 +112,11 @@ void hifs_netl_send_command_req(char *hive_payload)
     rc = nla_put_u16(skb, HIFS_NETL_ATB_IHRD_LNK, test_inode.i_hrd_lnk);
     if (rc != 0) goto failure;
 
-    rc = nla_put_u32(skb,  HIFS_NETL_ATB_ICTIME, test_inode.i_ctime);
-    if (rc != 0) goto failure;
+//    rc = nla_put_u32(skb,  HIFS_NETL_ATB_ICTIME, test_inode.i_ctime);
+//    if (rc != 0) goto failure;
 
-    rc = nla_put_u32(skb,  HIFS_NETL_ATB_IMTIME, test_inode.i_mtime);
-    if (rc != 0) goto failure;
+//    rc = nla_put_u32(skb,  HIFS_NETL_ATB_IMTIME, test_inode.i_mtime);
+//    if (rc != 0) goto failure;
 
     rc = nla_put_u32(skb,  HIFS_NETL_ATB_ISIZE, test_inode.i_size);
     if (rc != 0) goto failure;
