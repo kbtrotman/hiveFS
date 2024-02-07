@@ -58,16 +58,16 @@ int get_hive_vers()
 
 int save_binary_data(char *data_block, char *hash)
 {
-    const char *paramValues[1];
-    int paramLengths[1];
-    int paramFormats[1];
+    //const char *paramValues[1];
+    //int paramLengths[1];
+    //int paramFormats[1];
     // Assign the binary block to the parameter
-    paramValues[0] = data_block;
-    paramLengths[0] = sizeof(data_block);
-    paramFormats[0] = 1; // 1 means binary format
-    PGresult *res;
-    int rows = 0;
-    char *ins_sql;
+    //paramValues[0] = data_block;
+    //paramLengths[0] = sizeof(data_block);
+    //paramFormats[0] = 1; // 1 means binary format
+    //PGresult *res;
+    //int rows = 0;
+    //char *ins_sql;
 
     //char *quoted_sql = (char *) malloc(strlen(ins_sql) + quoted_hash.length() + quoted_count.length() + 1);
     //res = PQexecParams(sql.hive_conn, quoted_sql, 1, NULL, paramValues, paramLengths, paramFormats, 0);
@@ -82,11 +82,12 @@ int save_binary_data(char *data_block, char *hash)
 
 
     //    PQclear(res);
+    return 0;
 }
 
 int register_hive_host(void) 
 {
-    char *ins_sql = "INSERT INTO machines (host_name, host_ip, host_port, host_vers) VALUES ('%s', '%s', '%s', '%s');";
+    //char *ins_sql = "INSERT INTO machines (host_name, host_ip, host_port, host_vers) VALUES ('%s', '%s', '%s', '%s');";
     //char *quoted_sql = (char *) malloc(strlen(ins_sql) + quoted_host.length() + quoted_ip.length() + quoted_port.length() + quoted_vers.length() + 1);
     //sprintf(quoted_sql, ins_sql, quoted_host.c_str(), quoted_ip.c_str(), quoted_port.c_str(), quoted_vers.c_str());
     //PGresult *res = PQexec(sql.hive_conn, quoted_sql);

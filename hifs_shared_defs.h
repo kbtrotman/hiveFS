@@ -23,7 +23,7 @@ extern enum
 	HIFS_GENL_ATB_IVERS,
 	HIFS_GENL_ATB_IFLAGS,
 	HIFS_GENL_ATB_IMODE,
-    HIFS_GENL_ATB_I_ID,
+	HIFS_GENL_ATB_I_ID,
 	HIFS_GENL_ATB_IUID,
 	HIFS_GENL_ATB_IGID,
 	HIFS_GENL_ATB_IHRD_LNK,
@@ -36,7 +36,7 @@ extern enum
     __HIFS_GENL_ATB_MAX,
 } hive_payload_attrs;
 
-#define HIFS_NETL_ATB_MAX (__HIFS_GENL_ATB_MAX - 1)
+#define HIFS_GENL_ATB_MAX (__HIFS_GENL_ATB_MAX - 1)
 
 // Define the Netlink commands
 extern enum 
@@ -60,7 +60,7 @@ extern enum
 	__HIFS_GENL_CDM_MAX,
 } hive_commands;
 
-#define HIFS_GENL_CDM_MAX (__HIFS_NETL_COM_MAX - 1)
+#define HIFS_GENL_CDM_MAX (__HIFS_GENL_CDM_MAX - 1)
 
 
 /***********************

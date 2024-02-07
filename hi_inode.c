@@ -110,7 +110,7 @@ int alloc_inode(struct super_block *sb, struct hifs_inode *hii)
 	hisb = sb->s_fs_info;
 	hisb->s_inode_cnt += 1;
 	hii->i_ino = hisb->s_inode_cnt;
-	hii->i_version = hifs_LAYOUT_VER;
+	hii->i_version = HIFS_LAYOUT_VER;
 	hii->i_flags = 0;
 	hii->i_mode = 0;
 	hii->i_size = 0;

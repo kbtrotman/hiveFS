@@ -32,7 +32,7 @@ static int send_echo_msg(struct nl_sock *sk, int fam)
 
 	/* Put the genl header inside message buffer */
 	void *hdr = genlmsg_put(msg, NL_AUTO_PORT, NL_AUTO_SEQ, fam, 0, 0,
-				HIFS_GENL_CMD_SEND_INODE_ONLY, HIFS_GENL_VERSION);
+				HIFS_GENL_CDM_SEND_INODE_ONLY, HIFS_GENL_VERSION);
 	if (!hdr) {
 		return -EMSGSIZE;
 	}
