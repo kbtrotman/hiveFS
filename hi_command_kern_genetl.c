@@ -51,7 +51,7 @@ static struct nla_policy hifs_genl_policy[__HIFS_GENL_ATB_MAX + 1] =
 static struct genl_ops hifs_genl_ops[] = 
 {
     {
-        .cmd = HIFS_GENL_CMD_SEND_INODE_ONLY,
+        .cmd = HIFS_GENL_CDM_SEND_INODE_ONLY,
         .flags = 0,
         .policy = hifs_genl_policy,
         .doit = hifs_genl_rcv_acknowledge_command,
@@ -82,7 +82,7 @@ void hifs_genl_send_command_req(char *hive_payload)
     if (skb == NULL) return;
 
     // Add the message headers
-    msg_head = genlmsg_put(skb, 0, 0, &hifs_genl_family, 0, HIFS_GENL_CMD_SEND_INODE_ONLY);
+    msg_head = genlmsg_put(skb, 0, 0, &hifs_genl_family, 0, HIFS_GENL_CDM_SEND_INODE_ONLY);
     if (msg_head == NULL) {
         rc = -ENOMEM;
         goto failure;
@@ -146,9 +146,9 @@ failure:
 int hifs_genl_rcv_acknowledge_command(struct sk_buff *skb, struct genl_info *info)
 {
     // Check if the acknowledgement attribute is present
-    if (info->attrs[HIFS_GENL_CMD_SEND_ACK]) {
+    if (info->attrs[HIFS_GENL_CDM_SEND_ACK]) {
         pr_info(KERN_INFO "GENL: Recieved Genl ACK Command.\n");
-    } else if (info->attrs[HIFS_GENL_CMD_SEND_INODE_ONLY]) {
+    } else if (info->attrs[HIFS_GENL_CDM_SEND_INODE_ONLY]) {
         pr_info(KERN_INFO "GENL: Recieved Genl INODE Command.\n");
         pr_info(KERN_INFO "GENL: i_name: %d\n", nla_get_s32(info->attrs[HIFS_GENL_ATB_INAME]));
     } else {

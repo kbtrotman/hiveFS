@@ -20,9 +20,10 @@
 // in user-space.  The definitions file is included in both the kernel-space and user-space
 // hi_command files.
 // COMMON Definitions Here ONLY!
-#include "hifs_shared_defs.h"
+#include "../hifs_shared_defs.h"
 // COMMON Definitions Here ONLY!
 
+#define prerr(...) fprintf(stderr, "error: " __VA_ARGS__)
 
 /*  This file is for definitions specific to the Hi_Command router in user-space.  */
 

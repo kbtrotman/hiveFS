@@ -17,7 +17,9 @@ int hifs_fill_super(struct super_block *sb, void *data, int silent)
 	struct inode *root_inode;
 	struct hifs_inode *root_hifsinode, *rbuf;
 	int ret = 0;
-
+	struct timespec ts;
+	ktime_t kt;
+	
 	bh = sb_bread(sb, HIFS_SUPER_OFFSET);
 	BUG_ON(!bh);
 	h_sb = (struct hifs_superblock *)bh->b_data;
@@ -37,8 +39,6 @@ int hifs_fill_super(struct super_block *sb, void *data, int silent)
 	root_inode = new_inode(sb);
 
 	/* Fill inode */
-	struct timespec ts;
-	ktime_t kt;
 	kt = ktime_get_real();
 	ts = ktime_to_timespec(kt);
 
