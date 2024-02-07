@@ -129,9 +129,9 @@ struct hifs_inode
 	uint16_t	i_uid;		/* owner's user id */
 	uint16_t	i_gid;		/* owner's group id */
 	uint16_t	i_hrd_lnk;	/* number of hard links */
-	uint64_t	i_atime; /* Archive Time */
-	uint64_t	i_mtime; /* Modified Time */
-	uint64_t	i_ctime; /* Creation Time */
+	struct timespec64	i_atime; /* Archive Time */
+	struct timespec64	i_mtime; /* Modified Time */
+	struct timespec64	i_ctime; /* Creation Time */
 	uint32_t	i_size;		/* Number of bytes in file */
 	char    	i_name[50]; /* File name */
 	void		*i_private;  /* Private/Unpublished filesystrem member */

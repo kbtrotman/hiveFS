@@ -20,7 +20,7 @@
 // in user-space.  The definitions file is included in both the kernel-space and user-space
 // hi_command files.
 // COMMON Definitions Here ONLY!
-#include "../hive_fs_defs.h"
+#include "hifs_shared_defs.h"
 // COMMON Definitions Here ONLY!
 
 

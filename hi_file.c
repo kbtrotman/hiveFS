@@ -100,7 +100,7 @@ ssize_t hifs_write(struct kiocb *iocb, struct iov_iter *from)
 	size_t blk = 0;	
 	size_t boff = 0;
 	char *buffer;
-	int ret;
+	//int ret;
 
 	inode = iocb->ki_filp->f_path.dentry->d_inode;
 	sb = inode->i_sb;
@@ -108,10 +108,10 @@ ssize_t hifs_write(struct kiocb *iocb, struct iov_iter *from)
 	dsb = sb->s_fs_info;
 	
 	//ret = generic_write_checks(iocb, from);
-	if (ret <= 0) {
-	    printk(KERN_INFO "HiveFS: generic_write_checks Failed: %d", ret); 
-	    return ret;
-	}
+	//if (ret <= 0) {
+	//    printk(KERN_INFO "HiveFS: generic_write_checks Failed: %d", ret); 
+	//    return ret;
+	//}
 	
 	/* calculate datablock to write alloc if necessary */
 	//blk = hifs_alloc_if_necessary(dsb, dinode, off, count);
@@ -143,13 +143,13 @@ ssize_t hifs_write(struct kiocb *iocb, struct iov_iter *from)
 	return count;
 }
 
-int hifs_open_file(struct hifs_inode *inode, struct file *filp)
+int hifs_open_file(struct inode *inode, struct file *filp)
 {
 
 	return 0;
 }
 
-int hifs_release_file(struct hifs_inode *inode, struct file filp)
+int hifs_release_file(struct inode *inode, struct file *filp)
 {
 
 	return 0;
