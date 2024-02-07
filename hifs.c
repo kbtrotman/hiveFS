@@ -26,10 +26,9 @@
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Kevin Trotman");
 MODULE_DESCRIPTION("HiveFS - A Hive Mind Filesystem");
-MODULE_VERSION("0:0.01-001")
+MODULE_VERSION("0:0.01-001");
 
-
-const struct file_system_type hifs_type = 
+struct file_system_type hifs_type = 
 {
     .name = "hifs",
     .mount = hifs_mount,
@@ -63,18 +62,29 @@ const struct super_operations hifs_sb_operations =
 	.put_super = hifs_put_super,
 };
 
-
+/*
+EXPORT_SYMBOL(hifs_file_operations);
+EXPORT_SYMBOL(hifs_dir_operations);
+EXPORT_SYMBOL(hifs_sb_operations);
+EXPORT_SYMBOL(hifs_inode_cache);
+EXPORT_SYMBOL(ktime_get_with_offset);
+*/
 
 static int hifs_mkfs(struct file_system_type *fs_type, int flags, const char *dev_name, void *data)
 {
+    /*
+    struct inode *root_inode;
+    struct dentry *root_dentry;
     // Allocate a superblock structure
-    struct super_block *sb = get_sb_nodev(fs_type, flags, data, hifs_fill_super);
+
+
+    struct super_block sb = get_sb_nodev(fs_type, flags, data, hifs_fill_super);
     if (IS_ERR(sb)) {
         return PTR_ERR(sb);
     }
 
     // Create a root inode for the filesystem
-    struct inode *root_inode = new_inode(sb);
+    *root_inode = new_inode(sb);
     if (!root_inode) {
         return -ENOMEM;
     }
@@ -87,7 +97,7 @@ static int hifs_mkfs(struct file_system_type *fs_type, int flags, const char *de
     root_inode->i_mode = S_IFDIR | 0755;
 
     // Create a dentry for the root directory
-    struct dentry *root_dentry = d_make_root(root_inode);
+    *root_dentry = d_make_root(root_inode);
     if (!root_dentry) {
         iput(root_inode);
         return -ENOMEM;
@@ -95,7 +105,7 @@ static int hifs_mkfs(struct file_system_type *fs_type, int flags, const char *de
 
     // Set the root dentry for the superblock
     sb->s_root = root_dentry;
-
+    */
     return 0;
 }
 
@@ -104,10 +114,10 @@ static int __init hifs_init(void)
 
     int ret;
 
-    ret = genl_register_family(&hifs_netl_gnl_family);
-    if (ret != 0) goto failure;
+    ret = genl_register_family(&hifs_genl_family);
+    if (unlikely(ret)) { pr_crit("Failed to register with generic netlink.\n"); goto failure; }
 
-    int ret = register_filesystem(&hifs_type);
+    ret = register_filesystem(&hifs_type);
     if (ret != 0) {
         printk(KERN_ERR "hifs: Failed to register filesystem\n");
         return ret;
@@ -122,9 +132,8 @@ failure:
 
 static void __exit hifs_exit(void)
 {
-    int ret = genl_unregister_family(&hifs_netl_gnl_family);
-    if (ret != 0)
-        printk("unregister of NetLink for HiveFS failed: %i\n",ret);
+    int ret = genl_unregister_family(&hifs_genl_family);
+    if (unlikely(ret)) { pr_crit("Failed to unregister generic netlink.\n"); }
 
     ret = unregister_filesystem(&hifs_type);
     if (ret != 0) {
