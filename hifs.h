@@ -9,7 +9,6 @@
 #ifndef _KERN_HIVEFS_H
 #define _KERN_HIVEFS_H
 
-#include <linux/stddef.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
@@ -25,9 +24,7 @@
 #include <linux/types.h>
 #include <net/netlink.h>
 #include <net/genetlink.h>
-#include <linux/types.h>
 #include <linux/fs.h>
-#include <linux/genhd.h>
 
 // In the definitions file, those items are common to hi_command in both kernel-space and
 // in user-space.
@@ -99,6 +96,7 @@ void cache_put_inode(struct hifs_inode **hii);
  *Netlink-Generic definitions 
  **/
 extern struct genl_family hifs_genl_family;
+extern struct genl_ops hifs_genl_ops;
 
 /** 
  *Filesystem definition 

@@ -28,6 +28,8 @@ MODULE_AUTHOR("Kevin Trotman");
 MODULE_DESCRIPTION("HiveFS - A Hive Mind Filesystem");
 MODULE_VERSION("0:0.01-001");
 
+extern struct genl_link hifs_genl_link;
+
 struct file_system_type hifs_type = 
 {
     .name = "hifs",
@@ -111,22 +113,36 @@ static int hifs_mkfs(struct file_system_type *fs_type, int flags, const char *de
 
 static int __init hifs_init(void)
 {
-
     int ret;
 
-    ret = genl_register_family(&hifs_genl_family);
-    if (unlikely(ret)) { pr_crit("Failed to register with generic netlink.\n"); goto failure; }
+    hifs_genl_link.clockstart = GET_TIME();
 
     ret = register_filesystem(&hifs_type);
     if (ret != 0) {
         printk(KERN_ERR "hifs: Failed to register filesystem\n");
         return ret;
+    } else {
+        printk(KERN_INFO "hifs: Filesystem registered to kernel\n");
     }
 
-    printk(KERN_INFO "hifs: Filesystem registered\n");
+    ret = genl_register_family(&hifs_genl_family);
+    if (unlikely(ret)) { 
+        pr_crit("Failed to register with generic netlink.\n"); goto failure;
+    } else {
+        pr_info("Registered hifs module with generic netlink.\n");
+    }
+
+    ret = genl_register_ops(&hifs_genl_family, &hifs_genl_ops);
+    if (ret < 0) {
+        pr_err("Failed to register Netlink operations\n");
+        genl_unregister_family(&hifs_genl_family);
+        return ret;
+    } else {
+        pr_info("Registered hifs module with generic netlink ops commands.\n");
+    }
 
 failure:
-    return 0;
+    return -1;
 }
 
 
