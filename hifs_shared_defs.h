@@ -9,59 +9,58 @@
 #ifndef _LINUX_HIVEFS_DEFS_H
 #define _LINUX_HIVEFS_DEFS_H
 
-#include <linux/types.h>
-#include <stdbool.h>
-
 /***********************
  * Netlink Structures
  ***********************/
-#define NETLINK__HIVE__USER 27
+#define HIFS_GENL_NAME "hifs_genl"
+#define HIFS_GENL_VERSION 1
+#define HIFS_MC_GRP_NAME "mcgrp"
 #define MAX_PAYLOAD 4296
 
 // Define the payload
 extern enum 
 {
-	HIFS_NETL_ATB_IVERS,
-	HIFS_NETL_ATB_IFLAGS,
-	HIFS_NETL_ATB_IMODE,
-    HIFS_NETL_ATB_I_ID,
-	HIFS_NETL_ATB_IUID,
-	HIFS_NETL_ATB_IGID,
-	HIFS_NETL_ATB_IHRD_LNK,
-	HIFS_NETL_ATB_ICTIME,
-	HIFS_NETL_ATB_IMTIME,
-	HIFS_NETL_ATB_ISIZE,
-	HIFS_NETL_ATB_INAME,
-	HIFS_NETL_ATB_IADDRB,
-	HIFS_NETL_ATB_IADDRE,
-    __HIFS_NETL_ATB_MAX,
-} hive_payload;
+	HIFS_GENL_ATB_IVERS,
+	HIFS_GENL_ATB_IFLAGS,
+	HIFS_GENL_ATB_IMODE,
+    HIFS_GENL_ATB_I_ID,
+	HIFS_GENL_ATB_IUID,
+	HIFS_GENL_ATB_IGID,
+	HIFS_GENL_ATB_IHRD_LNK,
+	HIFS_GENL_ATB_ICTIME,
+	HIFS_GENL_ATB_IMTIME,
+	HIFS_GENL_ATB_ISIZE,
+	HIFS_GENL_ATB_INAME,
+	HIFS_GENL_ATB_IADDRB,
+	HIFS_GENL_ATB_IADDRE,
+    __HIFS_GENL_ATB_MAX,
+} hive_payload_attrs;
 
-#define HIFS_NETL_ATB_MAX (__HIFS_NETL_ATB_MAX - 1)
+#define HIFS_NETL_ATB_MAX (__HIFS_GENL_ATB_MAX - 1)
 
 // Define the Netlink commands
 extern enum 
 {
-	HIFS_NETL_COM_SEND_ACK,			    // Hive Send Ack to/from User Space
-    HIFS_NETL_COM_SET_LINK_UP,          // Hive Operational to/from User Space
-    HIFS_NETL_COM_SET_LINK_DOWN,        // Hive Shutdown to/from User Space
-    HIFS_NETL_COM_SET_LINK_PULSE,       // Periodic I'm Alive Pulse, when needed
-    HIFS_NETL_COM_SET_LINK_RESET,       // Hive Reset to/from User Space
-    HIFS_NETL_COM_SYNC_SUPERBLOCK,      // Hive Sync Superblock to/from User Space
-    HIFS_NETL_COM_SEND_INODE_ONLY,      // Hive Send Inode Only to/from User Space
-    HIFS_NETL_COM_SEND_INODE_AND_BLOCK, // Hive Send Inode and Block to/from User Space
-    HIFS_NETL_COM_SEND_INODE_AND_FILE,  // Hive Send Inode and File to/from User Space
-    HIFS_NETL_COM_SEND_BLOCK_ONLY,      // Hive Send Block Only to/from User Space
-    HIFS_NETL_COM_SEND_FILE_ONLY,       // Hive Send File Only to/from User Space
-    HIFS_NETL_COM_REQ_INODE_ONLY,       // User Space Request Inode Only to Hive
-    HIFS_NETL_COM_REQ_INODE_AND_BLOCK,  // User Space Request Inode and Block to Hive
-    HIFS_NETL_COM_REQ_INODE_AND_FILE,   // User Space Req Inode and File to/from Hive
-    HIFS_NETL_COM_REQ_BLOCK_ONLY,       // User Space Request Block Only to/from Hive
-    HIFS_NETL_COM_REQ_FILE_ONLY,        // User Space Request File Only to/from Hive
-	__HIFS_NETL_COM_MAX,
+	HIFS_GENL_CDM_SEND_ACK,			    // Hive Send Ack to/from User Space
+    HIFS_GENL_CDM_SET_LINK_UP,          // Hive Operational to/from User Space
+    HIFS_GENL_CDM_SET_LINK_DOWN,        // Hive Shutdown to/from User Space
+    HIFS_GENL_CDM_SET_LINK_PULSE,       // Periodic I'm Alive Pulse, when needed
+    HIFS_GENL_CDM_SET_LINK_RESET,       // Hive Reset to/from User Space
+    HIFS_GENL_CDM_SYNC_SUPERBLOCK,      // Hive Sync Superblock to/from User Space
+    HIFS_GENL_CDM_SEND_INODE_ONLY,      // Hive Send Inode Only to/from User Space
+    HIFS_GENL_CDM_SEND_INODE_AND_BLOCK, // Hive Send Inode and Block to/from User Space
+    HIFS_GENL_CDM_SEND_INODE_AND_FILE,  // Hive Send Inode and File to/from User Space
+    HIFS_GENL_CDM_SEND_BLOCK_ONLY,      // Hive Send Block Only to/from User Space
+    HIFS_GENL_CDM_SEND_FILE_ONLY,       // Hive Send File Only to/from User Space
+    HIFS_GENL_CDM_REQ_INODE_ONLY,       // User Space Request Inode Only to Hive
+    HIFS_GENL_CDM_REQ_INODE_AND_BLOCK,  // User Space Request Inode and Block to Hive
+    HIFS_GENL_CDM_REQ_INODE_AND_FILE,   // User Space Req Inode and File to/from Hive
+    HIFS_GENL_CDM_REQ_BLOCK_ONLY,       // User Space Request Block Only to/from Hive
+    HIFS_GENL_CDM_REQ_FILE_ONLY,        // User Space Request File Only to/from Hive
+	__HIFS_GENL_CDM_MAX,
 } hive_commands;
 
-#define HIFS_NETL_COM_MAX (__HIFS_NETL_COM_MAX - 1)
+#define HIFS_GENL_CDM_MAX (__HIFS_NETL_COM_MAX - 1)
 
 
 /***********************
@@ -75,7 +74,7 @@ extern struct
 } settings;
 
 /* Layout version */
-#define hifs_LAYOUT_VER		1
+#define HIFS_LAYOUT_VER		1
 
 /* FS SIZE/OFFSET CONST */
 #define HIFS_INODE_TSIZE		3
@@ -87,6 +86,7 @@ extern struct
 #define HIFS_ROOT_INODE_OFFSET	(HIFS_INODE_BITMAP_OFFSET + 1)
 #define HIFS_ROOT_IN_EXT_OFF	(HIFS_ROOT_INODE_OFFSET + 1)
 #define HIFS_LF_INODE_OFFSET	(HIFS_ROOT_IN_EXT_OFF + HIFS_DEF_ALLOC)
+
 /* Default place where FS will start using after mkfs (all above are used for mkfs) */
 #define DM_FS_SPACE_START	(HIFS_LF_INODE_OFFSET + HIFS_DEF_ALLOC)
 
@@ -129,9 +129,9 @@ struct hifs_inode
 	uint16_t	i_uid;		/* owner's user id */
 	uint16_t	i_gid;		/* owner's group id */
 	uint16_t	i_hrd_lnk;	/* number of hard links */
-	struct timespec64	i_atime; /* Archive Time */
-	struct timespec64	i_mtime; /* Modified Time */
-	struct timespec64	i_ctime; /* Creation Time */
+	uint32_t i_atime; /* Archive Time */
+	uint32_t	i_mtime; /* Modified Time */
+	uint32_t	i_ctime; /* Creation Time */
 	uint32_t	i_size;		/* Number of bytes in file */
 	char    	i_name[50]; /* File name */
 	void		*i_private;  /* Private/Unpublished filesystrem member */
