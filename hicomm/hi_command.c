@@ -22,9 +22,34 @@
 #include "hi_command.h"
 
 
+static int send_link_up_req(struct nl_sock *sk, int fam)
+{
+    int err = 0;
+    struct nl_msg *msg = nlmsg_alloc();
+    if (!msg) {
+        return -ENOMEM;
+    }
+
+    /* Put the genl header inside message buffer */
+    void *hdr = genlmsg_put(msg, NL_AUTO_PORT, NL_AUTO_SEQ, fam, 0, 0,
+                HIFS_GENL_CDM_SET_LINK_UP, HIFS_GENL_VERSION);
+    if (!hdr) {
+        return -EMSGSIZE;
+    }
+
+    /* Send the message. */
+    err = nl_send_auto(sk, msg);
+    err = err >= 0 ? 0 : err;
+
+    nlmsg_free(msg);
+
+    return err;
+}
+
+
 static int send_echo_msg(struct nl_sock *sk, int fam)
 {
-	int	       err = 0;
+	int err = 0;
 	struct nl_msg *msg = nlmsg_alloc();
 	if (!msg) {
 		return -ENOMEM;
@@ -38,7 +63,7 @@ static int send_echo_msg(struct nl_sock *sk, int fam)
 	}
 
 	/* Put the string inside the message. */
-	err = nla_put_string(msg, HIFS_GENL_ATB_INAME, "Hello from User Space, Netlink!");
+	err = nla_put_string(msg, HIFS_GENL_ATB_INAME, "Hello from User Space.");
 	if (err < 0) {
 		return -err;
 	}
@@ -75,7 +100,7 @@ static int echo_reply_handler(struct nl_msg *msg, void *arg)
 			genlmsg_attrlen(genlhdr, 0), NULL);
 	if (err) {
 		prerr("unable to parse message: %s\n", strerror(-err));
-		return NL_SKIP;
+		return -1;
     } else {
         nla_parse(tb, HIFS_GENL_ATB_MAX, genlmsg_attrdata(genlhdr, 0), genlmsg_attrlen(genlhdr, 0), NULL);
 
@@ -131,6 +156,8 @@ int main()
     int ret;
 
     // Initialize netlink sockets
+    hifs_genl_link.clockstart = GET_TIME();
+    
     if ((ret = conn(&ucsk)) || (ret = conn(&mcsk))) {
 	    prerr("failed to connect to generic netlink\n");
 	    goto out;
@@ -145,6 +172,11 @@ int main()
     if ((ret = set_cb(ucsk)) || (ret = set_cb(mcsk))) {
 	    prerr("failed to set callback: %s\n", strerror(-ret));
 	    goto out;
+    }
+
+    /* Send unicast message and listen for response. */
+    if ((ret = send_link_up_req(ucsk, fam))) {
+	    prerr("failed to send message: %s\n", strerror(-ret));
     }
 
     /* Send unicast message and listen for response. */

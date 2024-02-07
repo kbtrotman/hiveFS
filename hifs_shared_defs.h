@@ -6,8 +6,8 @@
  * License: GNU GPL as of 2023
  *
  */
-#ifndef _LINUX_HIVEFS_DEFS_H
-#define _LINUX_HIVEFS_DEFS_H
+#ifndef _LINUX_HIVEFS_SHAREDDEFS_H
+#define _LINUX_HIVEFS_SHAREDDEFS_H
 
 /***********************
  * Netlink Structures
@@ -16,6 +16,14 @@
 #define HIFS_GENL_VERSION 1
 #define HIFS_MC_GRP_NAME "mcgrp"
 #define MAX_PAYLOAD 4296
+
+#ifdef __KERNEL__
+#include <linux/jiffies.h>
+#define GET_TIME() (jiffies * 1000 / HZ)
+#else
+#include <time.h>
+#define GET_TIME() (clock() * 1000 / CLOCKS_PER_SEC)
+#endif // __KERNEL__
 
 // Define the payload
 extern enum 
@@ -42,6 +50,7 @@ extern enum
 extern enum 
 {
 	HIFS_GENL_CDM_SEND_ACK,			    // Hive Send Ack to/from User Space
+	HIFS_GENL_CMD_SEND_LINK_ACK,		// Acknowledge a link change request
     HIFS_GENL_CDM_SET_LINK_UP,          // Hive Operational to/from User Space
     HIFS_GENL_CDM_SET_LINK_DOWN,        // Hive Shutdown to/from User Space
     HIFS_GENL_CDM_SET_LINK_PULSE,       // Periodic I'm Alive Pulse, when needed
@@ -62,6 +71,14 @@ extern enum
 
 #define HIFS_GENL_CDM_MAX (__HIFS_GENL_CDM_MAX - 1)
 
+enum hifs_link_state {HIFS_GENL_LINK_DOWN, HIFS_GENL_LINK_UP};
+struct genl_link
+{
+    enum hifs_link_state state;
+	int last_check;
+	int last_state;
+	long int clockstart;	
+} hifs_genl_link;
 
 /***********************
  * HiveFS Structures
@@ -149,7 +166,7 @@ struct hifs_dir_entry
 	char name[256];			/* File name, up to HIFS_NAME_LEN */
 };
 
-#endif /* _LINUX_HIVEFS_DEFS_H */
+#endif /* _LINUX_HIVEFS_SHAREDDEFS_H */
 
 #ifdef HIVEFS_DEBUG
 #define hifs_debug(f, a...)						\

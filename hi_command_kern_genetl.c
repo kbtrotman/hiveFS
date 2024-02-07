@@ -48,13 +48,17 @@ static struct nla_policy hifs_genl_policy[__HIFS_GENL_ATB_MAX + 1] =
 };
 
 // Define the operations
-static struct genl_ops hifs_genl_ops[] = 
+struct genl_ops hifs_genl_ops[] = 
 {
+    {
+        .cmd = HIFS_GENL_CDM_SET_LINK_UP,
+        .flags = 0,
+        .doit = hifs_genl_link_up,
+    },
     {
         .cmd = HIFS_GENL_CDM_SEND_INODE_ONLY,
         .flags = 0,
-        .policy = hifs_genl_policy,
-        .doit = hifs_genl_rcv_acknowledge_command,
+        .doit = hifs_genl_rcv_inode,   
     },
 };
 
@@ -70,7 +74,7 @@ struct genl_family hifs_genl_family =
 };
 
 // Function to send request
-void hifs_genl_send_command_req(char *hive_payload)
+void hifs_genl_send_command_req(char *hive_payload_attrs)
 {
     struct sk_buff *skb;    /*  The Socket Buffer  */
     struct genl_info *info; /*  The Generic Netlink Info  */
@@ -136,24 +140,34 @@ void hifs_genl_send_command_req(char *hive_payload)
     rc = genlmsg_unicast(genl_info_net(info), skb, info->snd_portid);
     if (rc != 0) goto failure;
 
-    return;
+    return 0;
 
 failure:
     // Free the message on failure
     nlmsg_free(skb);
+    return -1;
 }
 
-int hifs_genl_rcv_acknowledge_command(struct sk_buff *skb, struct genl_info *info)
+int hifs_genl_rcv_inode(struct sk_buff *skb, struct genl_info *info)
 {
     // Check if the acknowledgement attribute is present
-    if (info->attrs[HIFS_GENL_CDM_SEND_ACK]) {
-        pr_info(KERN_INFO "GENL: Recieved Genl ACK Command.\n");
-    } else if (info->attrs[HIFS_GENL_CDM_SEND_INODE_ONLY]) {
+    if (info->attrs[HIFS_GENL_ATB_INAME]) {
+        char *iname = nla_get_s32(info->attrs[HIFS_GENL_ATB_INAME]);
         pr_info(KERN_INFO "GENL: Recieved Genl INODE Command.\n");
-        pr_info(KERN_INFO "GENL: i_name: %d\n", nla_get_s32(info->attrs[HIFS_GENL_ATB_INAME]));
+        pr_info(KERN_INFO "GENL: i_name: %s\n", nla_get_s32(info->attrs[HIFS_GENL_ATB_INAME]));
+        return 0;
     } else {
-        pr_info(KERN_INFO "GENL: Recieved other Genl Command.\n");
-    }
+        pr_info(KERN_ERR "GENL: Error processing Genl INODE Command packet.\n");
+        return -1;
+    }   
+}
 
-    return 0;
+
+int hifs_genl_link_up(struct sk_buff *skb, struct genl_info *info)
+{
+    pr_info(KERN_INFO "GENL: Recieved Genl Link_Up Command.\n");
+    hifs_genl_link.state = HIFS_GENL_LNK_UP;
+    pr_info(KERN_INFO "GENL: Netlink_generic link up'd at %d seconds after hifs start.\n", (clock() - hifs_genl_link.clockstart));
+    hifs_genl_link.last_check = 0;
+    hifs_genl_link.last_state = HIFS_GENL_LNK_UP;
 }
