@@ -148,7 +148,7 @@ static void __exit hifs_exit(void)
         printk(KERN_ERR "hifs: Failed to unregister filesystem\n");
     }
 
-    printk(KERN_INFO "hifs: Filesystem unregistered\n");
+    printk(KERN_INFO "hifs: hiveFS unregistered\n");
 }
 
 module_init(hifs_init);
