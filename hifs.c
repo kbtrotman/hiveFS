@@ -29,6 +29,7 @@ MODULE_DESCRIPTION("HiveFS - A Hive Mind Filesystem");
 MODULE_VERSION("0:0.01-001");
 
 extern struct genl_link hifs_genl_link;
+extern struct genl_family hifs_genl_family;
 
 struct file_system_type hifs_type = 
 {
@@ -130,15 +131,6 @@ static int __init hifs_init(void)
         pr_crit("Failed to register with generic netlink.\n"); goto failure;
     } else {
         pr_info("Registered hifs module with generic netlink.\n");
-    }
-
-    ret = genl_register_ops(&hifs_genl_family, &hifs_genl_ops);
-    if (ret < 0) {
-        pr_err("Failed to register Netlink operations\n");
-        genl_unregister_family(&hifs_genl_family);
-        return ret;
-    } else {
-        pr_info("Registered hifs module with generic netlink ops commands.\n");
     }
 
 failure:

@@ -16,64 +16,6 @@ deps_/home/trotmkeb/c/hiveFS/hi_command_kern_genetl.o := \
     $(wildcard include/config/optimize/inlining.h) \
     $(wildcard include/config/gcov/kernel.h) \
     $(wildcard include/config/arch/use/builtin/bswap.h) \
-  include/linux/string.h \
-    $(wildcard include/config/binary/printf.h) \
-    $(wildcard include/config/fortify/source.h) \
-    $(wildcard include/config/kasan/generic.h) \
-    $(wildcard include/config/kasan/sw/tags.h) \
-  include/linux/compiler.h \
-    $(wildcard include/config/trace/branch/profiling.h) \
-    $(wildcard include/config/profile/all/branches.h) \
-    $(wildcard include/config/stack/validation.h) \
-    $(wildcard include/config/debug/entry.h) \
-    $(wildcard include/config/kasan.h) \
-    $(wildcard include/config/kcsan.h) \
-  include/linux/compiler_types.h \
-  include/uapi/linux/types.h \
-  arch/x86/include/uapi/asm/types.h \
-  include/uapi/asm-generic/types.h \
-  include/asm-generic/int-ll64.h \
-  include/uapi/asm-generic/int-ll64.h \
-  arch/x86/include/uapi/asm/bitsperlong.h \
-  include/asm-generic/bitsperlong.h \
-    $(wildcard include/config/64bit.h) \
-  include/uapi/asm-generic/bitsperlong.h \
-  include/uapi/linux/posix_types.h \
-  include/linux/stddef.h \
-  include/uapi/linux/stddef.h \
-  arch/x86/include/asm/posix_types.h \
-    $(wildcard include/config/x86/32.h) \
-  arch/x86/include/uapi/asm/posix_types_64.h \
-  include/uapi/asm-generic/posix_types.h \
-  include/linux/kcsan-checks.h \
-    $(wildcard include/config/kcsan/ignore/atomics.h) \
-  include/linux/types.h \
-    $(wildcard include/config/have/uid16.h) \
-    $(wildcard include/config/uid16.h) \
-    $(wildcard include/config/arch/dma/addr/t/64bit.h) \
-    $(wildcard include/config/phys/addr/t/64bit.h) \
-  arch/x86/include/asm/barrier.h \
-  arch/x86/include/asm/alternative.h \
-    $(wildcard include/config/smp.h) \
-  include/linux/stringify.h \
-  arch/x86/include/asm/asm.h \
-  arch/x86/include/asm/nops.h \
-    $(wildcard include/config/mk7.h) \
-    $(wildcard include/config/x86/p6/nop.h) \
-    $(wildcard include/config/x86/64.h) \
-  include/asm-generic/barrier.h \
-  include/linux/kasan-checks.h \
-  include/linux/kcsan.h \
-  /usr/lib/gcc/x86_64-redhat-linux/8/include/stdarg.h \
-  include/uapi/linux/string.h \
-  arch/x86/include/asm/string.h \
-  arch/x86/include/asm/string_64.h \
-    $(wildcard include/config/x86/mce.h) \
-    $(wildcard include/config/arch/has/uaccess/flushcache.h) \
-  include/linux/jump_label.h \
-    $(wildcard include/config/jump/label.h) \
-    $(wildcard include/config/have/arch/jump/label/relative.h) \
-  arch/x86/include/asm/jump_label.h \
   /home/trotmkeb/c/hiveFS/hifs.h \
   include/linux/module.h \
     $(wildcard include/config/modules.h) \
@@ -84,6 +26,7 @@ deps_/home/trotmkeb/c/hiveFS/hi_command_kern_genetl.o := \
     $(wildcard include/config/module/sig.h) \
     $(wildcard include/config/generic/bug.h) \
     $(wildcard include/config/kallsyms.h) \
+    $(wildcard include/config/smp.h) \
     $(wildcard include/config/tracepoints.h) \
     $(wildcard include/config/debug/info/btf/modules.h) \
     $(wildcard include/config/tracing.h) \
@@ -95,6 +38,28 @@ deps_/home/trotmkeb/c/hiveFS/hi_command_kern_genetl.o := \
     $(wildcard include/config/strict/module/rwx.h) \
   include/linux/list.h \
     $(wildcard include/config/debug/list.h) \
+  include/linux/types.h \
+    $(wildcard include/config/have/uid16.h) \
+    $(wildcard include/config/uid16.h) \
+    $(wildcard include/config/arch/dma/addr/t/64bit.h) \
+    $(wildcard include/config/phys/addr/t/64bit.h) \
+    $(wildcard include/config/64bit.h) \
+  include/uapi/linux/types.h \
+  arch/x86/include/uapi/asm/types.h \
+  include/uapi/asm-generic/types.h \
+  include/asm-generic/int-ll64.h \
+  include/uapi/asm-generic/int-ll64.h \
+  arch/x86/include/uapi/asm/bitsperlong.h \
+  include/asm-generic/bitsperlong.h \
+  include/uapi/asm-generic/bitsperlong.h \
+  include/uapi/linux/posix_types.h \
+  include/linux/stddef.h \
+  include/uapi/linux/stddef.h \
+  include/linux/compiler_types.h \
+  arch/x86/include/asm/posix_types.h \
+    $(wildcard include/config/x86/32.h) \
+  arch/x86/include/uapi/asm/posix_types_64.h \
+  include/uapi/asm-generic/posix_types.h \
   include/linux/poison.h \
     $(wildcard include/config/illegal/pointer/value.h) \
   include/linux/const.h \
@@ -110,19 +75,42 @@ deps_/home/trotmkeb/c/hiveFS/hi_command_kern_genetl.o := \
     $(wildcard include/config/lock/down/mandatory.h) \
     $(wildcard include/config/panic/timeout.h) \
     $(wildcard include/config/rhel/differences.h) \
+  /usr/lib/gcc/x86_64-redhat-linux/8/include/stdarg.h \
   include/linux/limits.h \
   include/uapi/linux/limits.h \
   include/vdso/limits.h \
   include/linux/linkage.h \
+  include/linux/stringify.h \
   include/linux/export.h \
     $(wildcard include/config/modversions.h) \
     $(wildcard include/config/module/rel/crcs.h) \
     $(wildcard include/config/trim/unused/ksyms.h) \
   arch/x86/include/asm/linkage.h \
+    $(wildcard include/config/x86/64.h) \
     $(wildcard include/config/x86/alignment/16.h) \
     $(wildcard include/config/rethunk.h) \
     $(wildcard include/config/retpoline.h) \
     $(wildcard include/config/sls.h) \
+  include/linux/compiler.h \
+    $(wildcard include/config/trace/branch/profiling.h) \
+    $(wildcard include/config/profile/all/branches.h) \
+    $(wildcard include/config/stack/validation.h) \
+    $(wildcard include/config/debug/entry.h) \
+    $(wildcard include/config/kasan.h) \
+    $(wildcard include/config/kcsan.h) \
+  include/linux/kcsan-checks.h \
+    $(wildcard include/config/kcsan/ignore/atomics.h) \
+  arch/x86/include/asm/barrier.h \
+  arch/x86/include/asm/alternative.h \
+  arch/x86/include/asm/asm.h \
+  arch/x86/include/asm/nops.h \
+    $(wildcard include/config/mk7.h) \
+    $(wildcard include/config/x86/p6/nop.h) \
+  include/asm-generic/barrier.h \
+  include/linux/kasan-checks.h \
+    $(wildcard include/config/kasan/generic.h) \
+    $(wildcard include/config/kasan/sw/tags.h) \
+  include/linux/kcsan.h \
   include/linux/container_of.h \
   include/linux/build_bug.h \
   include/linux/err.h \
@@ -219,6 +207,10 @@ deps_/home/trotmkeb/c/hiveFS/hi_command_kern_genetl.o := \
     $(wildcard include/config/lock/stat.h) \
   include/linux/rwlock_types.h \
   include/linux/dynamic_debug.h \
+    $(wildcard include/config/jump/label.h) \
+  include/linux/jump_label.h \
+    $(wildcard include/config/have/arch/jump/label/relative.h) \
+  arch/x86/include/asm/jump_label.h \
   arch/x86/include/asm/div64.h \
   include/asm-generic/div64.h \
   include/linux/stat.h \
@@ -403,6 +395,14 @@ deps_/home/trotmkeb/c/hiveFS/hi_command_kern_genetl.o := \
     $(wildcard include/config/hotplug/cpu.h) \
     $(wildcard include/config/debug/per/cpu/maps.h) \
   include/linux/bitmap.h \
+  include/linux/string.h \
+    $(wildcard include/config/binary/printf.h) \
+    $(wildcard include/config/fortify/source.h) \
+  include/uapi/linux/string.h \
+  arch/x86/include/asm/string.h \
+  arch/x86/include/asm/string_64.h \
+    $(wildcard include/config/x86/mce.h) \
+    $(wildcard include/config/arch/has/uaccess/flushcache.h) \
   include/linux/atomic.h \
     $(wildcard include/config/generic/atomic64.h) \
   arch/x86/include/asm/atomic.h \
@@ -1071,17 +1071,7 @@ deps_/home/trotmkeb/c/hiveFS/hi_command_kern_genetl.o := \
   include/linux/elevator.h \
   include/linux/hashtable.h \
   include/linux/buffer_head.h \
-  include/linux/random.h \
-    $(wildcard include/config/gcc/plugin/latent/entropy.h) \
-    $(wildcard include/config/arch/random.h) \
-  include/linux/once.h \
-  include/uapi/linux/random.h \
-  include/linux/irqnr.h \
-  include/uapi/linux/irqnr.h \
-  include/linux/prandom.h \
-  arch/x86/include/asm/archrandom.h \
   include/generated/uapi/linux/version.h \
-  include/linux/parser.h \
   include/uapi/linux/magic.h \
   include/net/netlink.h \
     $(wildcard include/config/have/efficient/unaligned/access.h) \
@@ -1120,6 +1110,15 @@ deps_/home/trotmkeb/c/hiveFS/hi_command_kern_genetl.o := \
   include/uapi/linux/uio.h \
   include/uapi/linux/socket.h \
   include/linux/net.h \
+  include/linux/random.h \
+    $(wildcard include/config/gcc/plugin/latent/entropy.h) \
+    $(wildcard include/config/arch/random.h) \
+  include/linux/once.h \
+  include/uapi/linux/random.h \
+  include/linux/irqnr.h \
+  include/uapi/linux/irqnr.h \
+  include/linux/prandom.h \
+  arch/x86/include/asm/archrandom.h \
   include/uapi/linux/net.h \
   include/linux/textsearch.h \
   include/net/checksum.h \
