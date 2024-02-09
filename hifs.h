@@ -6,8 +6,7 @@
  * License: GNU GPL as of 2023
  *
  */
-#ifndef _KERN_HIVEFS_H
-#define _KERN_HIVEFS_H
+#pragma once
 
 #include <linux/module.h>
 #include <linux/kernel.h>
@@ -136,5 +135,3 @@ struct hifs_olt
 };
 
 // END: Globals Here:
-
-#endif /* _KERN_HIVEFS_H */  

@@ -21,6 +21,7 @@
 
 #include "hi_command.h"
 
+struct genl_link hifs_genl_link = {HIFS_GENL_LINK_DOWN, 0, 0, 0};
 
 static int send_link_up_req(struct nl_sock *sk, int fam)
 {

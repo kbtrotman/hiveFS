@@ -6,8 +6,7 @@
  * License: GNU GPL as of 2023
  *
  */
-#ifndef _LINUX_HIVEFS_SHAREDDEFS_H
-#define _LINUX_HIVEFS_SHAREDDEFS_H
+#pragma once
 
 /***********************
  * Netlink Structures
@@ -71,14 +70,14 @@ extern enum
 
 #define HIFS_GENL_CDM_MAX (__HIFS_GENL_CDM_MAX - 1)
 
-enum hifs_link_state {HIFS_GENL_LINK_DOWN, HIFS_GENL_LINK_UP};
-struct genl_link
-{
-    enum hifs_link_state state;
-	int last_check;
-	int last_state;
-	long int clockstart;	
-} hifs_genl_link;
+enum hifs_genl_link_state{HIFS_GENL_LINK_DOWN, HIFS_GENL_LINK_UP};
+struct genl_link {
+    enum hifs_genl_link_state state;
+    int last_check;
+    int last_state;
+    long int clockstart;	
+};
+extern struct genl_link hifs_genl_link;
 
 /***********************
  * HiveFS Structures
@@ -165,8 +164,6 @@ struct hifs_dir_entry
 	uint32_t name_len;		/* Name length */
 	char name[256];			/* File name, up to HIFS_NAME_LEN */
 };
-
-#endif /* _LINUX_HIVEFS_SHAREDDEFS_H */
 
 #ifdef HIVEFS_DEBUG
 #define hifs_debug(f, a...)						\

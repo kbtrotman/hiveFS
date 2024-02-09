@@ -11,9 +11,9 @@
 #include <linux/uio.h>
 
 #include "hifs.h"
+u32 _ix = 0, b = 0, e = 0;
 
 #define FOREAChi_BLK_IN_EXT(dmi, blk)	\
-u32 _ix = 0, b = 0, e = 0;				\
 for (_ix = 0, b = dmi->i_addrb[0], e = dmi->i_addre[0], blk = b-1;	\
 _ix < HIFS_INODE_TSIZE;							\
 ++_ix, b = dmi->i_addrb[_ix], e = dmi->i_addre[_ix], blk = b-1)		\

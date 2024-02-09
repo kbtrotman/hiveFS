@@ -27,8 +27,10 @@ __attribute__((section("__versions"))) = {
 	{ 0x8c3e547c, "genl_register_family" },
 	{ 0x754d539c, "strlen" },
 	{ 0xf9388c43, "genl_unregister_family" },
+	{ 0x84823cf3, "nla_strscpy" },
 	{ 0x306f7f60, "mount_bdev" },
 	{ 0x66decfd5, "ns_to_timespec" },
+	{ 0x15ba50a6, "jiffies" },
 	{ 0xe2d5255a, "strcmp" },
 	{ 0xb44ad4b3, "_copy_to_user" },
 	{ 0x5b8239ca, "__x86_return_thunk" },
@@ -66,5 +68,5 @@ __attribute__((section(".modinfo"))) =
 "depends=";
 
 
-MODULE_INFO(srcversion, "B360723BD0260CA692440B2");
+MODULE_INFO(srcversion, "AFEA4613FFF1D50B58E2592");
 MODULE_INFO(rhelversion, "8.8");
