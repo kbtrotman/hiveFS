@@ -31,7 +31,7 @@ struct hifs_inode  test_inode =
 extern struct genl_link hifs_genl_link;
 
 // Define the policy
-static struct nla_policy hifs_genl_policy[__HIFS_GENL_ATB_MAX + 1] = 
+static struct nla_policy hifs_genl_inode_policy[__HIFS_GENL_ATB_MAX + 1] = 
 {
     [HIFS_GENL_ATB_IVERS] = { .type = NLA_U8 },
     [HIFS_GENL_ATB_IFLAGS] = { .type = NLA_U8 },
@@ -48,18 +48,23 @@ static struct nla_policy hifs_genl_policy[__HIFS_GENL_ATB_MAX + 1] =
     [HIFS_GENL_ATB_IADDRE] = { .type = NLA_U32 },
 };
 
+static struct nla_policy hifs_genl_msg_policy[__HIFS_GENL_ATB_MAX + 1] = 
+{
+    [HIFS_GENL_ATB_INAME] = { .type = NLA_STRING, .len = 50 },
+};
+
 // Define the operations
 struct genl_ops hifs_genl_ops[] = 
 {
     {
         .cmd = HIFS_GENL_CDM_SET_LINK_UP,
-        .policy = hifs_genl_policy,
+        .policy = hifs_genl_msg_policy,
         .flags = 0,
         .doit = hifs_genl_link_up,
     },
     {
         .cmd = HIFS_GENL_CDM_SEND_INODE_ONLY,
-        .policy = hifs_genl_policy,
+        .policy = hifs_genl_inode_policy,
         .flags = 0,
         .doit = hifs_genl_rcv_inode,   
     },
