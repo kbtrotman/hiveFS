@@ -1078,17 +1078,7 @@ deps_/home/trotmkeb/c/hiveFS/hi_file.o := \
   include/linux/elevator.h \
   include/linux/hashtable.h \
   include/linux/buffer_head.h \
-  include/linux/random.h \
-    $(wildcard include/config/gcc/plugin/latent/entropy.h) \
-    $(wildcard include/config/arch/random.h) \
-  include/linux/once.h \
-  include/uapi/linux/random.h \
-  include/linux/irqnr.h \
-  include/uapi/linux/irqnr.h \
-  include/linux/prandom.h \
-  arch/x86/include/asm/archrandom.h \
   include/generated/uapi/linux/version.h \
-  include/linux/parser.h \
   include/uapi/linux/magic.h \
   include/net/netlink.h \
     $(wildcard include/config/have/efficient/unaligned/access.h) \
@@ -1122,6 +1112,15 @@ deps_/home/trotmkeb/c/hiveFS/hi_file.o := \
   include/uapi/linux/sockios.h \
   include/uapi/linux/socket.h \
   include/linux/net.h \
+  include/linux/random.h \
+    $(wildcard include/config/gcc/plugin/latent/entropy.h) \
+    $(wildcard include/config/arch/random.h) \
+  include/linux/once.h \
+  include/uapi/linux/random.h \
+  include/linux/irqnr.h \
+  include/uapi/linux/irqnr.h \
+  include/linux/prandom.h \
+  arch/x86/include/asm/archrandom.h \
   include/uapi/linux/net.h \
   include/linux/textsearch.h \
   include/net/checksum.h \

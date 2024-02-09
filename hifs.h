@@ -15,11 +15,9 @@
 #include <linux/namei.h>
 #include <linux/blkdev.h>
 #include <linux/buffer_head.h>
-#include <linux/random.h>
 #include <linux/slab.h>
 #include <linux/ktime.h>
 #include <linux/version.h>
-#include <linux/parser.h>
 #include <linux/magic.h>
 #include <linux/types.h>
 #include <net/netlink.h>
@@ -41,8 +39,8 @@
 //static int hifs_mkfs(struct file_system_type *fs_type, int flags, const char *dev_name, void *data);
 
 /* hi_command_kern_netl.c */
-void hifs_genl_send_command_req(char *hive_payload);
-int hifs_genl_rcv_acknowledge_command(struct sk_buff *skb, struct genl_info *info);
+int hifs_genl_rcv_inode(struct sk_buff *skb, struct genl_info *info);
+int hifs_genl_link_up(struct sk_buff *skb, struct genl_info *info);
 
 /* hi_superblock.c */
 void hifs_save_sb(struct super_block *sb);
@@ -96,7 +94,6 @@ void cache_put_inode(struct hifs_inode **hii);
  *Netlink-Generic definitions 
  **/
 extern struct genl_family hifs_genl_family;
-extern struct genl_ops hifs_genl_ops;
 
 /** 
  *Filesystem definition 

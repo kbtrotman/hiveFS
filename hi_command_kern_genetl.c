@@ -6,8 +6,7 @@
  * License: GNU GPL as of 2023
  *
  */
-#pragma GCC diagnostic ignored "-Wunknown-pragmas"
-#include <linux/string.h>
+
 #include "hifs.h"
 
 // Test Data
@@ -74,7 +73,7 @@ struct genl_family hifs_genl_family =
 };
 
 // Function to send request
-void hifs_genl_send_command_req(char *hive_payload_attrs)
+int hifs_genl_send_command_req(char *hive_payload_attrs)
 {
     struct sk_buff *skb;    /*  The Socket Buffer  */
     struct genl_info *info; /*  The Generic Netlink Info  */
@@ -83,7 +82,7 @@ void hifs_genl_send_command_req(char *hive_payload_attrs)
 
     // Allocate a new message
     skb = genlmsg_new(NLMSG_GOODSIZE, GFP_KERNEL);
-    if (skb == NULL) return;
+    if (skb == NULL) goto failure;
 
     // Add the message headers
     msg_head = genlmsg_put(skb, 0, 0, &hifs_genl_family, 0, HIFS_GENL_CDM_SEND_INODE_ONLY);
@@ -150,11 +149,13 @@ failure:
 
 int hifs_genl_rcv_inode(struct sk_buff *skb, struct genl_info *info)
 {
+    char *iname;
+
     // Check if the acknowledgement attribute is present
     if (info->attrs[HIFS_GENL_ATB_INAME]) {
-        char *iname = nla_get_s32(info->attrs[HIFS_GENL_ATB_INAME]);
+        nla_strscpy(iname, info->attrs[HIFS_GENL_ATB_INAME], 50);
         pr_info(KERN_INFO "GENL: Recieved Genl INODE Command.\n");
-        pr_info(KERN_INFO "GENL: i_name: %s\n", nla_get_s32(info->attrs[HIFS_GENL_ATB_INAME]));
+        pr_info(KERN_INFO "GENL: i_name: %s\n", iname);
         return 0;
     } else {
         pr_info(KERN_ERR "GENL: Error processing Genl INODE Command packet.\n");
@@ -166,8 +167,9 @@ int hifs_genl_rcv_inode(struct sk_buff *skb, struct genl_info *info)
 int hifs_genl_link_up(struct sk_buff *skb, struct genl_info *info)
 {
     pr_info(KERN_INFO "GENL: Recieved Genl Link_Up Command.\n");
-    hifs_genl_link.state = HIFS_GENL_LNK_UP;
-    pr_info(KERN_INFO "GENL: Netlink_generic link up'd at %d seconds after hifs start.\n", (clock() - hifs_genl_link.clockstart));
+    hifs_genl_link.state = HIFS_GENL_LINK_UP;
+    pr_info(KERN_INFO "GENL: Netlink_generic link up'd at %ld seconds after hifs start.\n", (GET_TIME() - hifs_genl_link.clockstart));
     hifs_genl_link.last_check = 0;
-    hifs_genl_link.last_state = HIFS_GENL_LNK_UP;
+    hifs_genl_link.last_state = HIFS_GENL_LINK_UP;
+    return 0;
 }
