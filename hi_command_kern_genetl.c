@@ -9,6 +9,7 @@
 
 #include "hifs.h"
 
+
 // Test Data
 struct hifs_inode  test_inode = 
 {
@@ -27,6 +28,7 @@ struct hifs_inode  test_inode =
     .i_addre = {5},
 };
 
+extern struct genl_link hifs_genl_link;
 
 // Define the policy
 static struct nla_policy hifs_genl_policy[__HIFS_GENL_ATB_MAX + 1] = 
@@ -51,11 +53,13 @@ struct genl_ops hifs_genl_ops[] =
 {
     {
         .cmd = HIFS_GENL_CDM_SET_LINK_UP,
+        .policy = hifs_genl_policy,
         .flags = 0,
         .doit = hifs_genl_link_up,
     },
     {
         .cmd = HIFS_GENL_CDM_SEND_INODE_ONLY,
+        .policy = hifs_genl_policy,
         .flags = 0,
         .doit = hifs_genl_rcv_inode,   
     },

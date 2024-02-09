@@ -21,6 +21,8 @@
 // Entry and mount point are different, and they are both seperate functions.
 
 
+
+
 #include "hifs.h"
 
 MODULE_LICENSE("GPL");
@@ -28,7 +30,7 @@ MODULE_AUTHOR("Kevin Trotman");
 MODULE_DESCRIPTION("HiveFS - A Hive Mind Filesystem");
 MODULE_VERSION("0:0.01-001");
 
-extern struct genl_link hifs_genl_link;
+struct genl_link hifs_genl_link = {HIFS_GENL_LINK_DOWN, 0, 0, 0};
 extern struct genl_family hifs_genl_family;
 
 struct file_system_type hifs_type = 
