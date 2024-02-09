@@ -21,8 +21,6 @@
 // Entry and mount point are different, and they are both seperate functions.
 
 
-
-
 #include "hifs.h"
 
 MODULE_LICENSE("GPL");
