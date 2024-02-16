@@ -22,6 +22,9 @@
 #include <net/netlink.h>
 #include <net/genetlink.h>
 #include <linux/fs.h>
+#include <linux/mm.h>
+#include <linux/vfs.h>
+#include <asm/uaccess.h>
 
 // In the definitions file, those items are common to hi_command in both kernel-space and
 // in user-space.

@@ -11,10 +11,20 @@
 /***********************
  * Netlink Structures
  ***********************/
-#define HIFS_GENL_NAME "hifs_genl"
-#define HIFS_GENL_VERSION 1
-#define HIFS_MC_GRP_NAME "mcgrp"
-#define MAX_PAYLOAD 4296
+#define DEVICE_FILE_INODE "/dev/hivefs_comms_inode"
+#define DEVICE_FILE_BLOCK "/dev/hivefs_comms_byblock"
+#define DEVICE_FILE_CMDS "/dev/hivefs_comms_cmds"
+
+extern atomic_t new_command_flag = ATOMIC_INIT(0);
+DECLARE_WAIT_QUEUE_HEAD(queue_wq);
+
+extern int major;
+extern struct inode *shared_inode;
+extern struct buffer_head *shared_block;
+extern char *shared_cmd;
+extern struct vm_operations_struct block_mmap_vm_ops;
+extern struct vm_operations_struct inode_mmap_vm_ops;
+extern struct vm_operations_struct cmd_mmap_vm_ops;
 
 #ifdef __KERNEL__
 #include <linux/jiffies.h>
@@ -24,52 +34,6 @@
 #define GET_TIME() (clock() * 1000 / CLOCKS_PER_SEC)
 #endif // __KERNEL__
 
-// Define the payload
-extern enum 
-{
-	HIFS_GENL_ATB_IVERS,
-	HIFS_GENL_ATB_IFLAGS,
-	HIFS_GENL_ATB_IMODE,
-	HIFS_GENL_ATB_I_ID,
-	HIFS_GENL_ATB_IUID,
-	HIFS_GENL_ATB_IGID,
-	HIFS_GENL_ATB_IHRD_LNK,
-	HIFS_GENL_ATB_ICTIME,
-	HIFS_GENL_ATB_IMTIME,
-	HIFS_GENL_ATB_ISIZE,
-	HIFS_GENL_ATB_INAME,
-	HIFS_GENL_ATB_IADDRB,
-	HIFS_GENL_ATB_IADDRE,
-    __HIFS_GENL_ATB_MAX,
-} hive_payload_attrs;
-
-#define HIFS_GENL_ATB_MAX (__HIFS_GENL_ATB_MAX - 1)
-
-// Define the Netlink commands
-extern enum 
-{
-	HIFS_GENL_CDM_SEND_ACK,			    // Hive Send Ack to/from User Space
-	HIFS_GENL_CMD_SEND_LINK_ACK,		// Acknowledge a link change request
-    HIFS_GENL_CDM_SET_LINK_UP,          // Hive Operational to/from User Space
-    HIFS_GENL_CDM_SET_LINK_DOWN,        // Hive Shutdown to/from User Space
-    HIFS_GENL_CDM_SET_LINK_PULSE,       // Periodic I'm Alive Pulse, when needed
-    HIFS_GENL_CDM_SET_LINK_RESET,       // Hive Reset to/from User Space
-    HIFS_GENL_CDM_SYNC_SUPERBLOCK,      // Hive Sync Superblock to/from User Space
-    HIFS_GENL_CDM_SEND_INODE_ONLY,      // Hive Send Inode Only to/from User Space
-    HIFS_GENL_CDM_SEND_INODE_AND_BLOCK, // Hive Send Inode and Block to/from User Space
-    HIFS_GENL_CDM_SEND_INODE_AND_FILE,  // Hive Send Inode and File to/from User Space
-    HIFS_GENL_CDM_SEND_BLOCK_ONLY,      // Hive Send Block Only to/from User Space
-    HIFS_GENL_CDM_SEND_FILE_ONLY,       // Hive Send File Only to/from User Space
-    HIFS_GENL_CDM_REQ_INODE_ONLY,       // User Space Request Inode Only to Hive
-    HIFS_GENL_CDM_REQ_INODE_AND_BLOCK,  // User Space Request Inode and Block to Hive
-    HIFS_GENL_CDM_REQ_INODE_AND_FILE,   // User Space Req Inode and File to/from Hive
-    HIFS_GENL_CDM_REQ_BLOCK_ONLY,       // User Space Request Block Only to/from Hive
-    HIFS_GENL_CDM_REQ_FILE_ONLY,        // User Space Request File Only to/from Hive
-	__HIFS_GENL_CDM_MAX,
-} hive_commands;
-
-#define HIFS_GENL_CDM_MAX (__HIFS_GENL_CDM_MAX - 1)
-
 enum hifs_genl_link_state{HIFS_GENL_LINK_DOWN, HIFS_GENL_LINK_UP};
 struct genl_link {
     enum hifs_genl_link_state state;
@@ -77,7 +41,7 @@ struct genl_link {
     int last_state;
     long int clockstart;	
 };
-extern struct genl_link hifs_genl_link;
+extern struct genl_link hifs_kern_link;
 
 /***********************
  * HiveFS Structures
