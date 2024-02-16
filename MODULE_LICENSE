@@ -10,32 +10,36 @@ intention of using the software in binary form:
 
 An [Enterprise] is considered to be any corporation or LLC or other
 similarly formed commercial company with more than 50 employees who use
-this . Those with less than 50 employees do not apply as commercial use 
+this. Those with less than 50 employees do not apply as commercial use 
 when using this software in it's binary form (or compiled onsite and installed
-as a running binary). Alteration of the software before compiling 
+as a running binary). Alterations of the software before compiling should be
+posted back to the original archive as a seperate branch in the code tree.
 
 Commericial use of this software in source code form:
 
 An [Enterprise] is considered to be any entity, regardless of the number of
 employees, whose intention is to use this project's source code in it's 
-original form or any modified form (including additions) to create any 
+original form or any modified form (including additions) to create 
 commercially-sold or licensed software. It is against the license of 
 this software for any part of the source code to be used with the 
 intention of profitting on the end product without written approval
 from the original creator.
 
-Any not-for-profit use of the code falls within this license, and the
-only restriction on use is intended to be that this license file must 
-be included in any use of this source code (whether the source code 
-is used in part or in whole). The end code may be distributed under any
-open source license. The terms of this original license may be made
-more permissive by changing the actively distributed license with your
-source code to any other open source license, so long as this file is 
-included in the distribution and this file has the word "license" in 
-the name of the file. No distribution may make the terms of this licensing
-more restrictive with the intention of profiting from the terms. Said
-profiteering would be defined as Enterprise use above.
+Any not-for-profit use of the code falls within the free-use clauses of
+this  license, and the only restriction on use is intended to be that 
+this license file must be included in any use of this source code (whether 
+the source code is used in part or in whole). The end code may be 
+distributed under any open source license. The terms of this original 
+license may be made more permissive by changing the actively distributed 
+license with your source code to any other open source license, so long 
+as this file is included in the distribution and this file has the word 
+"license" in the name of the file. No distribution may make the terms 
+of this licensing more restrictive with the intention of profiting from 
+the more restrictive use terms. Said profiteering would be defined as 
+Enterprise use above.
 =======================================================================
+Additional restrictions:
+
 In binary form, free Enterprise use of this software is limited to a 
 single server install with two clients. Use of this software in it's 
 compiled form on more than one enterprise server or more than two 

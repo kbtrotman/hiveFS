@@ -23,13 +23,20 @@
 
 #include "hifs.h"
 
-MODULE_LICENSE("GPL");
+MODULE_LICENSE("CREATIVE COMMONS");
 MODULE_AUTHOR("Kevin Trotman");
 MODULE_DESCRIPTION("HiveFS - A Hive Mind Filesystem");
 MODULE_VERSION("0:0.01-001");
 
-struct genl_link hifs_genl_link = {HIFS_GENL_LINK_DOWN, 0, 0, 0};
-extern struct genl_family hifs_genl_family;
+atomic_t new_command_flag;
+extern int major;
+extern struct inode *shared_inode;
+extern struct buffer_head *shared_block;
+extern char *shared_cmd;
+extern struct vm_operations_struct block_mmap_vm_ops;
+extern struct vm_operations_struct inode_mmap_vm_ops;
+extern struct vm_operations_struct cmd_mmap_vm_ops;
+
 
 struct file_system_type hifs_type = 
 {
@@ -116,39 +123,43 @@ static int __init hifs_init(void)
 {
     int ret;
 
-    hifs_genl_link.clockstart = GET_TIME();
-
     ret = register_filesystem(&hifs_type);
     if (ret != 0) {
         printk(KERN_ERR "hifs: Failed to register filesystem\n");
-        return ret;
+        goto failure;
     } else {
         printk(KERN_INFO "hifs: Filesystem registered to kernel\n");
     }
 
-    ret = genl_register_family(&hifs_genl_family);
-    if (unlikely(ret)) { 
-        pr_crit("Failed to register with generic netlink.\n"); goto failure;
+    ret = register_all_comm_queues();
+    if (ret != 0) {
+        printk(KERN_ERR "hifs: Failed to register command queues\n");
+        goto failure;
     } else {
-        pr_info("Registered hifs module with generic netlink.\n");
+        printk(KERN_INFO "hifs: HiFS Command queues registered\n");
     }
+
+    return 0;
 
 failure:
     return -1;
 }
 
-
 static void __exit hifs_exit(void)
 {
-    int ret = genl_unregister_family(&hifs_genl_family);
-    if (unlikely(ret)) { pr_crit("Failed to unregister generic netlink.\n"); }
+    int ret;
 
+    unregister_all_comm_queues();
     ret = unregister_filesystem(&hifs_type);
     if (ret != 0) {
         printk(KERN_ERR "hifs: Failed to unregister filesystem\n");
+        goto failure;
     }
 
     printk(KERN_INFO "hifs: hiveFS unregistered\n");
+
+failure:
+    printk(KERN_ERR "hifs: There were errors when attempting to unregister the filesystem\n");
 }
 
 module_init(hifs_init);

@@ -9,12 +9,6 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
-#include <stdlib.h>
-#include <stdio.h>
-#include <linux/netlink.h>
-#include <linux/genetlink.h>
-#include <netlink/genl/genl.h>
-#include <netlink/genl/ctrl.h>
 
 // In the definitions file, those items are common to hi_command in both kernel-space and
 // in user-space.  The definitions file is included in both the kernel-space and user-space
