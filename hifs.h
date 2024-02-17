@@ -25,6 +25,7 @@
 #include <linux/mm.h>
 #include <linux/vfs.h>
 #include <asm/uaccess.h>
+#include <atomic.h>
 
 // In the definitions file, those items are common to hi_command in both kernel-space and
 // in user-space.
