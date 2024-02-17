@@ -17,12 +17,14 @@
 
 
 // Test Data
-
-atomic_t new_command_flag;
+static atomic_t my_atomic_variable = ATOMIC_INIT(0);
+static struct class* atomic_class = NULL;
+static struct device* atomic_device = NULL;
 int major;
 struct inode *shared_inode;
 struct buffer_head *shared_block;
 char *shared_cmd;
+
 
 static struct file_operations inode_mmap_fops = {
     .owner = THIS_MODULE,
@@ -69,6 +71,89 @@ struct inode *create_test_inode(void) {
 
 void destroy_test_inode(struct inode *inode) {
     iput(inode);
+}
+
+
+static int atomic_open(struct inode *, struct file *);
+static ssize_t atomic_read(struct file *, char *, size_t, loff_t *);
+static ssize_t atomic_write(struct file *, const char *, size_t, loff_t *);
+static int atomic_release(struct inode *, struct file *);
+
+static struct file_operations fops = {
+    .open = atomic_open,
+    .read = atomic_read,
+    .write = atomic_write,
+    .release = atomic_release,
+};
+
+static int atomic_init(void) {
+    major = register_chrdev(0, DEVICE_NAME, &fops);
+    if (major < 0) {
+        pr_err("Failed to register character device\n");
+        return major;
+    }
+
+    atomic_class = class_create(THIS_MODULE, CLASS_NAME);
+    if (IS_ERR(atomic_class)) {
+        unregister_chrdev(major, DEVICE_NAME);
+        pr_err("Failed to create class\n");
+        return PTR_ERR(atomic_class);
+    }
+
+    atomic_device = device_create(atomic_class, NULL, MKDEV(major, 0), NULL, DEVICE_NAME);
+    if (IS_ERR(atomic_device)) {
+        class_destroy(atomic_class);
+        unregister_chrdev(major, DEVICE_NAME);
+        pr_err("Failed to create atomic device\n");
+        return PTR_ERR(atomic_device);
+    }
+
+    pr_info("Atomic variable module loaded\n");
+    return 0;
+}
+
+static void atomic_exit(void) {
+    device_destroy(atomic_class, MKDEV(major, 0));
+    class_unregister(atomic_class);
+    class_destroy(atomic_class);
+    unregister_chrdev(major, DEVICE_NAME);
+
+    pr_info("Atomic variable(s) unloaded\n");
+}
+
+static int atomic_open(struct inode *inodep, struct file *filep) {
+    pr_info("Device opened\n");
+    return 0;
+}
+
+static ssize_t atomic_read(struct file *filep, char *buffer, size_t len, loff_t *offset) {
+    int value = atomic_read(&my_atomic_variable);
+    if (put_user(value, (int *)buffer) != 0) {
+        pr_err("Failed to copy data to user space\n");
+        return -EFAULT;
+    }
+
+    pr_info("Read %d from the atomic variable\n", value);
+    return sizeof(int);
+}
+
+static ssize_t atomic_write(struct file *filep, const char *buffer, size_t len, loff_t *offset) {
+    int value;
+
+    if (get_user(value, (int *)buffer) != 0) {
+        pr_err("Failed to copy data from user space\n");
+        return -EFAULT;
+    }
+
+    atomic_set(&my_atomic_variable, value);
+    pr_info("Wrote %d to the atomic variable\n", value);
+
+    return sizeof(int);
+}
+
+static int atomic_release(struct inode *inodep, struct file *filep) {
+    pr_info("Device closed\n");
+    return 0;
 }
 
 
