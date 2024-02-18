@@ -28,7 +28,7 @@ MODULE_AUTHOR("Kevin Trotman");
 MODULE_DESCRIPTION("HiveFS - A Hive Mind Filesystem");
 MODULE_VERSION("0:0.01-001");
 
-atomic_t new_command_flag;
+extern atomic_t my_atomic_variable;
 extern int major;
 extern struct inode *shared_inode;
 extern struct buffer_head *shared_block;

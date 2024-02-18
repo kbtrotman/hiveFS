@@ -17,9 +17,9 @@
 
 
 // Test Data
-static atomic_t my_atomic_variable = ATOMIC_INIT(0);
-static struct class* atomic_class = NULL;
-static struct device* atomic_device = NULL;
+atomic_t my_atomic_variable = ATOMIC_INIT(0);
+struct class* atomic_class = NULL;
+struct device* atomic_device = NULL;
 int major;
 struct inode *shared_inode;
 struct buffer_head *shared_block;
@@ -74,12 +74,7 @@ void destroy_test_inode(struct inode *inode) {
 }
 
 
-static int atomic_open(struct inode *, struct file *);
-static ssize_t atomic_read(struct file *, char *, size_t, loff_t *);
-static ssize_t atomic_write(struct file *, const char *, size_t, loff_t *);
-static int atomic_release(struct inode *, struct file *);
-
-static struct file_operations fops = {
+static struct file_operations faops = {
     .open = atomic_open,
     .read = atomic_read,
     .write = atomic_write,
@@ -87,23 +82,23 @@ static struct file_operations fops = {
 };
 
 static int atomic_init(void) {
-    major = register_chrdev(0, DEVICE_NAME, &fops);
+    major = register_chrdev(0, ATOMIC_DEVICE_NAME, &faops);
     if (major < 0) {
         pr_err("Failed to register character device\n");
         return major;
     }
 
-    atomic_class = class_create(THIS_MODULE, CLASS_NAME);
+    atomic_class = class_create(THIS_MODULE, ATOMIC_CLASS_NAME);
     if (IS_ERR(atomic_class)) {
-        unregister_chrdev(major, DEVICE_NAME);
+        unregister_chrdev(major, ATOMIC_DEVICE_NAME);
         pr_err("Failed to create class\n");
         return PTR_ERR(atomic_class);
     }
 
-    atomic_device = device_create(atomic_class, NULL, MKDEV(major, 0), NULL, DEVICE_NAME);
+    atomic_device = device_create(atomic_class, NULL, MKDEV(major, 0), NULL, ATOMIC_DEVICE_NAME);
     if (IS_ERR(atomic_device)) {
         class_destroy(atomic_class);
-        unregister_chrdev(major, DEVICE_NAME);
+        unregister_chrdev(major, ATOMIC_DEVICE_NAME);
         pr_err("Failed to create atomic device\n");
         return PTR_ERR(atomic_device);
     }
@@ -116,7 +111,7 @@ static void atomic_exit(void) {
     device_destroy(atomic_class, MKDEV(major, 0));
     class_unregister(atomic_class);
     class_destroy(atomic_class);
-    unregister_chrdev(major, DEVICE_NAME);
+    unregister_chrdev(major, ATOMIC_DEVICE_NAME);
 
     pr_info("Atomic variable(s) unloaded\n");
 }
