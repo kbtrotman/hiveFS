@@ -42,6 +42,10 @@
 //static int hifs_mkfs(struct file_system_type *fs_type, int flags, const char *dev_name, void *data);
 
 /* hi_command_kern_netl.c */
+static int atomic_open(struct inode *, struct file *);
+static ssize_t atomic_read(struct file *, char *, size_t, loff_t *);
+static ssize_t atomic_write(struct file *, const char *, size_t, loff_t *);
+static int atomic_release(struct inode *, struct file *);
 int hifs_genl_rcv_inode(struct sk_buff *skb, struct genl_info *info);
 int hifs_genl_link_up(struct sk_buff *skb, struct genl_info *info);
 

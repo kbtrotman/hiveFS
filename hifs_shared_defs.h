@@ -14,12 +14,10 @@
 #define DEVICE_FILE_INODE "/dev/hivefs_comms_inode"
 #define DEVICE_FILE_BLOCK "/dev/hivefs_comms_byblock"
 #define DEVICE_FILE_CMDS "/dev/hivefs_comms_cmds"
-#define DEVICE_NAME "atomic_device"
-#define CLASS_NAME "atomic_class"
+#define ATOMIC_DEVICE_NAME "hifs_atomic_sync_device"
+#define ATOMIC_CLASS_NAME "atomic_class"
 
-extern atomic_t new_command_flag = ATOMIC_INIT(0);
-DECLARE_WAIT_QUEUE_HEAD(queue_wq);
-
+extern atomic_t my_atomic_variable;
 extern int major;
 extern struct inode *shared_inode;
 extern struct buffer_head *shared_block;
