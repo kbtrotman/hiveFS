@@ -11,9 +11,9 @@
 /***********************
  * Netlink Structures
  ***********************/
-#define DEVICE_FILE_INODE "/dev/hivefs_comms_inode"
-#define DEVICE_FILE_BLOCK "/dev/hivefs_comms_byblock"
-#define DEVICE_FILE_CMDS "/dev/hivefs_comms_cmds"
+#define DEVICE_FILE_INODE "hivefs_comms_inode"
+#define DEVICE_FILE_BLOCK "hivefs_comms_byblock"
+#define DEVICE_FILE_CMDS "hivefs_comms_cmds"
 #define ATOMIC_DEVICE_NAME "hifs_atomic_sync_device"
 #define ATOMIC_CLASS_NAME "atomic_class"
 

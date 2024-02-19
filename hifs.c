@@ -125,28 +125,27 @@ static int __init hifs_init(void)
 
     ret = register_filesystem(&hifs_type);
     if (ret != 0) {
-        printk(KERN_ERR "hifs: Failed to register filesystem\n");
+        printk(KERN_ERR "hivefs: Failed to register filesystem\n");
         goto failure;
     } else {
-        printk(KERN_INFO "hifs: Filesystem registered to kernel\n");
+        printk(KERN_INFO "hivefs: Filesystem registered to kernel\n");
     }
 
     ret = hifs_atomic_init();
     if (ret != 0) {
-        printk(KERN_ERR "hifs: Failed to register atomic sync variable(s)\n");
+        printk(KERN_ERR "hivefs: Failed to register atomic sync variable(s)\n");
         goto failure;
     } else {
-        printk(KERN_INFO "hifs: HiFS atomic sync variable(s) registered\n");
+        printk(KERN_INFO "hivefs: HiFS atomic sync variable(s) registered in kernel\n");
     }
 
     ret = register_all_comm_queues();
     if (ret != 0) {
-        printk(KERN_ERR "hifs: Failed to register communication queues\n");
+        printk(KERN_ERR "hivefs: Failed to register communication queues\n");
         goto failure;
     } else {
-        printk(KERN_INFO "hifs: HiFS Communication queues registered\n");
+        printk(KERN_INFO "hivefs: Memory Mapped Communication queues registered to kernel\n");
     }
-
     return 0;
 
 failure:
@@ -161,14 +160,14 @@ static void __exit hifs_exit(void)
     unregister_all_comm_queues();
     ret = unregister_filesystem(&hifs_type);
     if (ret != 0) {
-        printk(KERN_ERR "hifs: Failed to unregister filesystem\n");
+        printk(KERN_ERR "hivefs: Failed to unregister filesystem\n");
         goto failure;
     }
 
-    printk(KERN_INFO "hifs: hiveFS unregistered\n");
+    printk(KERN_INFO "hivefs: hiveFS unregistered\n");
 
 failure:
-    printk(KERN_ERR "hifs: There were errors when attempting to unregister the filesystem\n");
+    printk(KERN_ERR "hivefs: There were errors when attempting to unregister the filesystem\n");
 }
 
 module_init(hifs_init);
