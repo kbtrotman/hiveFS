@@ -7,7 +7,6 @@
  *
  */
 
-#include <libpq-fe.h>
 #include "hi_command.h"
 #include "sql/hi_command_sql.h"
 

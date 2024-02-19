@@ -33,7 +33,8 @@
 // COMMON Definitions Here ONLY!
 #include "hifs_shared_defs.h"
 // COMMON Definitions Here ONLY!
-
+extern atomic_t my_atomic_variable;
+extern struct class* atomic_class;
 
 /* Definitions past this point should be specific only to the kernel-space module! */
 

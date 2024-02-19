@@ -17,7 +17,7 @@
 #define ATOMIC_DEVICE_NAME "hifs_atomic_sync_device"
 #define ATOMIC_CLASS_NAME "atomic_class"
 
-extern atomic_t my_atomic_variable;
+
 extern int major;
 extern struct inode *shared_inode;
 extern struct buffer_head *shared_block;

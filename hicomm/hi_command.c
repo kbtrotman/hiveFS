@@ -12,23 +12,22 @@
 #include <string.h>
 #include <errno.h>
 #include <sys/socket.h>
-#include <libpq-fe.h>
-#include <netlink/socket.h>
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <unistd.h>
-#include <linux/atomic.h>
-#include <linux/wait.h>
 
 
 #include "hi_command.h"
+
+char *block_buffer[4096];
+
 
 int read_from_atomic()
 {
     int fd;
     int value;
 
-    fd = open(DEVICE_FILE, O_RDWR);
+    fd = open(ATOMIC_DEVICE_NAME, O_RDWR);
     if (fd == -1) {
         perror("Error opening device file");
         return -1;
@@ -37,6 +36,7 @@ int read_from_atomic()
     // Reading from the atomic variable in the kernel space
     read(fd, &value, sizeof(int));
     printf("Read value from kernel: %d\n", value);
+    return 0;
 }
 
 int write_to_atomic(void)
@@ -44,7 +44,7 @@ int write_to_atomic(void)
     int fd;
     int value;
 
-    fd = open(DEVICE_FILE, O_RDWR);
+    fd = open(ATOMIC_DEVICE_NAME, O_RDWR);
     if (fd == -1) {
         perror("Error opening device file");
         return -1;
@@ -67,7 +67,7 @@ int main(int argc, char *argv[])
         return EXIT_FAILURE;
     }
 
-    struct inode *shared_inode = mmap(NULL, sizeof(struct inode), PROT_READ | PROT_WRITE, MAP_SHARED, fd_inode, 0);
+    struct inode *shared_inode = mmap(NULL, sizeof(struct hifs_inode), PROT_READ | PROT_WRITE, MAP_SHARED, fd_inode, 0);
     if (shared_inode == MAP_FAILED) {
         perror("Error mapping inode memory");
         close(fd_inode);
@@ -77,16 +77,17 @@ int main(int argc, char *argv[])
     int fd_block = open(DEVICE_FILE_BLOCK, O_RDWR);
     if (fd_block == -1) {
         perror("Error opening block device file");
-        munmap(shared_inode, sizeof(struct inode));
+        munmap(shared_inode, sizeof(struct hifs_inode));
         close(fd_inode);
         return EXIT_FAILURE;
     }
 
-    struct buffer_head *shared_block = mmap(NULL, sizeof(struct buffer_head), PROT_READ | PROT_WRITE, MAP_SHARED, fd_block, 0);
+    struct block_buffer *shared_block = mmap(NULL, sizeof(block_buffer), PROT_READ | PROT_WRITE, MAP_SHARED, fd_block, 0);
+
     if (shared_block == MAP_FAILED) {
         perror("Error mapping block memory");
         close(fd_block);
-        munmap(shared_inode, sizeof(struct inode));
+        munmap(shared_inode, sizeof(struct hifs_inode));
         close(fd_inode);
         return EXIT_FAILURE;
     }
@@ -95,13 +96,13 @@ int main(int argc, char *argv[])
     // Remember to use proper synchronization mechanisms for concurrent access
 
     // Unmap the memory
-    if (munmap(shared_block, sizeof(struct buffer_head)) == -1) {
+    if (munmap(shared_block, sizeof(block_buffer)) == -1) {
         perror("Error unmapping block memory");
     }
 
     close(fd_block);
 
-    if (munmap(shared_inode, sizeof(struct inode)) == -1) {
+    if (munmap(shared_inode, sizeof(struct hifs_inode)) == -1) {
         perror("Error unmapping inode memory");
     }
 
