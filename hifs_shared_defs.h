@@ -34,14 +34,14 @@ extern struct vm_operations_struct cmd_mmap_vm_ops;
 #define GET_TIME() (clock() * 1000 / CLOCKS_PER_SEC)
 #endif // __KERNEL__
 
-enum hifs_genl_link_state{HIFS_GENL_LINK_DOWN, HIFS_GENL_LINK_UP};
-struct genl_link {
-    enum hifs_genl_link_state state;
+enum hifs_link_state{HIFS_COMM_LINK_DOWN, HIFS_COMM_LINK_UP};
+struct hifs_link {
+    enum hifs_link_state state;
     int last_check;
     int last_state;
     long int clockstart;	
 };
-extern struct genl_link hifs_kern_link;
+extern struct hifs_link hifs_kern_link;
 
 /***********************
  * HiveFS Structures

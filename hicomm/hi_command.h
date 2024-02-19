@@ -6,6 +6,8 @@
  * License: GNU GPL as of 2023
  *
  */
+#pragma once
+
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
@@ -34,5 +36,4 @@ int get_hive_vers(void);
 int save_binary_data(char *data_block, char *hash);
 int register_hive_host(void);
 
-// Prototypes Here:
-
+// Prototypes Here/

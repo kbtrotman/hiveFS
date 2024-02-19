@@ -11,21 +11,22 @@
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
+#include <linux/mm.h>
+#include <linux/atomic.h>
+#include <linux/types.h>
 #include <linux/namei.h>
-#include <linux/blkdev.h>
-#include <linux/buffer_head.h>
 #include <linux/slab.h>
 #include <linux/ktime.h>
 #include <linux/version.h>
-#include <linux/magic.h>
-#include <linux/types.h>
-#include <net/netlink.h>
-#include <net/genetlink.h>
 #include <linux/fs.h>
-#include <linux/mm.h>
 #include <linux/vfs.h>
+#include <linux/blkdev.h>
+#include <linux/buffer_head.h>
+#include <linux/magic.h>
+#include <linux/debugfs.h>
 #include <asm/uaccess.h>
-#include <linux/atomic.h>
+#include <linux/fs_struct.h>
+
 
 // In the definitions file, those items are common to hi_command in both kernel-space and
 // in user-space.
@@ -47,11 +48,19 @@ void unregister_all_comm_queues(void);
 int hifs_atomic_init(void);
 void hifs_atomic_exit(void);
 int hifs_atomic_open(struct inode *, struct file *);
-ssize_t hifs_atomic_read(struct file *, char *, size_t, loff_t *);
-ssize_t hifs_atomic_write(struct file *, const char *, size_t, loff_t *);
-int atomic_release(struct inode *inodep, struct file *filep);
-int hifs_genl_rcv_inode(struct sk_buff *skb, struct genl_info *info);
-int hifs_genl_link_up(struct sk_buff *skb, struct genl_info *info);
+ssize_t hifs_atomic_read(struct file *filep, char __user *buffer, size_t len, loff_t *offset);
+ssize_t hifs_atomic_write(struct file *filep, const char __user *buffer, size_t len, loff_t *offset);
+int hifs_atomic_release(struct inode *inodep, struct file *filep);
+int hifs_comm_rcv_inode( void );
+int hifs_comm_link_up( void );
+int mmap_open(struct inode *inode, struct file *filp);
+int mmap_close(struct inode *inode, struct file *filp);
+int inode_mmap(struct file *filp, struct vm_area_struct *vma);
+int block_mmap(struct file *filp, struct vm_area_struct *vma);
+int cmd_mmap(struct file *filp, struct vm_area_struct *vma);
+vm_fault_t inode_mmap_fault(struct vm_fault *vmf);
+vm_fault_t block_mmap_fault(struct vm_fault *vmf);
+vm_fault_t cmd_mmap_fault(struct vm_fault *vmf);
 
 /* hi_superblock.c */
 void hifs_save_sb(struct super_block *sb);

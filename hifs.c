@@ -23,7 +23,7 @@
 
 #include "hifs.h"
 
-MODULE_LICENSE("CREATIVE COMMONS");
+MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Kevin Trotman");
 MODULE_DESCRIPTION("HiveFS - A Hive Mind Filesystem");
 MODULE_VERSION("0:0.01-001");
