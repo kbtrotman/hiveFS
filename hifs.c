@@ -131,12 +131,20 @@ static int __init hifs_init(void)
         printk(KERN_INFO "hifs: Filesystem registered to kernel\n");
     }
 
-    ret = register_all_comm_queues();
+    ret = hifs_atomic_init();
     if (ret != 0) {
-        printk(KERN_ERR "hifs: Failed to register command queues\n");
+        printk(KERN_ERR "hifs: Failed to register atomic sync variable(s)\n");
         goto failure;
     } else {
-        printk(KERN_INFO "hifs: HiFS Command queues registered\n");
+        printk(KERN_INFO "hifs: HiFS atomic sync variable(s) registered\n");
+    }
+
+    ret = register_all_comm_queues();
+    if (ret != 0) {
+        printk(KERN_ERR "hifs: Failed to register communication queues\n");
+        goto failure;
+    } else {
+        printk(KERN_INFO "hifs: HiFS Communication queues registered\n");
     }
 
     return 0;
@@ -149,6 +157,7 @@ static void __exit hifs_exit(void)
 {
     int ret;
 
+    hifs_atomic_exit();
     unregister_all_comm_queues();
     ret = unregister_filesystem(&hifs_type);
     if (ret != 0) {

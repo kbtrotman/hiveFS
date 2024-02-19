@@ -25,7 +25,7 @@
 #include <linux/mm.h>
 #include <linux/vfs.h>
 #include <asm/uaccess.h>
-#include <atomic.h>
+#include <linux/atomic.h>
 
 // In the definitions file, those items are common to hi_command in both kernel-space and
 // in user-space.
@@ -42,10 +42,14 @@
 //static int hifs_mkfs(struct file_system_type *fs_type, int flags, const char *dev_name, void *data);
 
 /* hi_command_kern_netl.c */
-static int atomic_open(struct inode *, struct file *);
-static ssize_t atomic_read(struct file *, char *, size_t, loff_t *);
-static ssize_t atomic_write(struct file *, const char *, size_t, loff_t *);
-static int atomic_release(struct inode *, struct file *);
+int register_all_comm_queues(void);
+void unregister_all_comm_queues(void);
+int hifs_atomic_init(void);
+void hifs_atomic_exit(void);
+int hifs_atomic_open(struct inode *, struct file *);
+ssize_t hifs_atomic_read(struct file *, char *, size_t, loff_t *);
+ssize_t hifs_atomic_write(struct file *, const char *, size_t, loff_t *);
+int atomic_release(struct inode *inodep, struct file *filep);
 int hifs_genl_rcv_inode(struct sk_buff *skb, struct genl_info *info);
 int hifs_genl_link_up(struct sk_buff *skb, struct genl_info *info);
 

@@ -81,7 +81,7 @@ static struct file_operations faops = {
     .release = atomic_release,
 };
 
-static int atomic_init(void) {
+int hifs_atomic_init(void) {
     major = register_chrdev(0, ATOMIC_DEVICE_NAME, &faops);
     if (major < 0) {
         pr_err("Failed to register character device\n");
@@ -107,7 +107,7 @@ static int atomic_init(void) {
     return 0;
 }
 
-static void atomic_exit(void) {
+void hifs_atomic_exit(void) {
     device_destroy(atomic_class, MKDEV(major, 0));
     class_unregister(atomic_class);
     class_destroy(atomic_class);
@@ -116,12 +116,12 @@ static void atomic_exit(void) {
     pr_info("Atomic variable(s) unloaded\n");
 }
 
-static int atomic_open(struct inode *inodep, struct file *filep) {
+int atomic_open(struct inode *inodep, struct file *filep) {
     pr_info("Device opened\n");
     return 0;
 }
 
-static ssize_t atomic_read(struct file *filep, char *buffer, size_t len, loff_t *offset) {
+ssize_t hifs_atomic_read(struct file *filep, char *buffer, size_t len, loff_t *offset) {
     int value = atomic_read(&my_atomic_variable);
     if (put_user(value, (int *)buffer) != 0) {
         pr_err("Failed to copy data to user space\n");
@@ -132,7 +132,7 @@ static ssize_t atomic_read(struct file *filep, char *buffer, size_t len, loff_t 
     return sizeof(int);
 }
 
-static ssize_t atomic_write(struct file *filep, const char *buffer, size_t len, loff_t *offset) {
+ssize_t hifs_atomic_write(struct file *filep, const char *buffer, size_t len, loff_t *offset) {
     int value;
 
     if (get_user(value, (int *)buffer) != 0) {
@@ -146,7 +146,7 @@ static ssize_t atomic_write(struct file *filep, const char *buffer, size_t len, 
     return sizeof(int);
 }
 
-static int atomic_release(struct inode *inodep, struct file *filep) {
+int atomic_release(struct inode *inodep, struct file *filep) {
     pr_info("Device closed\n");
     return 0;
 }

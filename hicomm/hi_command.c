@@ -23,6 +23,42 @@
 
 #include "hi_command.h"
 
+int read_from_atomic()
+{
+    int fd;
+    int value;
+
+    fd = open(DEVICE_FILE, O_RDWR);
+    if (fd == -1) {
+        perror("Error opening device file");
+        return -1;
+    }
+
+    // Reading from the atomic variable in the kernel space
+    read(fd, &value, sizeof(int));
+    printf("Read value from kernel: %d\n", value);
+}
+
+int write_to_atomic(void)
+{
+    int fd;
+    int value;
+
+    fd = open(DEVICE_FILE, O_RDWR);
+    if (fd == -1) {
+        perror("Error opening device file");
+        return -1;
+    }
+
+    // Writing to the atomic variable in the kernel space
+    value = 42;
+    write(fd, &value, sizeof(int));
+    printf("Wrote value to kernel: %d\n", value);
+
+    close(fd);
+    return value;
+}
+
 int main(int argc, char *argv[])
 {
     int fd_inode = open(DEVICE_FILE_INODE, O_RDWR);
