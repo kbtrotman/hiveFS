@@ -9,14 +9,9 @@
 
 #include "hifs.h"
 
-// Netlink didn't fit what we're trying to do here. We're going to use a memory-mapped file 
-// instead to communicate between the kernel and the user-space. Netlink_Generic is too tied 
-// to its policy and message format. Even if that weren't a major show-stopper, eventually 
-// the comms would overwhelm the kernel with negenl messages. This requires a more direct & 
-// flexible communication method.
 
 
-// Test Data
+// Globals
 atomic_t my_atomic_variable = ATOMIC_INIT(0);
 struct class* atomic_class = NULL;
 struct device* atomic_device = NULL;
@@ -24,6 +19,9 @@ int major;
 struct inode *shared_inode;
 struct buffer_head *shared_block;
 char *shared_cmd;
+struct hifs_link hifs_kern_link = {HIFS_COMM_LINK_DOWN, 0, 0, 0};
+struct task_struct *task;
+
 
 
 struct file_operations inode_mmap_fops = {
@@ -67,18 +65,34 @@ struct vm_operations_struct cmd_mmap_vm_ops = {
 };
 
 
+int hifs_thread_fn(void *data) {
+    while (!kthread_should_stop()) {
+        if (hifs_atomic_read(&my_atomic_variable) == 0) {
+            hifs_atomic_write(&my_atomic_variable, 1);
+            // Call our queue management function to write data to the queue here
+
+
+
+
+            // Call our queue management function to write data to the queue here
+        }
+        msleep(100);  // Sleep for 100 ms
+    }
+    return 0;
+}
+
 
 int hifs_atomic_init(void) {
     major = register_chrdev(0, ATOMIC_DEVICE_NAME, &faops);
     if (major < 0) {
-        pr_err("Failed to register character device\n");
+        pr_err("hivefs: Failed to register the atmomic character device\n");
         return major;
     }
 
     atomic_class = class_create(THIS_MODULE, ATOMIC_CLASS_NAME);
     if (IS_ERR(atomic_class)) {
         unregister_chrdev(major, ATOMIC_DEVICE_NAME);
-        pr_err("Failed to create class\n");
+        pr_err("hivefs: Failed to create atomic class\n");
         return PTR_ERR(atomic_class);
     }
 
@@ -86,11 +100,20 @@ int hifs_atomic_init(void) {
     if (IS_ERR(atomic_device)) {
         class_destroy(atomic_class);
         unregister_chrdev(major, ATOMIC_DEVICE_NAME);
-        pr_err("Failed to create atomic device\n");
+        pr_err("hivefs: Failed to create the final atomic device\n");
         return PTR_ERR(atomic_device);
     }
 
-    pr_info("Atomic variable module loaded\n");
+    pr_info("hivefs: Atomic variable module loaded in kernel\n");
+
+    // Start the new monitoring kernel thread
+    task = kthread_run(hifs_thread_fn, NULL, "hifs_thread");
+    if (IS_ERR(task)) {
+        pr_err("hivefs: Failed to create the atomic variable monitoring kernel thread\n");
+        return PTR_ERR(task);
+    }
+    pr_info("hivefs: A new kernel thread was forked to monitor/manage communications\n");
+
     return 0;
 }
 
@@ -100,22 +123,24 @@ void hifs_atomic_exit(void) {
     class_destroy(atomic_class);
     unregister_chrdev(major, ATOMIC_DEVICE_NAME);
 
-    pr_info("Atomic variable(s) unloaded\n");
+    pr_info("hivefs: Atomic variable(s) unloaded\n");
+    pr_info("hivefs: Atomic variable module unloaded from kernel\n");
 }
 
 int hifs_atomic_open(struct inode *inodep, struct file *filep) {
-    pr_info("Device opened\n");
+    pr_info("hivefs: Atomic Device opened\n");
     return 0;
 }
 
 ssize_t hifs_atomic_read(struct file *filep, char __user *buffer, size_t len, loff_t *offset) {
     int value = atomic_read(&my_atomic_variable);
     if (put_user(value, (int *)buffer) != 0) {
-        pr_err("Failed to copy data to user space\n");
+        pr_err("hivefs: Failed to read data from the atomic variable\n");
         return -EFAULT;
     }
 
-    pr_info("Read %d from the atomic variable\n", value);
+    pr_info("hivefs: Read %d from the atomic variable\n", value);
+
     return sizeof(int);
 }
 
@@ -123,18 +148,18 @@ ssize_t hifs_atomic_write(struct file *filep, const char __user *buffer, size_t 
     int value;
 
     if (get_user(value, (int *)buffer) != 0) {
-        pr_err("Failed to copy data from user space\n");
+        pr_err("hivefs: Failed to copy data to the atomic variable\n");
         return -EFAULT;
     }
 
     atomic_set(&my_atomic_variable, value);
-    pr_info("Wrote %d to the atomic variable\n", value);
+    pr_info("hivefs: Wrote %d to the atomic variable\n", value);
 
     return sizeof(int);
 }
 
 int hifs_atomic_release(struct inode *inodep, struct file *filep) {
-    pr_info("Device closed\n");
+    pr_info("hivefs: Atomic Device closed\n");
     return 0;
 }
 
@@ -340,10 +365,10 @@ int hifs_comm_rcv_inode( void )
 
 int hifs_comm_link_up( void )
 {
-    pr_info(KERN_INFO "GENL: Received Genl Link_Up Command.\n");
+    pr_info(KERN_INFO "hivefs: Received hivefs Link_Up Command.\n");
     hifs_kern_link.last_state = hifs_kern_link.state;
     hifs_kern_link.state = HIFS_COMM_LINK_UP;
-    pr_info(KERN_INFO "GENL: Netlink_generic link up'd at %ld seconds after hifs start.\n", (GET_TIME() - hifs_kern_link.clockstart));
+    pr_info(KERN_INFO "hivefs: link up'd at %ld seconds after hifs start.\n", (GET_TIME() - hifs_kern_link.clockstart));
     hifs_kern_link.last_check = 0;
     return 0;
 }
