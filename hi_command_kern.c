@@ -10,158 +10,16 @@
 #include "hifs.h"
 
 
-
 // Globals
-atomic_t my_atomic_variable = ATOMIC_INIT(0);
-struct class* atomic_class = NULL;
-struct device* atomic_device = NULL;
-int major;
-struct inode *shared_inode;
-struct buffer_head *shared_block;
-char *shared_cmd;
 struct hifs_link hifs_kern_link = {HIFS_COMM_LINK_DOWN, 0, 0, 0};
 struct task_struct *task;
+extern atomic_t my_atomic_variable;
+extern int major;
+extern struct inode *shared_inode;
+extern struct buffer_head *shared_block;
+extern char *shared_cmd;
 
 
-
-struct file_operations inode_mmap_fops = {
-    .owner = THIS_MODULE,
-    .open = mmap_open,
-    .release = mmap_close,
-    .mmap = inode_mmap,
-};
-
-struct file_operations block_mmap_fops = {
-    .owner = THIS_MODULE,
-    .open = mmap_open,
-    .release = mmap_close,
-    .mmap = block_mmap,
-};
-
-struct file_operations cmd_mmap_fops = {
-    .owner = THIS_MODULE,
-    .open = mmap_open,
-    .release = mmap_close,
-    .mmap = cmd_mmap,
-};
-
-struct file_operations faops = {
-    .open = hifs_atomic_open,
-    .read = hifs_atomic_read,
-    .write = hifs_atomic_write,
-    .release = hifs_atomic_release,
-};
-
-struct vm_operations_struct inode_mmap_vm_ops = {
-    .fault = inode_mmap_fault,
-};
-
-struct vm_operations_struct block_mmap_vm_ops = {
-    .fault = block_mmap_fault,
-};
-
-struct vm_operations_struct cmd_mmap_vm_ops = {
-    .fault = cmd_mmap_fault,
-};
-
-
-int hifs_thread_fn(void *data) {
-    while (!kthread_should_stop()) {
-        if (hifs_atomic_read(&my_atomic_variable) == 0) {
-            hifs_atomic_write(&my_atomic_variable, 1);
-            // Call our queue management function to write data to the queue here
-
-
-
-
-            // Call our queue management function to write data to the queue here
-        }
-        msleep(100);  // Sleep for 100 ms
-    }
-    return 0;
-}
-
-
-int hifs_atomic_init(void) {
-    major = register_chrdev(0, ATOMIC_DEVICE_NAME, &faops);
-    if (major < 0) {
-        pr_err("hivefs: Failed to register the atmomic character device\n");
-        return major;
-    }
-
-    atomic_class = class_create(THIS_MODULE, ATOMIC_CLASS_NAME);
-    if (IS_ERR(atomic_class)) {
-        unregister_chrdev(major, ATOMIC_DEVICE_NAME);
-        pr_err("hivefs: Failed to create atomic class\n");
-        return PTR_ERR(atomic_class);
-    }
-
-    atomic_device = device_create(atomic_class, NULL, MKDEV(major, 0), NULL, ATOMIC_DEVICE_NAME);
-    if (IS_ERR(atomic_device)) {
-        class_destroy(atomic_class);
-        unregister_chrdev(major, ATOMIC_DEVICE_NAME);
-        pr_err("hivefs: Failed to create the final atomic device\n");
-        return PTR_ERR(atomic_device);
-    }
-
-    pr_info("hivefs: Atomic variable module loaded in kernel\n");
-
-    // Start the new monitoring kernel thread
-    task = kthread_run(hifs_thread_fn, NULL, "hifs_thread");
-    if (IS_ERR(task)) {
-        pr_err("hivefs: Failed to create the atomic variable monitoring kernel thread\n");
-        return PTR_ERR(task);
-    }
-    pr_info("hivefs: A new kernel thread was forked to monitor/manage communications\n");
-
-    return 0;
-}
-
-void hifs_atomic_exit(void) {
-    device_destroy(atomic_class, MKDEV(major, 0));
-    class_unregister(atomic_class);
-    class_destroy(atomic_class);
-    unregister_chrdev(major, ATOMIC_DEVICE_NAME);
-
-    pr_info("hivefs: Atomic variable(s) unloaded\n");
-    pr_info("hivefs: Atomic variable module unloaded from kernel\n");
-}
-
-int hifs_atomic_open(struct inode *inodep, struct file *filep) {
-    pr_info("hivefs: Atomic Device opened\n");
-    return 0;
-}
-
-ssize_t hifs_atomic_read(struct file *filep, char __user *buffer, size_t len, loff_t *offset) {
-    int value = atomic_read(&my_atomic_variable);
-    if (put_user(value, (int *)buffer) != 0) {
-        pr_err("hivefs: Failed to read data from the atomic variable\n");
-        return -EFAULT;
-    }
-
-    pr_info("hivefs: Read %d from the atomic variable\n", value);
-
-    return sizeof(int);
-}
-
-ssize_t hifs_atomic_write(struct file *filep, const char __user *buffer, size_t len, loff_t *offset) {
-    int value;
-
-    if (get_user(value, (int *)buffer) != 0) {
-        pr_err("hivefs: Failed to copy data to the atomic variable\n");
-        return -EFAULT;
-    }
-
-    atomic_set(&my_atomic_variable, value);
-    pr_info("hivefs: Wrote %d to the atomic variable\n", value);
-
-    return sizeof(int);
-}
-
-int hifs_atomic_release(struct inode *inodep, struct file *filep) {
-    pr_info("hivefs: Atomic Device closed\n");
-    return 0;
-}
 
 struct inode *create_test_inode(void) {
     struct inode *inode;
@@ -191,148 +49,41 @@ void destroy_test_inode(struct inode *inode) {
     iput(inode);
 }
 
-int register_all_comm_queues(void)
-{
-    major = register_chrdev(0, DEVICE_FILE_INODE, &inode_mmap_fops);
-    if (major < 0) {
-        pr_err("Failed to register inode character device\n");
-        return major;
-    }
-
-    shared_inode = kmalloc(sizeof(struct inode), GFP_KERNEL);
-    if (!shared_inode) {
-        unregister_chrdev(major, DEVICE_FILE_INODE);
-        pr_err("Failed to allocate inode memory\n");
-        return -ENOMEM;
-    }
-
-    major = register_chrdev(0, DEVICE_FILE_BLOCK "_block", &block_mmap_fops);
-    if (major < 0) {
-        pr_err("Failed to register block character device\n");
-        kfree(shared_inode);
-        return major;
-    }
-
-    shared_block = kmalloc(sizeof(struct buffer_head), GFP_KERNEL);
-    if (!shared_block) {
-        unregister_chrdev(major, DEVICE_FILE_BLOCK "_block");
-        kfree(shared_inode);
-        pr_err("Failed to allocate block memory\n");
-        return -ENOMEM;
-    }
-
-    major = register_chrdev(0, DEVICE_FILE_CMDS, &cmd_mmap_fops);
-    if (major < 0) {
-        pr_err("Failed to register block character device\n");
-        kfree(shared_inode);
-        kfree(shared_block);
-        return major;
-    }
-
-    shared_cmd = kmalloc(30, GFP_KERNEL);
-    if (!shared_cmd) {
-        unregister_chrdev(major, DEVICE_FILE_CMDS);
-        kfree(shared_inode);
-        kfree(shared_block);
-        pr_err("Failed to allocate block memory\n");
-        return -ENOMEM;
+int hifs_thread_fn(void *data) {
+    while (!kthread_should_stop()) {
+        int value;
+        value = hifs_atomic_read();
+        if ( value == 0) {
+            hifs_atomic_write(1);
+            // Call our queue management function to write data to the queue here
+            scan_queue_and_send();
+        } else if (value == 4) {
+            scan_queue_and_recv();
+            hifs_atomic_write(0);
+            // Call our queue management function to recieve data from the queue here
+        } else if (value == 8 || value == 9 || value == 10) {
+            // Call to complete an aborted link_up here
+            pr_info("hivefs_comm: Waiting on link up. Re-trying...\n");
+            hifs_comm_link_init_change();
+        }
+        msleep(5);  // Sleep for 5 ms
     }
     return 0;
 }
 
-void unregister_all_comm_queues(void)
-{
-    unregister_chrdev(major, DEVICE_FILE_INODE);     
-    unregister_chrdev(major, DEVICE_FILE_BLOCK "_block");
-    unregister_chrdev(major, DEVICE_FILE_CMDS "_block");
-    kfree(shared_inode);
-    kfree(shared_block);
-    kfree(shared_cmd);
-}
+int scan_queue_and_send(void) {
+    // Send data to the queue here
 
-vm_fault_t inode_mmap_fault(struct vm_fault *vmf)
-{
-    unsigned long offset = vmf->pgoff << PAGE_SHIFT;
-    struct page *page;
-
-    if (offset >= PAGE_SIZE)
-        return VM_FAULT_SIGBUS;
-
-    page = virt_to_page(shared_inode + offset);
-    get_page(page);
-    vmf->page = page;
-
+    hifs_atomic_write(2);
     return 0;
 }
 
-vm_fault_t block_mmap_fault(struct vm_fault *vmf)
-{
-    unsigned long offset = vmf->pgoff << PAGE_SHIFT;
-    struct page *page;
+int scan_queue_and_recv(void) {
+    // Recieve data from the queue here
 
-    if (offset >= PAGE_SIZE)
-        return VM_FAULT_SIGBUS;
-
-    page = virt_to_page(shared_block + offset);
-    get_page(page);
-    vmf->page = page;
 
     return 0;
 }
-
-vm_fault_t cmd_mmap_fault(struct vm_fault *vmf)
-{
-    unsigned long offset = vmf->pgoff << PAGE_SHIFT;
-    struct page *page;
-
-    if (offset >= PAGE_SIZE)
-        return VM_FAULT_SIGBUS;
-
-    page = virt_to_page(shared_block + offset);
-    get_page(page);
-    vmf->page = page;
-
-    return 0;
-}
-
-int mmap_open(struct inode *inode, struct file *filp)
-{
-    filp->private_data = inode->i_private;
-    return 0;
-}
-
-int mmap_close(struct inode *inode, struct file *filp)
-{
-    return 0;
-}
-
-int inode_mmap(struct file *filp, struct vm_area_struct *vma)
-{
-    vma->vm_ops = &inode_mmap_vm_ops;
-    vma->vm_flags |= VM_DONTEXPAND | VM_DONTDUMP;
-    vma->vm_private_data = filp->private_data;
-    inode_mmap_fault(NULL);  // Populate the initial page
-    return 0;
-}
-
-int block_mmap(struct file *filp, struct vm_area_struct *vma)
-{
-    vma->vm_ops = &block_mmap_vm_ops;
-    vma->vm_flags |= VM_DONTEXPAND | VM_DONTDUMP;
-    vma->vm_private_data = filp->private_data;
-    block_mmap_fault(NULL);  // Populate the initial page
-    return 0;
-}
-
-int cmd_mmap(struct file *filp, struct vm_area_struct *vma)
-{
-    vma->vm_ops = &cmd_mmap_vm_ops;
-    vma->vm_flags |= VM_DONTEXPAND | VM_DONTDUMP;
-    vma->vm_private_data = filp->private_data;
-    block_mmap_fault(NULL);  // Populate the initial page
-    return 0;
-}
-
 
 
 int hifs_comm_rcv_inode( void )
@@ -342,33 +93,78 @@ int hifs_comm_rcv_inode( void )
     // Allocate memory for iname
     iname = kmalloc(50, GFP_KERNEL);
 
-// READ the inode from the shared queue here......
+    // READ the inode from the shared queue here......
+
+
+
 
     if (iname == NULL) {
-        pr_info(KERN_ERR "GENL: Error allocating memory for iname.\n");
+        pr_info(KERN_ERR "hivefs: Error allocating memory for iname.\n");
         return -ENOMEM;
     }
 
     // Check if the acknowledgement attribute is present
     if (1) {
 
-        pr_info(KERN_INFO "HIFS-COMM: Received INODE Command.\n");
-        pr_info(KERN_INFO "HIFS-COMM: i_name: %s\n", iname);
+        pr_info(KERN_INFO "hivefs-comm: Received INODE Command.\n");
+        pr_info(KERN_INFO "hivefs-comm: i_name: %s\n", iname);
         kfree(iname); // Free the allocated memory
         return 0;
     } else {
-        pr_info(KERN_ERR "HIFS-COMM: Error processing Genl INODE Command packet.\n");
+        pr_info(KERN_ERR "hivefs-comm: Error processing comm INODE Command packet.\n");
         kfree(iname); // Free the allocated memory
         return -1;
     }   
 }
 
-int hifs_comm_link_up( void )
+int hifs_comm_link_init_change( void )
+{
+    int value = 0;
+    value = hifs_atomic_read();
+    if (value == 0) {
+        hifs_atomic_write(1);
+        hifs_comm_link_up();
+        hifs_atomic_write(9);
+        for (int i = 0; i < 100; i++) {
+            if (hifs_atomic_read() == 8) {
+                hifs_comm_link_up_completed();
+                break;
+            }
+            msleep(10);
+        }
+    } else if (value == 8) {
+        hifs_comm_link_up_completed();
+    } else if (value ==9) {
+        for (int i = 0; i < 100; i++) {
+            if (hifs_atomic_read() == 8) {
+                hifs_comm_link_up_completed();
+                break;
+            }
+            msleep(10);
+        }
+    } else if (value == 10) {
+        hifs_atomic_write(1);
+        hifs_kern_link.remote_state = HIFS_COMM_LINK_UP;
+        hifs_comm_link_up();
+        hifs_atomic_write(0);
+    }
+
+    return 0;
+}
+
+void hifs_comm_link_up (void) 
 {
     pr_info(KERN_INFO "hivefs: Received hivefs Link_Up Command.\n");
     hifs_kern_link.last_state = hifs_kern_link.state;
     hifs_kern_link.state = HIFS_COMM_LINK_UP;
-    pr_info(KERN_INFO "hivefs: link up'd at %ld seconds after hifs start.\n", (GET_TIME() - hifs_kern_link.clockstart));
+    pr_info(KERN_INFO "hivefs: kern link up'd at %ld seconds after hifs start, waiting on hi_command.\n", (GET_TIME() - hifs_kern_link.clockstart));
     hifs_kern_link.last_check = 0;
-    return 0;
+}
+
+void hifs_comm_link_up_completed (void)
+{
+    // Link up to hi_command completed.
+    hifs_kern_link.remote_state = HIFS_COMM_LINK_UP;
+    hifs_atomic_write(0);
+    pr_info("hivefs_comm: Link to hi_command completed at %ld seconds after hifs start.\n", (GET_TIME() - hifs_kern_link.clockstart));
 }

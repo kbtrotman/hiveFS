@@ -26,6 +26,8 @@
 #include <linux/debugfs.h>
 #include <asm/uaccess.h>
 #include <linux/fs_struct.h>
+#include <linux/kthread.h>
+#include <linux/delay.h>
 
 
 // In the definitions file, those items are common to hi_command in both kernel-space and
@@ -35,6 +37,7 @@
 // COMMON Definitions Here ONLY!
 extern atomic_t my_atomic_variable;
 extern struct class* atomic_class;
+extern struct task_struct *task;
 
 /* Definitions past this point should be specific only to the kernel-space module! */
 
@@ -43,17 +46,16 @@ extern struct class* atomic_class;
 /* hifs.c */
 //static int hifs_mkfs(struct file_system_type *fs_type, int flags, const char *dev_name, void *data);
 
-/* hi_command_kern_netl.c */
-int register_all_comm_queues(void);
-void unregister_all_comm_queues(void);
-int hifs_atomic_init(void);
-void hifs_atomic_exit(void);
-int hifs_atomic_open(struct inode *, struct file *);
-ssize_t hifs_atomic_read(struct file *filep, char __user *buffer, size_t len, loff_t *offset);
-ssize_t hifs_atomic_write(struct file *filep, const char __user *buffer, size_t len, loff_t *offset);
-int hifs_atomic_release(struct inode *inodep, struct file *filep);
+/* hi_command_kern.c */
+void hifs_comm_link_up (void);
 int hifs_comm_rcv_inode( void );
-int hifs_comm_link_up( void );
+int hifs_comm_link_init_change( void );
+int hifs_thread_fn(void *data);
+void hifs_comm_link_up_completed(void);
+int scan_queue_and_send(void);
+int scan_queue_and_recv(void);
+
+/* hi_command_kern_comm_memman.c */
 int mmap_open(struct inode *inode, struct file *filp);
 int mmap_close(struct inode *inode, struct file *filp);
 int inode_mmap(struct file *filp, struct vm_area_struct *vma);
@@ -62,6 +64,16 @@ int cmd_mmap(struct file *filp, struct vm_area_struct *vma);
 vm_fault_t inode_mmap_fault(struct vm_fault *vmf);
 vm_fault_t block_mmap_fault(struct vm_fault *vmf);
 vm_fault_t cmd_mmap_fault(struct vm_fault *vmf);
+int register_all_comm_queues(void);
+void unregister_all_comm_queues(void);
+int hifs_atomic_init(void);
+void hifs_atomic_exit(void);
+int hifs_atomic_read( void );
+int hifs_atomic_write( int value );
+int hifs_atomic_open(struct inode *, struct file *);
+ssize_t v_atomic_read(struct file *filep, char __user *buffer, size_t len, loff_t *offset);
+ssize_t v_atomic_write(struct file *filep, const char __user *buffer, size_t len, loff_t *offset);
+int hifs_atomic_release(struct inode *inodep, struct file *filep);
 
 /* hi_superblock.c */
 void hifs_save_sb(struct super_block *sb);
@@ -110,11 +122,6 @@ void cache_put_inode(struct hifs_inode **hii);
 
 
 // Globals Here:
-
-/** 
- *Netlink-Generic definitions 
- **/
-extern struct genl_family hifs_genl_family;
 
 /** 
  *Filesystem definition 
