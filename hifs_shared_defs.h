@@ -39,7 +39,8 @@ struct hifs_link {
     enum hifs_link_state state;
     int last_check;
     int last_state;
-    long int clockstart;	
+    long int clockstart;
+	enum hifs_link_state remote_state;	
 };
 extern struct hifs_link hifs_kern_link;
 
