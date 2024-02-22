@@ -157,7 +157,7 @@ static void __exit hifs_exit(void)
     int ret;
 
     hifs_atomic_exit();
-    unregister_all_comm_queues();
+    //unregister_all_comm_queues();
     ret = unregister_filesystem(&hifs_type);
     if (ret != 0) {
         printk(KERN_ERR "hivefs: Failed to unregister filesystem\n");
