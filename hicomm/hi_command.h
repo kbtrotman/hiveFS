@@ -27,7 +27,11 @@
 // Prototypes Here:
 
 /* hi_command.c */
-void handle_netlink_msg(int sock_fd);
+
+/* hi_command_memman.c */
+int read_from_atomic(void);
+int write_to_atomic(int value);
+int hi_comm_queue_init(void);
 
 /* hi_command_sql.c */
 void execute_sql(char* sql_string);

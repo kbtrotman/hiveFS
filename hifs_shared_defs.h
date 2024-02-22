@@ -20,7 +20,7 @@
 
 extern int major;
 extern struct inode *shared_inode;
-extern struct buffer_head *shared_block;
+extern char *shared_block;
 extern char *shared_cmd;
 extern struct vm_operations_struct block_mmap_vm_ops;
 extern struct vm_operations_struct inode_mmap_vm_ops;
@@ -43,6 +43,7 @@ struct hifs_link {
 	enum hifs_link_state remote_state;	
 };
 extern struct hifs_link hifs_kern_link;
+extern struct hifs_link hifs_user_link;
 
 /***********************
  * HiveFS Structures

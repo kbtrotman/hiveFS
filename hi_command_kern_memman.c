@@ -41,10 +41,10 @@ struct file_operations cmd_mmap_fops = {
 };
 
 struct file_operations faops = {
-    .open = hifs_atomic_open,
-    .read = atomic_read,
-    .write = atomic_write,
-    .release = hifs_atomic_release,
+    .open = v_atomic_open,   //virtual defs
+    .read = v_atomic_read,
+    .write = v_atomic_write,
+    .release = v_atomic_release,
 };
 
 struct vm_operations_struct inode_mmap_vm_ops = {
@@ -107,22 +107,22 @@ void hifs_atomic_exit(void) {
 }
 
 // Override functions here: These we don't need to change.
-int hifs_atomic_open(struct inode *inodep, struct file *filep) {
+int v_atomic_open(struct inode *inodep, struct file *filep) {
     pr_info("hivefs: Atomic Device opened\n");
     return 0;
 }
 
-int hifs_atomic_release(struct inode *inodep, struct file *filep) {
+int v_atomic_release(struct inode *inodep, struct file *filep) {
     pr_info("hivefs: Atomic Device closed\n");
     return 0;
 }
 
 ssize_t v_atomic_read(struct file *filep, char __user *buffer, size_t len, loff_t *offset) {
-    pr_info("hivefs-comm: Read from the atomic variable\n");
+    //pr_info("hivefs-comm: Read from the atomic variable\n");
     return 0;
 }
 
-ssize_t atomic_write(struct file *filep, const char __user *buffer, size_t len, loff_t *offset) {
+ssize_t v_atomic_write(struct file *filep, const char __user *buffer, size_t len, loff_t *offset) {
     pr_info("hivefs-comm: Write to the atomic variable\n");
     return 0;
 }
@@ -199,7 +199,7 @@ void unregister_all_comm_queues(void)
 {
     unregister_chrdev(major, DEVICE_FILE_INODE);     
     unregister_chrdev(major, DEVICE_FILE_BLOCK "_block");
-    unregister_chrdev(major, DEVICE_FILE_CMDS "_block");
+    unregister_chrdev(major, DEVICE_FILE_CMDS);
     kfree(shared_inode);
     kfree(shared_block);
     kfree(shared_cmd);
