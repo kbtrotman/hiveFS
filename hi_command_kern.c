@@ -16,7 +16,7 @@ struct task_struct *task;
 extern atomic_t my_atomic_variable;
 extern int major;
 extern struct inode *shared_inode;
-extern struct buffer_head *shared_block;
+extern char *shared_block;;
 extern char *shared_cmd;
 
 
@@ -52,14 +52,14 @@ void destroy_test_inode(struct inode *inode) {
 int hifs_thread_fn(void *data) {
     while (!kthread_should_stop()) {
         int value;
-        value = hifs_atomic_read();
+        value = atomic_read(&my_atomic_variable);
         if ( value == 0) {
-            hifs_atomic_write(1);
+            atomic_set(&my_atomic_variable, 1);;
             // Call our queue management function to write data to the queue here
             scan_queue_and_send();
         } else if (value == 4) {
             scan_queue_and_recv();
-            hifs_atomic_write(0);
+            atomic_set(&my_atomic_variable, 0);
             // Call our queue management function to recieve data from the queue here
         } else if (value == 8 || value == 9 || value == 10) {
             // Call to complete an aborted link_up here
@@ -74,7 +74,7 @@ int hifs_thread_fn(void *data) {
 int scan_queue_and_send(void) {
     // Send data to the queue here
 
-    hifs_atomic_write(2);
+    atomic_set(&my_atomic_variable, 2);
     return 0;
 }
 
@@ -120,33 +120,33 @@ int hifs_comm_rcv_inode( void )
 int hifs_comm_link_init_change( void )
 {
     int value = 0;
-    value = hifs_atomic_read();
-    if (value == 0) {
-        hifs_atomic_write(1);
+
+    if (atomic_read(&my_atomic_variable) == 0) {
+        atomic_set(&my_atomic_variable, 1);
         hifs_comm_link_up();
-        hifs_atomic_write(9);
+        atomic_set(&my_atomic_variable, 9);
         for (int i = 0; i < 100; i++) {
-            if (hifs_atomic_read() == 8) {
+            if (atomic_read(&my_atomic_variable) == 8) {
                 hifs_comm_link_up_completed();
                 break;
             }
             msleep(10);
         }
-    } else if (value == 8) {
+    } else if (atomic_read(&my_atomic_variable) == 8) {
         hifs_comm_link_up_completed();
-    } else if (value ==9) {
+    } else if (atomic_read(&my_atomic_variable) ==9) {
         for (int i = 0; i < 100; i++) {
-            if (hifs_atomic_read() == 8) {
+            if (atomic_read(&my_atomic_variable) == 8) {
                 hifs_comm_link_up_completed();
                 break;
             }
             msleep(10);
         }
     } else if (value == 10) {
-        hifs_atomic_write(1);
+        atomic_set(&my_atomic_variable, 1);
         hifs_kern_link.remote_state = HIFS_COMM_LINK_UP;
         hifs_comm_link_up();
-        hifs_atomic_write(0);
+        atomic_set(&my_atomic_variable, 0);
     }
 
     return 0;
@@ -165,6 +165,6 @@ void hifs_comm_link_up_completed (void)
 {
     // Link up to hi_command completed.
     hifs_kern_link.remote_state = HIFS_COMM_LINK_UP;
-    hifs_atomic_write(0);
+    atomic_set(&my_atomic_variable, 0);
     pr_info("hivefs_comm: Link to hi_command completed at %ld seconds after hifs start.\n", (GET_TIME() - hifs_kern_link.clockstart));
 }

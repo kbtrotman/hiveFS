@@ -15,7 +15,7 @@ struct class *atomic_class = NULL;
 struct device *atomic_device = NULL;
 int major;
 struct inode *shared_inode;
-struct buffer_head *shared_block;
+char *shared_block;;
 char *shared_cmd;
 
 
@@ -118,33 +118,28 @@ int v_atomic_release(struct inode *inodep, struct file *filep) {
 }
 
 ssize_t v_atomic_read(struct file *filep, char __user *buffer, size_t len, loff_t *offset) {
-    //pr_info("hivefs-comm: Read from the atomic variable\n");
-    return 0;
+    int value = atomic_read(&my_atomic_variable);
+    if (copy_to_user(buffer, &value, sizeof(int))) {
+        return -EFAULT;
+    }
+    return sizeof(int);
 }
 
 ssize_t v_atomic_write(struct file *filep, const char __user *buffer, size_t len, loff_t *offset) {
-    pr_info("hivefs-comm: Write to the atomic variable\n");
-    return 0;
+    int value;
+    int count;
+    count = sizeof(int);
+    if (count != sizeof(int)) {
+        return -EINVAL;
+    }
+    if (copy_from_user(&value, buffer, count)) {
+        return -EFAULT;
+    }
+    atomic_set(&my_atomic_variable, value);
+    return sizeof(int);
 }
 // Override functions here: These we don't need to change.
 
-// These are the actual atomic functions here which change the variable below.
-int hifs_atomic_read( void ) {
-
-    int value = atomic_read(&my_atomic_variable);
-    pr_info("hivefs: Read %d from the atomic variable\n", value);
-
-    return value;
-}
-
-int hifs_atomic_write( int value ) {
-
-    atomic_set(&my_atomic_variable, value);
-    pr_info("hivefs: Wrote %d to the atomic variable\n", value);
- 
-    return value;
-}
-// These are the actual atomic functions here which change the variable.
 
 int register_all_comm_queues(void)
 {

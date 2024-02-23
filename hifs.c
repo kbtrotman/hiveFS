@@ -31,7 +31,7 @@ MODULE_VERSION("0:0.01-001");
 extern atomic_t my_atomic_variable;
 extern int major;
 extern struct inode *shared_inode;
-extern struct buffer_head *shared_block;
+extern char *shared_block;
 extern char *shared_cmd;
 extern struct vm_operations_struct block_mmap_vm_ops;
 extern struct vm_operations_struct inode_mmap_vm_ops;
@@ -156,7 +156,7 @@ static void __exit hifs_exit(void)
 {
     int ret;
 
-    hifs_atomic_exit();
+    //hifs_atomic_exit();
     //unregister_all_comm_queues();
     ret = unregister_filesystem(&hifs_type);
     if (ret != 0) {
