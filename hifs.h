@@ -68,8 +68,6 @@ int register_all_comm_queues(void);
 void unregister_all_comm_queues(void);
 int hifs_atomic_init(void);
 void hifs_atomic_exit(void);
-int hifs_atomic_read( void );
-int hifs_atomic_write( int value );
 int v_atomic_open(struct inode *, struct file *);  // Virtual place holders, not currently used....
 ssize_t v_atomic_read(struct file *filep, char __user *buffer, size_t len, loff_t *offset);
 ssize_t v_atomic_write(struct file *filep, const char __user *buffer, size_t len, loff_t *offset);

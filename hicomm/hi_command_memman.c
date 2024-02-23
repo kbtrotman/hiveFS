@@ -6,10 +6,7 @@
  * License: GNU GPL as of 2023
  *
  */
-#include <stddef.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+
 #include <errno.h>
 #include <sys/socket.h>
 #include <fcntl.h>
@@ -19,17 +16,20 @@
 
 #include "hi_command.h"
 
-
+int ret;
 char *shared_block;
 struct inode *shared_inode;
 char *shared_cmd;
+const char *atomic_device = ATOMIC_DEVICE_NAME;
+char atomic_path[];
+char atomic_device_name[256];  // Make sure this is large enough
 
 int read_from_atomic(void)
 {
     int fd;
     int value;
 
-    fd = open(ATOMIC_DEVICE_NAME, O_RDWR);
+    fd = open(atomic_device_name, O_RDWR);
     if (fd == -1) {
         perror("Error opening device file");
         return -1;
@@ -46,7 +46,7 @@ int write_to_atomic(int value)
 {
     int fd;
 
-    fd = open(ATOMIC_DEVICE_NAME, O_RDWR);
+    fd = open( atomic_device_name, O_RDWR);
     if (fd == -1) {
         perror("Error opening device file");
         return -1;
@@ -93,8 +93,6 @@ int hi_comm_queue_init(void)
         return EXIT_FAILURE;
     }
 
-    // Access and modify the shared_inode and shared_block as needed
-    // Remember to use proper synchronization mechanisms for concurrent access
 
     // Unmap the memory
     if (munmap(shared_block, 4096) == -1) {

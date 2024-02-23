@@ -11,7 +11,10 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <libpq-fe.h>
+#include <string.h>
 
 // In the definitions file, those items are common to hi_command in both kernel-space and
 // in user-space.  The definitions file is included in both the kernel-space and user-space
@@ -23,6 +26,9 @@
 #define prerr(...) fprintf(stderr, "error: " __VA_ARGS__)
 
 /*  This file is for definitions specific to the Hi_Command router in user-space.  */
+extern const char *atomic_device;
+extern char atomic_path[20];
+extern char atomic_device_name[256]; 
 
 // Prototypes Here:
 

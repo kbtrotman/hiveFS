@@ -10,15 +10,23 @@
 #include "hi_command.h"
 
 struct hifs_link hifs_user_link;
+extern const char *atomic_device;
+extern char atomic_path[20];
+extern char atomic_device_name[256]; 
 
 
 int main(int argc, char *argv[])
 {
     hifs_user_link.clockstart = GET_TIME();
+    strcpy(atomic_path, "/dev/");
+    strcpy(atomic_device_name, atomic_path);
+    strcat(atomic_device_name, atomic_device);
+
     int atomic_value;
     hi_comm_queue_init(); 
     atomic_value = read_from_atomic();
     printf("Atomic value: %d\n", atomic_value);
+
     if (atomic_value == 0) {
 
         printf("Atomic value: %d\n", atomic_value);
