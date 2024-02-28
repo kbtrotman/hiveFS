@@ -56,6 +56,7 @@ int scan_queue_and_send(void);
 int scan_queue_and_recv(void);
 
 /* hi_command_kern_comm_memman.c */
+void free_all_comm_queues(void);
 int mmap_open(struct inode *inode, struct file *filp);
 int mmap_close(struct inode *inode, struct file *filp);
 int inode_mmap(struct file *filp, struct vm_area_struct *vma);

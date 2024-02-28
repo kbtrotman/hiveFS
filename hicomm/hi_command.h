@@ -29,6 +29,9 @@
 extern const char *atomic_device;
 extern char atomic_path[20];
 extern char atomic_device_name[256]; 
+extern char device_file_inode[256];
+extern char device_file_block[256];
+extern char device_file_cmd[50];
 
 // Prototypes Here:
 

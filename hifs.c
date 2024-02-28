@@ -18,7 +18,6 @@
 
 // *********           HiveFS Entry          *********
 // This is the entry point for the entire FS in this file.
-// Entry and mount point are different, and they are both seperate functions.
 
 
 #include "hifs.h"
@@ -72,13 +71,6 @@ const struct super_operations hifs_sb_operations =
 	.put_super = hifs_put_super,
 };
 
-/*
-EXPORT_SYMBOL(hifs_file_operations);
-EXPORT_SYMBOL(hifs_dir_operations);
-EXPORT_SYMBOL(hifs_sb_operations);
-EXPORT_SYMBOL(hifs_inode_cache);
-EXPORT_SYMBOL(ktime_get_with_offset);
-*/
 
 static int hifs_mkfs(struct file_system_type *fs_type, int flags, const char *dev_name, void *data)
 {
@@ -156,14 +148,13 @@ static void __exit hifs_exit(void)
 {
     int ret;
 
-    //hifs_atomic_exit();
-    //unregister_all_comm_queues();
+    hifs_atomic_exit();
+    unregister_all_comm_queues();
     ret = unregister_filesystem(&hifs_type);
     if (ret != 0) {
         printk(KERN_ERR "hivefs: Failed to unregister filesystem\n");
         goto failure;
     }
-
     printk(KERN_INFO "hivefs: hiveFS unregistered\n");
 
 failure:

@@ -13,7 +13,9 @@ struct hifs_link hifs_user_link;
 extern const char *atomic_device;
 extern char atomic_path[20];
 extern char atomic_device_name[256]; 
-
+extern char device_file_inode[256];
+extern char device_file_block[256];
+extern char device_file_cmd[50];
 
 int main(int argc, char *argv[])
 {
@@ -21,6 +23,15 @@ int main(int argc, char *argv[])
     strcpy(atomic_path, "/dev/");
     strcpy(atomic_device_name, atomic_path);
     strcat(atomic_device_name, atomic_device);
+
+    strcpy(device_file_inode, atomic_path);
+    strcat(device_file_inode, DEVICE_FILE_INODE);
+
+    strcpy(device_file_block, atomic_path);
+    strcat(device_file_block, DEVICE_FILE_BLOCK);
+
+    strcpy(device_file_cmd, atomic_path);
+    strcat(device_file_cmd, DEVICE_FILE_CMDS);
 
     int atomic_value;
     hi_comm_queue_init(); 

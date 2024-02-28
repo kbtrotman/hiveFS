@@ -25,7 +25,7 @@ struct inode *create_test_inode(void) {
     struct inode *inode;
 
     // Allocate memory for the inode
-    inode = kmalloc(sizeof(struct inode), GFP_KERNEL);
+    inode = kzalloc(sizeof(struct inode), GFP_KERNEL);
     if (!inode)
         return NULL;
 
@@ -91,7 +91,7 @@ int hifs_comm_rcv_inode( void )
     char *iname;
     
     // Allocate memory for iname
-    iname = kmalloc(50, GFP_KERNEL);
+    iname = kzalloc(50, GFP_KERNEL);
 
     // READ the inode from the shared queue here......
 

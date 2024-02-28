@@ -23,6 +23,10 @@ char *shared_cmd;
 const char *atomic_device = ATOMIC_DEVICE_NAME;
 char atomic_path[];
 char atomic_device_name[256];  // Make sure this is large enough
+char device_file_inode[256];
+char device_file_block[256];
+char device_file_cmd[50];
+
 
 int read_from_atomic(void)
 {
