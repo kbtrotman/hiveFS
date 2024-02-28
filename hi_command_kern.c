@@ -8,45 +8,33 @@
  */
 
 #include "hifs.h"
-
+#include <linux/list.h>
 
 // Globals
 struct hifs_link hifs_kern_link = {HIFS_COMM_LINK_DOWN, 0, 0, 0};
 struct task_struct *task;
 extern atomic_t my_atomic_variable;
 extern int major;
-extern struct inode *shared_inode;
+extern struct hifs_inode *shared_inode;
 extern char *shared_block;;
 extern char *shared_cmd;
 
 
+void *create_test_inode(void) {
 
-struct inode *create_test_inode(void) {
-    struct inode *inode;
+    struct hifs_inode first_inode = {
+        .i_mode = S_IFREG | 0644,
+        .i_uid = 000001,
+        .i_gid = 010101,
+        .i_blocks = 99,
+        .i_bytes = 512,
+        .i_size = 512,
+        .i_ino = 1,
+        .hifs_inode_list = LIST_HEAD_INIT(first_inode.hifs_inode_list)
+    };
 
-    // Allocate memory for the inode
-    inode = kzalloc(sizeof(struct inode), GFP_KERNEL);
-    if (!inode)
-        return NULL;
-
-    // Zero out the memory
-    memset(inode, 0, sizeof(struct inode));
-
-    // Populate inode fields with test data
-    inode->i_mode = S_IFREG | 0644;  // Regular file with read and write permissions
-    inode->i_uid.val = 000001;
-    inode->i_gid.val = 010101;
-    inode->i_blocks = 99;  // Number of 512-byte blocks
-    //inode->i_atime = inode->i_mtime = inode->i_ctime = (GET_TIME());
-    inode->i_bytes = 512;  // File size in bytes
-    inode->i_size = 512;  // File size in bytes
-    inode->i_ino = 1;  // Inode number
-
-    return inode;
-}
-
-void destroy_test_inode(struct inode *inode) {
-    iput(inode);
+    shared_inode = &first_inode;
+    // Return the inode
 }
 
 int hifs_thread_fn(void *data) {

@@ -29,7 +29,7 @@ MODULE_VERSION("0:0.01-001");
 
 extern atomic_t my_atomic_variable;
 extern int major;
-extern struct inode *shared_inode;
+extern struct hifs_inode *shared_inode;
 extern char *shared_block;
 extern char *shared_cmd;
 extern struct vm_operations_struct block_mmap_vm_ops;
