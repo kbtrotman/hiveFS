@@ -17,6 +17,7 @@
 #define ATOMIC_DEVICE_NAME "hifs_atomic_sync_device"
 #define ATOMIC_CLASS_NAME "atomic_class"
 
+#define HIFS_BLOCK_SIZE 4096
 
 extern int major;
 extern struct inode *shared_inode;

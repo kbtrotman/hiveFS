@@ -149,7 +149,7 @@ int register_all_comm_queues(void)
         return major;
     }
 
-    shared_inode = kmalloc(sizeof(struct inode), GFP_KERNEL);
+    shared_inode = kzalloc(sizeof(struct inode), GFP_KERNEL);
     if (!shared_inode) {
         unregister_chrdev(major, DEVICE_FILE_INODE);
         pr_err("Failed to allocate inode memory\n");
@@ -163,7 +163,7 @@ int register_all_comm_queues(void)
         return major;
     }
 
-    shared_block = kmalloc(sizeof(struct buffer_head), GFP_KERNEL);
+    shared_block = kzalloc(HIFS_BLOCK_SIZE, GFP_KERNEL);
     if (!shared_block) {
         unregister_chrdev(major, DEVICE_FILE_BLOCK "_block");
         kfree(shared_inode);
@@ -179,7 +179,7 @@ int register_all_comm_queues(void)
         return major;
     }
 
-    shared_cmd = kmalloc(30, GFP_KERNEL);
+    shared_cmd = kzalloc(50, GFP_KERNEL);
     if (!shared_cmd) {
         unregister_chrdev(major, DEVICE_FILE_CMDS);
         kfree(shared_inode);
