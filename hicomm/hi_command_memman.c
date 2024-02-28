@@ -87,7 +87,7 @@ int hi_comm_queue_init(void)
         return EXIT_FAILURE;
     }
 
-    shared_block = (char *)mmap(NULL, 4096, PROT_READ | PROT_WRITE, MAP_SHARED, fd_block, 0);
+    shared_block = (char *)mmap(NULL, HIFS_BLOCK_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, fd_block, 0);
 
     if (shared_block == MAP_FAILED) {
         perror("Error mapping block memory");
@@ -97,17 +97,6 @@ int hi_comm_queue_init(void)
         return EXIT_FAILURE;
     }
 
-
-    // Unmap the memory
-    if (munmap(shared_block, 4096) == -1) {
-        perror("Error unmapping block memory");
-    }
-
-    close(fd_block);
-
-    if (munmap(shared_inode, sizeof(struct hifs_inode)) == -1) {
-        perror("Error unmapping inode memory");
-    }
 
     close(fd_inode);
 

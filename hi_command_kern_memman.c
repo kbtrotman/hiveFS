@@ -9,12 +9,13 @@
 
 #include "hifs.h"
 
+
 // Globals
 atomic_t my_atomic_variable = ATOMIC_INIT(0);
 struct class *atomic_class = NULL;
 struct device *atomic_device = NULL;
 int major;
-struct inode *shared_inode;
+struct hifs_inode *shared_inode;
 char *shared_block;;
 char *shared_cmd;
 
@@ -149,12 +150,14 @@ int register_all_comm_queues(void)
         return major;
     }
 
-    shared_inode = kzalloc(sizeof(struct inode), GFP_KERNEL);
+    shared_inode = kzalloc(sizeof(struct hifs_inode), GFP_KERNEL);
     if (!shared_inode) {
         unregister_chrdev(major, DEVICE_FILE_INODE);
         pr_err("Failed to allocate inode memory\n");
         return -ENOMEM;
     }
+    open_mm_dev_file(DEVICE_FILE_INODE);
+
 
     major = register_chrdev(0, DEVICE_FILE_BLOCK "_block", &block_mmap_fops);
     if (major < 0) {
@@ -187,6 +190,7 @@ int register_all_comm_queues(void)
         pr_err("Failed to allocate block memory\n");
         return -ENOMEM;
     }
+
     return 0;
 }
 
@@ -280,5 +284,39 @@ int cmd_mmap(struct file *filp, struct vm_area_struct *vma)
     vma->vm_flags |= VM_DONTEXPAND | VM_DONTDUMP;
     vma->vm_private_data = filp->private_data;
     block_mmap_fault(NULL);  // Populate the initial page
+    return 0;
+}
+
+void write_to_mm_dev_file(char filename[50])
+{
+    mm_segment_t old_fs;
+    struct file *dev_file;
+    char buf[10];
+    int ret;
+
+    old_fs = get_fs();
+    set_fs(KERNEL_DS);
+
+    dev_file = filp_open(filename, O_WRONLY, 0);
+if (IS_ERR(dev_file)) {
+    pr_err("hifs: Queue memory-mapped file open error, queue name = \n", filename);
+    set_fs(old_fs);
+    return PTR_ERR(dev_file);
+}
+
+ret = vfs_write(file, buf, sizeof(buf), &file->f_pos);
+if (ret < 0) {
+    pr_err("vfs_write error\n");
+}
+
+filp_close(file, NULL);
+
+set_fs(old_fs);
+
+}
+
+void read_from_mm_dev_file(DEVICE_FILE_INODE)
+{
+    close(fd_inode);
     return 0;
 }

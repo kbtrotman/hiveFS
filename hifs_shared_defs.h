@@ -20,7 +20,7 @@
 #define HIFS_BLOCK_SIZE 4096
 
 extern int major;
-extern struct inode *shared_inode;
+extern struct hifs_inode *shared_inode;
 extern char *shared_block;
 extern char *shared_cmd;
 extern struct vm_operations_struct block_mmap_vm_ops;
@@ -97,13 +97,12 @@ extern struct
 #define EXT4_EXCLUDE_INO	 9	/* The "exclude" inode, for snapshots */
 #define HIFS_ROOT_INODE      15  /* Root inode nbr */
 
-
-
 /**
  * The on-Disk inode
  **/
 struct hifs_inode 
 {
+	struct list_head hifs_inode_list;
 	struct super_block	*i_sb;      /* Superblock position */
     uint8_t     i_version;	/* inode version */
 	uint8_t		i_flags;	/* inode flags: TYPE */
@@ -123,8 +122,9 @@ struct hifs_inode
 	/* address begin - end block, range exclusive: addres end (last block) does not belogs to extend! */
 	uint32_t	i_addrb[HIFS_INODE_TSIZE];	/* Start block of extend ranges */
 	uint32_t	i_addre[HIFS_INODE_TSIZE];	/* End block of extend ranges */
+	uint32_t	i_blocks;	/* Number of blocks */
+	uint32_t	i_bytes;	/* Number of bytes */
 };
-
 struct hifs_dir_entry 
 {
 	uint32_t inode_nr;		/* inode number */

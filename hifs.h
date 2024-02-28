@@ -54,6 +54,7 @@ int hifs_thread_fn(void *data);
 void hifs_comm_link_up_completed(void);
 int scan_queue_and_send(void);
 int scan_queue_and_recv(void);
+void *create_test_inode(void);
 
 /* hi_command_kern_comm_memman.c */
 void free_all_comm_queues(void);
