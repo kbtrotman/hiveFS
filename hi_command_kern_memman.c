@@ -287,36 +287,53 @@ int cmd_mmap(struct file *filp, struct vm_area_struct *vma)
     return 0;
 }
 
-void write_to_mm_dev_file(char filename[50])
+void write_to_mm_dev_file(char filename[50], char *buf, int len)
 {
     mm_segment_t old_fs;
     struct file *dev_file;
-    char buf[10];
     int ret;
 
     old_fs = get_fs();
     set_fs(KERNEL_DS);
 
     dev_file = filp_open(filename, O_WRONLY, 0);
-if (IS_ERR(dev_file)) {
-    pr_err("hifs: Queue memory-mapped file open error, queue name = \n", filename);
+    if (IS_ERR(dev_file)) {
+        pr_err("hifs: Queue memory-mapped file open error, queue name = \n", filename);
+        set_fs(old_fs);
+        //return PTR_ERR(dev_file);
+    }
+
+    ret = vfs_write(filename, buf, len, &dev_file->f_pos);
+    if (ret < 0) {
+        pr_err("hifs-comm: virtual memory write error\n");
+    }
     set_fs(old_fs);
-    return PTR_ERR(dev_file);
+    filp_close(dev_file, NULL);
 }
 
-ret = vfs_write(file, buf, sizeof(buf), &file->f_pos);
-if (ret < 0) {
-    pr_err("vfs_write error\n");
-}
-
-filp_close(file, NULL);
-
-set_fs(old_fs);
-
-}
-
-void read_from_mm_dev_file(DEVICE_FILE_INODE)
+void read_from_mm_dev_file(char filename[50], int len)
 {
-    close(fd_inode);
-    return 0;
+    mm_segment_t old_fs;
+    struct file *dev_file;
+    char buf[4096];
+    int ret;
+
+    old_fs = get_fs();
+    set_fs(KERNEL_DS);
+
+    dev_file = filp_open(filename, O_WRONLY, 0);
+    if (IS_ERR(dev_file)) {
+        pr_err("hifs: Queue memory-mapped file open error, queue name = \n", filename);
+        set_fs(old_fs);
+        return PTR_ERR(dev_file);
+    }
+
+    ret = vfs_read(filename, buf, sizeof(buf), &dev_file->f_pos);
+    if (ret < 0) {
+        pr_err("hifs-comm: virtual memory read error\n");
+    }
+    set_fs(old_fs);
+    filp_close(dev_file, NULL);
+    
 }
+
