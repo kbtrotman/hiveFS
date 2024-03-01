@@ -1,12 +1,22 @@
 1. Need write and delete functions for caches in hi_command.
-2. Need a configuration ability locally. FOr both HiveFS and Hi_Command.
-3. Need configuration for memory usage of caches and disk usage of caches.
-4. At present, we only write superblock to local disk, which is needed to make a FS.
-   Hi-COmmand is fleshed out to recieve messages to user space for inode management,
-   so we need to flesh out the connection and test it. Then mock up an inode table.
-5. Once we have inode comms working, we need to flesh out block read/write comms.
-   That will automatically take care of de-dupe routine as part of that process.
+2. Need a configuration ability locally. For both HiveFS and Hi_Command.
+3. Need configuration for memory usage of disk caches.
+4. Then mock up an inode table.
+5. Superblock handling and make a filesystem mount function.
 6. De-dupe hashes via linked OpenSSL library in C (user-space) via hi-command. Basically  
    copy over the C++ routines and port as everything else.
 7. For the Queen-B (catchy, but no I'm not really gonna call the main node that), I 
    really want an embedded database. I want something screaming fast that can keep up with communication from 100 machines at once. That's the point. I can dev with postgres, but need to consider the possibilities here and maybe write something custom. A true DB isn't going to be as fast as we want for an FS most likely (performance testing?).
+
+
+   * Completed 3/1/2024: 
+   Once we have inode comms working, we need to flesh out block read/write comms.
+   That will automatically take care of de-dupe routine as part of that process.
+
+   * Completed 3/1/2024:
+   At present, we only write superblock to local disk, which is needed to make a FS.
+   Hi-COmmand is fleshed out to recieve messages to user space for inode management,
+   so we need to flesh out the connection and test it.
+
+   * Completed 3/1/2014:
+   Need configuration for memory usage of queues.

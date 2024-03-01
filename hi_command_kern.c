@@ -18,7 +18,7 @@ extern int major;
 extern struct hifs_inode *shared_inode;
 extern char *shared_block;;
 extern char *shared_cmd;
-
+char buffer[4096];
 
 void hifs_create_test_inode(void) {
 
@@ -40,17 +40,20 @@ void hifs_create_test_inode(void) {
 int hifs_thread_fn(void *data) {
     while (!kthread_should_stop()) {
         int value;
+
         value = atomic_read(&my_atomic_variable);
-        if ( value == 0) {
-            atomic_set(&my_atomic_variable, 1);;
+        if ( value == HIFS_Q_PROTO_UNUSED) {
+            atomic_set(&my_atomic_variable, HIFS_Q_PROTO_KERNEL_LOCK);;
             // Call our queue management function to write data to the queue here
-            scan_queue_and_send();
-        } else if (value == 4) {
-            scan_queue_and_recv();
-            atomic_set(&my_atomic_variable, 0);
+            hifs_queue_send(buffer);
+        } else if (value == HIFS_Q_PROTO_USER_WO_KERNEL) {
+            hifs_queue_recv();
+            atomic_set(&my_atomic_variable, HIFS_Q_PROTO_UNUSED);
             // Call our queue management function to recieve data from the queue here
-        } else if (value == 8 || value == 9 || value == 10) {
-            // Call to complete an aborted link_up here
+        } else if (value == HIFS_Q_PROTO_ACK_LINK_UP || 
+                    value == HIFS_Q_PROTO_ACK_LINK_KERN || 
+                    value == HIFS_Q_PROTO_ACK_LINK_USER) {
+            // Call to complete a new or a temp aborted link_up here
             pr_info("hivefs_comm: Waiting on link up. Re-trying...\n");
             hifs_comm_link_init_change();
         }
@@ -59,17 +62,19 @@ int hifs_thread_fn(void *data) {
     return 0;
 }
 
-int scan_queue_and_send(void) {
+int hifs_queue_send(char *buf) {
     // Send data to the queue here
 
-    atomic_set(&my_atomic_variable, 2);
+    atomic_set(&my_atomic_variable, HIFS_Q_PROTO_KERNEL_WO_USER);
     return 0;
 }
 
-int scan_queue_and_recv(void) {
+int hifs_queue_recv(void) {
     // Recieve data from the queue here
 
+    int fd;
 
+    atomic_set(&my_atomic_variable, HIFS_Q_PROTO_UNUSED);
     return 0;
 }
 
@@ -104,34 +109,23 @@ int hifs_comm_rcv_inode( void )
 
 int hifs_comm_link_init_change( void )
 {
-    int value = 0;
+    int value = HIFS_Q_PROTO_UNUSED;
+    value = atomic_read(&my_atomic_variable);
 
-    if (atomic_read(&my_atomic_variable) == 0) {
-        atomic_set(&my_atomic_variable, 1);
+    if (value == HIFS_Q_PROTO_UNUSED) {
+        atomic_set(&my_atomic_variable, HIFS_Q_PROTO_KERNEL_LOCK);
         hifs_comm_link_up();
-        atomic_set(&my_atomic_variable, 9);
-        for (int i = 0; i < 100; i++) {
-            if (atomic_read(&my_atomic_variable) == 8) {
-                hifs_comm_link_up_completed();
-                break;
-            }
-            msleep(10);
-        }
-    } else if (atomic_read(&my_atomic_variable) == 8) {
+        atomic_set(&my_atomic_variable, HIFS_Q_PROTO_ACK_LINK_KERN);
+        hifs_wait_on_link();
+    } else if (value == HIFS_Q_PROTO_ACK_LINK_UP) {
         hifs_comm_link_up_completed();
-    } else if (atomic_read(&my_atomic_variable) ==9) {
-        for (int i = 0; i < 100; i++) {
-            if (atomic_read(&my_atomic_variable) == 8) {
-                hifs_comm_link_up_completed();
-                break;
-            }
-            msleep(10);
-        }
-    } else if (value == 10) {
-        atomic_set(&my_atomic_variable, 1);
+    } else if (value ==HIFS_Q_PROTO_ACK_LINK_KERN) {
+        hifs_wait_on_link();
+    } else if (value == HIFS_Q_PROTO_ACK_LINK_USER) {
+        atomic_set(&my_atomic_variable, HIFS_Q_PROTO_KERNEL_LOCK);
         hifs_kern_link.remote_state = HIFS_COMM_LINK_UP;
         hifs_comm_link_up();
-        atomic_set(&my_atomic_variable, 0);
+        atomic_set(&my_atomic_variable, HIFS_Q_PROTO_UNUSED);
     }
 
     return 0;
@@ -150,6 +144,17 @@ void hifs_comm_link_up_completed (void)
 {
     // Link up to hi_command completed.
     hifs_kern_link.remote_state = HIFS_COMM_LINK_UP;
-    atomic_set(&my_atomic_variable, 0);
+    atomic_set(&my_atomic_variable, HIFS_Q_PROTO_UNUSED);
     pr_info("hivefs_comm: Link to hi_command completed at %ld seconds after hifs start.\n", (GET_TIME() - hifs_kern_link.clockstart));
+}
+
+void hifs_wait_on_link(void)
+{
+    for (int i = 0; i < 100; i++) {
+        if (atomic_read(&my_atomic_variable) == HIFS_Q_PROTO_ACK_LINK_UP) {
+            hifs_comm_link_up_completed();
+            break;
+        }
+        msleep(10);
+    }
 }

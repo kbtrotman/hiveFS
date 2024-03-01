@@ -8,17 +8,30 @@
  */
 #pragma once
 
-/***********************
- * Netlink Structures
- ***********************/
+/******************************
+ * Queue Management Structures
+ ******************************/
+#define HIFS_QUEUE_COUNT 3
+#define HIFS_DEVICE_NAME "hifs_dev"
+
 #define DEVICE_FILE_INODE "hivefs_comms_inode"
 #define DEVICE_FILE_BLOCK "hivefs_comms_byblock"
 #define DEVICE_FILE_CMDS "hivefs_comms_cmds"
 #define ATOMIC_DEVICE_NAME "hifs_atomic_sync_device"
 #define ATOMIC_CLASS_NAME "atomic_class"
 
-#define HIFS_BLOCK_SIZE 4096
+#define HIFS_DEFAULT_BLOCK_SIZE 4096
 #define HIFS_BUFFER_SIZE 4096
+
+#define HIFS_Q_PROTO_VERSION  1
+#define HIFS_Q_PROTO_UNUSED 0
+#define HIFS_Q_PROTO_KERNEL_LOCK 1
+#define HIFS_Q_PROTO_KERNEL_WO_USER 2
+#define HIFS_Q_PROTO_USER_LOCK 3
+#define HIFS_Q_PROTO_USER_WO_KERNEL 4
+#define HIFS_Q_PROTO_ACK_LINK_UP 8
+#define HIFS_Q_PROTO_ACK_LINK_KERN 9
+#define HIFS_Q_PROTO_ACK_LINK_USER 10
 
 extern int major;
 extern struct hifs_inode *shared_inode;
@@ -63,7 +76,6 @@ extern struct
 /* FS SIZE/OFFSET CONST */
 #define HIFS_INODE_TSIZE		3
 #define HIFS_SUPER_OFFSET		0
-#define HIFS_DEFAULT_BSIZE	4096
 #define HIFS_OLT_OFFSET		(HIFS_SUPER_OFFSET + 1)
 #define HIFS_INODE_TABLE_OFFSET	(HIFS_OLT_OFFSET + 1)
 #define HIFS_INODE_BITMAP_OFFSET	(HIFS_INODE_TABLE_OFFSET + HIFS_INODE_TABLE_SIZE + 1)
@@ -72,17 +84,16 @@ extern struct
 #define HIFS_LF_INODE_OFFSET	(HIFS_ROOT_IN_EXT_OFF + HIFS_DEF_ALLOC)
 
 /* Default place where FS will start using after mkfs (all above are used for mkfs) */
-#define DM_FS_SPACE_START	(HIFS_LF_INODE_OFFSET + HIFS_DEF_ALLOC)
+#define HIFS_CACHE_SPACE_START	(HIFS_LF_INODE_OFFSET + HIFS_DEF_ALLOC)
 
 /* FS constants */
 #define HIFS_MAGIC_NR		0xf00dbeef
 #define HIFS_INODE_SIZE		512
 #define HIFS_INODE_NUMBER_TABLE	128
-#define HIFS_INODE_TABLE_SIZE	(HIFS_INODE_NUMBER_TABLE * HIFS_INODE_SIZE)/HIFS_DEFAULT_BSIZE
+#define HIFS_INODE_TABLE_SIZE	(HIFS_INODE_NUMBER_TABLE * HIFS_INODE_SIZE)/HIFS_DEFAULT_BLOCK_SIZE
 #define HIFS_EMPTY_ENTRY		0xdeeddeed
 
 #define HIFS_NAME_LEN		255
-#define HIFS_DEF_ALLOC		4	/* By default alloc N blocks per extend */
 
 /**
  * Special inode numbers 
