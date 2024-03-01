@@ -11,7 +11,7 @@
  * Database  Definitions
  ***********************/
 #define HOST "10.100.122.20"
-#define DATABASE "hiveFS"
+#define DATABASE "hivefs"
 #define USER "postgres"
 #define PASSWORD "Postgres!909"
 #define HIVE "10.100.122.20"

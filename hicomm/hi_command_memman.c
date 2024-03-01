@@ -18,7 +18,7 @@
 
 int ret;
 char *shared_block;
-struct inode *shared_inode;
+struct hifs_inode *shared_inode;
 char *shared_cmd;
 const char *atomic_device = ATOMIC_DEVICE_NAME;
 char atomic_path[];

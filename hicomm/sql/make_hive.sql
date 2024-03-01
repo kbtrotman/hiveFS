@@ -17,7 +17,6 @@ CREATE TABLE blocks (
     block blob(4096) NOT NULL,
     block_hash VARCHAR(128) NOT NULL PRIMARY KEY,
     block_bck_hash VARCHAR(128)
-    block BLOB(4096) NOT NULL,
 );
 
 CREATE TABLE inode_to_blocks (

@@ -11,7 +11,7 @@ LIBS = -L/usr/lib/ -L/usr/lib64/ -L/usr/ -lpq -lnl-3 -lnl-genl-3
 CFLAGS = -std=c11 -Wall -g $(INCS) $(LIBS)
 
 # Define the C source files
-SRCS = hi_command.c hi_command_memman.c hi_command_sql.c hi_command_cache.c
+SRCS = hi_command.c hi_command_memman.c hi_command_sql.c hi_command_proto.c hi_command_cache.c
 
 # Define the C object files 
 OBJS = $(SRCS:.c=.o)

@@ -37,6 +37,9 @@ extern char device_file_cmd[50];
 
 /* hi_command.c */
 
+/* hi_command_proto.c */
+void scan_user_queue_and_send(void);
+
 /* hi_command_memman.c */
 int read_from_atomic(void);
 int write_to_atomic(int value);
