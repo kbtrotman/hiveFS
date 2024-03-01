@@ -19,26 +19,33 @@ struct hifs_inode *shared_inode;
 char *shared_block;;
 char *shared_cmd;
 
+struct my_device_data {
+    char *buffer;
+};
+
 
 struct file_operations inode_mmap_fops = {
     .owner = THIS_MODULE,
-    .open = mmap_open,
-    .release = mmap_close,
-    .mmap = inode_mmap,
+    .read = hi_comm_device_read,
+    .write = hi_comm_device_write,
+    .open = hifs_comm_device_open,
+    .release = hifs_comm_device_release,
 };
 
 struct file_operations block_mmap_fops = {
     .owner = THIS_MODULE,
-    .open = mmap_open,
-    .release = mmap_close,
-    .mmap = block_mmap,
+    .read = hi_comm_device_read,
+    .write = hi_comm_device_write,
+    .open = hifs_comm_device_open,
+    .release = hifs_comm_device_release,
 };
 
 struct file_operations cmd_mmap_fops = {
     .owner = THIS_MODULE,
-    .open = mmap_open,
-    .release = mmap_close,
-    .mmap = cmd_mmap,
+    .read = hi_comm_device_read,
+    .write = hi_comm_device_write,
+    .open = hifs_comm_device_open,
+    .release = hifs_comm_device_release,
 };
 
 struct file_operations faops = {
@@ -46,18 +53,6 @@ struct file_operations faops = {
     .read = v_atomic_read,
     .write = v_atomic_write,
     .release = v_atomic_release,
-};
-
-struct vm_operations_struct inode_mmap_vm_ops = {
-    .fault = inode_mmap_fault,
-};
-
-struct vm_operations_struct block_mmap_vm_ops = {
-    .fault = block_mmap_fault,
-};
-
-struct vm_operations_struct cmd_mmap_vm_ops = {
-    .fault = cmd_mmap_fault,
 };
 
 int hifs_atomic_init(void) {
@@ -141,54 +136,24 @@ ssize_t v_atomic_write(struct file *filep, const char __user *buffer, size_t len
 }
 // Override functions here: These we don't need to change.
 
-
 int register_all_comm_queues(void)
 {
     major = register_chrdev(0, DEVICE_FILE_INODE, &inode_mmap_fops);
     if (major < 0) {
-        pr_err("Failed to register inode character device\n");
+        pr_err("hivefs: Failed to register inode & block comm queue device\n");
         return major;
     }
-
-    shared_inode = kzalloc(sizeof(struct hifs_inode), GFP_KERNEL);
-    if (!shared_inode) {
-        unregister_chrdev(major, DEVICE_FILE_INODE);
-        pr_err("Failed to allocate inode memory\n");
-        return -ENOMEM;
-    }
-    open_mm_dev_file(DEVICE_FILE_INODE);
-
 
     major = register_chrdev(0, DEVICE_FILE_BLOCK "_block", &block_mmap_fops);
     if (major < 0) {
-        pr_err("Failed to register block character device\n");
-        kfree(shared_inode);
+        pr_err("hivefs: Failed to register block (file) comm queue device\n");
         return major;
-    }
-
-    shared_block = kzalloc(HIFS_BLOCK_SIZE, GFP_KERNEL);
-    if (!shared_block) {
-        unregister_chrdev(major, DEVICE_FILE_BLOCK "_block");
-        kfree(shared_inode);
-        pr_err("Failed to allocate block memory\n");
-        return -ENOMEM;
     }
 
     major = register_chrdev(0, DEVICE_FILE_CMDS, &cmd_mmap_fops);
     if (major < 0) {
-        pr_err("Failed to register block character device\n");
-        kfree(shared_inode);
-        kfree(shared_block);
+        pr_err("hivefs: Failed to register command comm queue device\n");
         return major;
-    }
-
-    shared_cmd = kzalloc(50, GFP_KERNEL);
-    if (!shared_cmd) {
-        unregister_chrdev(major, DEVICE_FILE_CMDS);
-        kfree(shared_inode);
-        kfree(shared_block);
-        pr_err("Failed to allocate block memory\n");
-        return -ENOMEM;
     }
 
     return 0;
@@ -204,136 +169,73 @@ void unregister_all_comm_queues(void)
     kfree(shared_cmd);
 }
 
-vm_fault_t inode_mmap_fault(struct vm_fault *vmf)
-{
-    unsigned long offset = vmf->pgoff << PAGE_SHIFT;
-    struct page *page;
+int hifs_comm_device_open(struct inode *inode, struct file *filp) {
+    struct my_device_data *data;
 
-    if (offset >= PAGE_SIZE)
-        return VM_FAULT_SIGBUS;
-
-    page = virt_to_page(shared_inode + offset);
-    get_page(page);
-    vmf->page = page;
-
-    return 0;
-}
-
-vm_fault_t block_mmap_fault(struct vm_fault *vmf)
-{
-    unsigned long offset = vmf->pgoff << PAGE_SHIFT;
-    struct page *page;
-
-    if (offset >= PAGE_SIZE)
-        return VM_FAULT_SIGBUS;
-
-    page = virt_to_page(shared_block + offset);
-    get_page(page);
-    vmf->page = page;
-
-    return 0;
-}
-
-vm_fault_t cmd_mmap_fault(struct vm_fault *vmf)
-{
-    unsigned long offset = vmf->pgoff << PAGE_SHIFT;
-    struct page *page;
-
-    if (offset >= PAGE_SIZE)
-        return VM_FAULT_SIGBUS;
-
-    page = virt_to_page(shared_block + offset);
-    get_page(page);
-    vmf->page = page;
-
-    return 0;
-}
-
-int mmap_open(struct inode *inode, struct file *filp)
-{
-    filp->private_data = inode->i_private;
-    return 0;
-}
-
-int mmap_close(struct inode *inode, struct file *filp)
-{
-    return 0;
-}
-
-int inode_mmap(struct file *filp, struct vm_area_struct *vma)
-{
-    vma->vm_ops = &inode_mmap_vm_ops;
-    vma->vm_flags |= VM_DONTEXPAND | VM_DONTDUMP;
-    vma->vm_private_data = filp->private_data;
-    inode_mmap_fault(NULL);  // Populate the initial page
-    return 0;
-}
-
-int block_mmap(struct file *filp, struct vm_area_struct *vma)
-{
-    vma->vm_ops = &block_mmap_vm_ops;
-    vma->vm_flags |= VM_DONTEXPAND | VM_DONTDUMP;
-    vma->vm_private_data = filp->private_data;
-    block_mmap_fault(NULL);  // Populate the initial page
-    return 0;
-}
-
-int cmd_mmap(struct file *filp, struct vm_area_struct *vma)
-{
-    vma->vm_ops = &cmd_mmap_vm_ops;
-    vma->vm_flags |= VM_DONTEXPAND | VM_DONTDUMP;
-    vma->vm_private_data = filp->private_data;
-    block_mmap_fault(NULL);  // Populate the initial page
-    return 0;
-}
-
-void write_to_mm_dev_file(char filename[50], char *buf, int len)
-{
-    mm_segment_t old_fs;
-    struct file *dev_file;
-    int ret;
-
-    old_fs = get_fs();
-    set_fs(KERNEL_DS);
-
-    dev_file = filp_open(filename, O_WRONLY, 0);
-    if (IS_ERR(dev_file)) {
-        pr_err("hifs: Queue memory-mapped file open error, queue name = \n", filename);
-        set_fs(old_fs);
-        //return PTR_ERR(dev_file);
+    data = kzalloc(sizeof(struct my_device_data), GFP_KERNEL);
+    if (!data) {
+        return -ENOMEM;
     }
 
-    ret = vfs_write(filename, buf, len, &dev_file->f_pos);
-    if (ret < 0) {
-        pr_err("hifs-comm: virtual memory write error\n");
-    }
-    set_fs(old_fs);
-    filp_close(dev_file, NULL);
+    data->buffer = /* allocate and initialize buffer */
+
+    filp->private_data = data;
+
+    return 0;
 }
 
-void read_from_mm_dev_file(char filename[50], int len)
-{
-    mm_segment_t old_fs;
-    struct file *dev_file;
-    char buf[4096];
-    int ret;
+int hifs_comm_device_release(struct inode *inode, struct file *filp) {
+    struct my_device_data *data = filp->private_data;
 
-    old_fs = get_fs();
-    set_fs(KERNEL_DS);
+    /* free buffer */
 
-    dev_file = filp_open(filename, O_WRONLY, 0);
-    if (IS_ERR(dev_file)) {
-        pr_err("hifs: Queue memory-mapped file open error, queue name = \n", filename);
-        set_fs(old_fs);
-        return PTR_ERR(dev_file);
-    }
+    kfree(data);
 
-    ret = vfs_read(filename, buf, sizeof(buf), &dev_file->f_pos);
-    if (ret < 0) {
-        pr_err("hifs-comm: virtual memory read error\n");
-    }
-    set_fs(old_fs);
-    filp_close(dev_file, NULL);
-    
+    return 0;
 }
 
+ssize_t hi_comm_device_write(struct file *filp, const char __user *buf, size_t count, loff_t *f_pos) {
+    ssize_t result = 0;
+
+    struct my_device_data *data = filp->private_data;
+
+    if (*f_pos >= HIFS_BUFFER_SIZE) {
+        return 0;
+    }
+
+    if (*f_pos + count > HIFS_BUFFER_SIZE) {
+        count = HIFS_BUFFER_SIZE - *f_pos;
+    }
+
+    if (copy_to_user(data + *f_pos, buf, count) != 0) {
+        result = -EFAULT;
+    } else {
+        *f_pos += count;
+        result = count;
+    }
+
+    return result;
+}
+
+ssize_t hi_comm_device_read(struct file *filp, char __user *buf, size_t count, loff_t *f_pos) {
+    ssize_t result = 0;
+
+    struct my_device_data *data = filp->private_data;
+ 
+    if (*f_pos >= HIFS_BUFFER_SIZE) {
+        return 0;
+    }
+
+    if (*f_pos + count > HIFS_BUFFER_SIZE) {
+        count = HIFS_BUFFER_SIZE - *f_pos;
+    }
+
+    if (copy_from_user(buf, data + *f_pos, count) != 0) {
+        result = -EFAULT;
+    } else {
+        *f_pos += count;
+        result = count;
+    }
+
+    return result;
+}

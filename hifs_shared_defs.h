@@ -18,6 +18,7 @@
 #define ATOMIC_CLASS_NAME "atomic_class"
 
 #define HIFS_BLOCK_SIZE 4096
+#define HIFS_BUFFER_SIZE 4096
 
 extern int major;
 extern struct hifs_inode *shared_inode;

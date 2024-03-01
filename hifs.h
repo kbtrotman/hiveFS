@@ -54,18 +54,13 @@ int hifs_thread_fn(void *data);
 void hifs_comm_link_up_completed(void);
 int scan_queue_and_send(void);
 int scan_queue_and_recv(void);
-void *create_test_inode(void);
+void hifs_create_test_inode(void);
 
 /* hi_command_kern_comm_memman.c */
-void free_all_comm_queues(void);
-int mmap_open(struct inode *inode, struct file *filp);
-int mmap_close(struct inode *inode, struct file *filp);
-int inode_mmap(struct file *filp, struct vm_area_struct *vma);
-int block_mmap(struct file *filp, struct vm_area_struct *vma);
-int cmd_mmap(struct file *filp, struct vm_area_struct *vma);
-vm_fault_t inode_mmap_fault(struct vm_fault *vmf);
-vm_fault_t block_mmap_fault(struct vm_fault *vmf);
-vm_fault_t cmd_mmap_fault(struct vm_fault *vmf);
+int hifs_comm_device_open(struct inode *inode, struct file *filp);
+int hifs_comm_device_release(struct inode *inode, struct file *filp);
+ssize_t hi_comm_device_write(struct file *filp, const char __user *buf, size_t count, loff_t *f_pos);
+ssize_t hi_comm_device_read(struct file *filp, char __user *buf, size_t count, loff_t *f_pos);
 int register_all_comm_queues(void);
 void unregister_all_comm_queues(void);
 int hifs_atomic_init(void);
