@@ -20,7 +20,7 @@ extern char *shared_block;;
 extern char *shared_cmd;
 
 
-void *create_test_inode(void) {
+void hifs_create_test_inode(void) {
 
     struct hifs_inode first_inode = {
         .i_mode = S_IFREG | 0644,
@@ -82,9 +82,6 @@ int hifs_comm_rcv_inode( void )
     iname = kzalloc(50, GFP_KERNEL);
 
     // READ the inode from the shared queue here......
-
-
-
 
     if (iname == NULL) {
         pr_info(KERN_ERR "hivefs: Error allocating memory for iname.\n");
