@@ -1,23 +1,27 @@
 # hiveFS
 A Hive Mind Filesystem
 
-The problem with describing what I'm trying to do here is there is no moniker to describe it. So, I'll try my best. It could be called a Globally De-duped Virtualized Filesystem (or Filesystem Protocol). There's probably a hundred other things it could be called, including crazy. But the idea is to have a small module on a linux system that writes a local superblock and then emulates a filesystem by using a protocol to copy higher-level remote objects to the local system. By higher-level, I mean the filesystem isn't limited on the lun-layer with hiveFS. The storage appliance hub would keep inodes, dirs, files, etc, and it would keep the local structure of each client. However, the actual objects in that structure could be managed across any number of hosts or hypervisors. In other words, de-dupe would be global. File trees could be moved around from host to host with ease, and new filesystems created instantly from remote. Only one copy of each file could be kept, and versioning across multiple hosts would be possible. There are two components to hiveFS.
+HiveFS is just starting. It is a filesystem for Linux and VMWare datastore use, but unlike typical filesystems, it also extends to a protocol layer, making it somewhat like NFS conceptually. There are 3 companents to the "Hive" in general:
+1. The central "Hive" is a blade server that runs a storage appliance ISO cd-rom. Once completed, 
+   the ISO install will setup an embedded linux system and configure all storage behind the blade
+   for use as a blob of storage in the hive. From that point the storage can be managed without
+   any traditional storage management (such as zoning, lun management, etc) since it is a
+   virtual appliance. All management is done from the hive blade or the end linux host.
 
-First the server (Hub):
-The [Hive Applicance] or hive software. This device is the hub that controls everything. It would be a blade host, similar to existing array controllers, attached to a huge blob of storage behind it, cpus, memory, etc. The hive will be an installable software image (ISO) built on that blade that helps the admin to automatically configure the hardware into a large pool of storage as one central hive. Once the storage is accessible, rather than serving luns, our hive has a unique purpose, which is to:
-   1. Require certificates to prove the host/spoke is a valid hive member.
-   2. A configured hive worker will then be given a confirmed spoke on the wheel, which initiates his filesystem at whatever place you mount it to.
-      
-      i. We could also say the admin is doing a mkfs here, because in the hive a mkfs linux command will add a host as a spoke on that wheel.
+2. HiveFS is a kernel module that takes a small local disk and builds a superblock on it. This
+   superblock allows the FS to load and then points it to the central hive. There is a small 
+   configurable cache locally on the disk also which will act as NVRAM on a storage array acts.
+   In other words, in a power outage, the local cache keeps data consistent. Both the superblock
+   and NVRAM area can be very small, on the order of less than 1GB.
 
-   3. Transfer encrypted filesystem structures to the foreign host, his inode table. and de-duplicated block data.
-      
-      i. I should add here that most hosts already have a large block of local storage, so a local cache is prabably a good idea here 
-         to increase performance and is feasible using existing disk space.
- 
-   4. Store the remote worker's data as it comes in and as in any filesystem, add links to existing data instead of physical storage.
-   5. And store n-number of copies of each block in it's global store. (Replicated/DR'd/ad-nauseum)
+3. Hi_Command (or Hi_Comm) is a user-space program that runs on the same linux client as HiveFS.
+   Hi_Command sets up several queues with the kernel module and accepts data from the kernel to
+   be sent over ethernet or Infiniband to the central hive. In other words, its a user space 
+   program that implements the protocols necessary to communicate.
 
-Remote Clients or spokes run the hiveFS software, which is a true filesystem (module in linux with a user-space communication layer called hi-command.) with a local superblock written to a physical disk that points to hive-owned inodes and other filesystem structures stored remotely. The hive blade can serve a small number of CIFS/NFS/S3 shares or an additional blade/blades can serve larger numbers of shares. So long as the network stays active, the array presents its storage.
-
-I'm very much not a windows developer, but the eventual goal is to support linux and windows, the primary O/S's for virtualization and the biggest footprint for O/S's in general. I wish to add support for VMWare API and S3 direct from the hub appliance via network/Infiniband. Support of legacy FC is not the goal for this project. Everything should run over IP.
+So, to this point what we've described is not so dissimilar to setting up a linux blade with NFS and then sharing the filesystem with several clients (our worker bees in this case) as a global filesystem. So, what does hiveFS buy that NFS doesn't? Well, HiveFS is designed with these main things in mind:
+1. Global deduplication. Arrays de-dupe generally on a volume level, or possibly on an aggregate or raid group level. HiveFS de-dupes across all storage under its management, and there is no real client limit.
+2. Made with Cloud Computing in mind. Not only is the end goal to make it VMWare-aware but also cloud aware. Currently cloud storage is often more expensive than it seems and devoid of any functionality at all. There are storage appliance images that can turn cloud storage into functional virtual storage arrays, but that adds a much more hefty price to the storage. HiveFS is designed to function as a co-lo appliance for cloud, where cloud workloads can access storage from remote co-locations or at a customer's own datacenter. It's management is much easier than an array, flexible enough not to require re-zones, reboots, and other disruptive processes, and the client portions of the software can run in a cloud image.
+3. Unlike NFS, a directory structure of the admin's choosing is assigned to each client, and it can be re-configured on the fly without large copies or moves. Data can be firewalled from clients, added to other clients, and subdirectories can be grafted onto other trees instantly. Unlike other filesystems, the root directory is really at the central hive layer, and every client has a sub-directory that acts as its own personal mount point. Meaning the client can only see the data placed in it's branch of the "tree".
+4. The Hive itself manages file copies. Although storage can be used underneath that supports replication, the hive software can also manage replication setup, backup copies, file versioning copies, and database testing cycle snapshots. Since it is globally de-dupable, methods need to exist to make sure the data is well-protected to ensure there is always more than one copy of every block.
+5. HiveFS acts on a protocol level, so it sees communications with storage on a block level. Any block application can use it. However, the central hive blade server can always share data on a file or object level (NFS< CIFS, S3) to allow for access from other protocols, making hiveFS more verstile than a file protocol like NFS or CIFS.

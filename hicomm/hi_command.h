@@ -44,6 +44,9 @@ void scan_user_queue_and_send(void);
 int read_from_atomic(void);
 int write_to_atomic(int value);
 int hi_comm_queue_init(void);
+int write_to_dev(int fd, char *buffer, int size);
+char *read_from_dev(int fd, char *buffer, int size);
+void hi_comm_close_queues(void);
 
 /* hi_command_sql.c */
 void execute_sql(char* sql_string);

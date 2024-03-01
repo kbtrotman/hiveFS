@@ -19,12 +19,13 @@ struct hifs_inode *shared_inode;
 char *shared_block;;
 char *shared_cmd;
 
+
 struct my_device_data {
     char *buffer;
 };
 
 
-struct file_operations inode_mmap_fops = {
+struct file_operations inode_fops = {
     .owner = THIS_MODULE,
     .read = hi_comm_device_read,
     .write = hi_comm_device_write,
@@ -32,7 +33,7 @@ struct file_operations inode_mmap_fops = {
     .release = hifs_comm_device_release,
 };
 
-struct file_operations block_mmap_fops = {
+struct file_operations block_fops = {
     .owner = THIS_MODULE,
     .read = hi_comm_device_read,
     .write = hi_comm_device_write,
@@ -40,7 +41,7 @@ struct file_operations block_mmap_fops = {
     .release = hifs_comm_device_release,
 };
 
-struct file_operations cmd_mmap_fops = {
+struct file_operations cmd_fops = {
     .owner = THIS_MODULE,
     .read = hi_comm_device_read,
     .write = hi_comm_device_write,
@@ -138,23 +139,37 @@ ssize_t v_atomic_write(struct file *filep, const char __user *buffer, size_t len
 
 int register_all_comm_queues(void)
 {
-    major = register_chrdev(0, DEVICE_FILE_INODE, &inode_mmap_fops);
+    int err;
+    major = register_chrdev(0, DEVICE_FILE_INODE, &inode_fops);
     if (major < 0) {
         pr_err("hivefs: Failed to register inode & block comm queue device\n");
         return major;
     }
 
-    major = register_chrdev(0, DEVICE_FILE_BLOCK "_block", &block_mmap_fops);
+    major = register_chrdev(0, DEVICE_FILE_BLOCK "_block", &block_fops);
     if (major < 0) {
         pr_err("hivefs: Failed to register block (file) comm queue device\n");
         return major;
     }
 
-    major = register_chrdev(0, DEVICE_FILE_CMDS, &cmd_mmap_fops);
+    major = register_chrdev(0, DEVICE_FILE_CMDS, &cmd_fops);
     if (major < 0) {
         pr_err("hivefs: Failed to register command comm queue device\n");
         return major;
     }
+
+ #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 4, 0) 
+    err = class_create(DEVICE_FILE_INODE);
+    err = class_create(DEVICE_FILE_BLOCK);
+    err = class_create(DEVICE_FILE_CMDS);
+#else 
+    err = class_create(THIS_MODULE, DEVICE_FILE_INODE);
+    err = class_create(THIS_MODULE, DEVICE_FILE_BLOCK); 
+    err = class_create(THIS_MODULE, DEVICE_FILE_CMDS);  
+#endif
+    pr_info("hivefs: Queue device created on %s\n", DEVICE_FILE_CMDS);
+    pr_info("hivefs: Queue device created on %s\n", DEVICE_FILE_INODE);
+    pr_info("hivefs: Queue device created on %s\n", DEVICE_FILE_BLOCK);
 
     return 0;
 }
@@ -212,6 +227,7 @@ ssize_t hi_comm_device_write(struct file *filp, const char __user *buf, size_t c
     } else {
         *f_pos += count;
         result = count;
+        hifs_queue_send(buf);
     }
 
     return result;
@@ -235,7 +251,9 @@ ssize_t hi_comm_device_read(struct file *filp, char __user *buf, size_t count, l
     } else {
         *f_pos += count;
         result = count;
+        hifs_queue_recv();
     }
+
 
     return result;
 }

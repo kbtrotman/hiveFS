@@ -39,11 +39,18 @@ int main(int argc, char *argv[])
     printf("hi-command: Atomic value: %d\n", atomic_value);
 
     init_hive_link();
-    
+
+
+ queue_management:   
     if (atomic_value == 0) {
         write_to_atomic(3);
         printf("hi-command: Atomic value: %d\n", atomic_value);
         scan_user_queue_and_send();
+    }
+    else if (atomic_value == 2) {
+        write_to_atomic(3);
+        printf("hi-command: Atomic value: %d\n", atomic_value);
+        scan_user_queue_and_rec();    
     }
     else if (atomic_value == 9) {
         printf("hi-command: Received hivefs Link_Up Command to user-space.\n");
@@ -57,4 +64,7 @@ int main(int argc, char *argv[])
     else {
         printf("hi-command: Atomic value: %d\n", atomic_value);
     }
+
+    goto queue_management;
+    
 }

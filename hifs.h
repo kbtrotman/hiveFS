@@ -28,6 +28,7 @@
 #include <linux/fs_struct.h>
 #include <linux/kthread.h>
 #include <linux/delay.h>
+#include <linux/cdev.h>
 
 
 // In the definitions file, those items are common to hi_command in both kernel-space and
@@ -52,9 +53,10 @@ int hifs_comm_rcv_inode( void );
 int hifs_comm_link_init_change( void );
 int hifs_thread_fn(void *data);
 void hifs_comm_link_up_completed(void);
-int scan_queue_and_send(void);
-int scan_queue_and_recv(void);
+int hifs_queue_send(char *buf);
+int hifs_queue_recv(void);
 void hifs_create_test_inode(void);
+void hifs_wait_on_link(void);
 
 /* hi_command_kern_comm_memman.c */
 int hifs_comm_device_open(struct inode *inode, struct file *filp);

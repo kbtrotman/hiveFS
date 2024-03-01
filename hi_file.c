@@ -18,8 +18,8 @@ ssize_t hifs_get_loffset(struct hifs_inode *hii, loff_t off)
 	loff_t add = 0;
 	u32 i = 0;
 
-	if (off > HIFS_DEFAULT_BSIZE)
-		add += HIFS_DEFAULT_BSIZE % off;
+	if (off > HIFS_DEFAULT_BLOCK_SIZE)
+		add += HIFS_DEFAULT_BLOCK_SIZE % off;
 
 	for (i = 0; i < HIFS_INODE_TSIZE; ++i) {
 		if (hii->i_addrb[i] + off > hii->i_addre[i]) {
@@ -65,7 +65,7 @@ ssize_t hifs_read(struct kiocb *iocb, struct iov_iter *to)
 		return 0;
 	}
 
-	buffer = (char *)bh->b_data + (off % HIFS_DEFAULT_BSIZE);
+	buffer = (char *)bh->b_data + (off % HIFS_DEFAULT_BLOCK_SIZE);
 	nbytes = min((size_t)(hiinode->i_size - off), count);
 
 	if (copy_to_user(buf, buffer, nbytes)) {
@@ -123,7 +123,7 @@ ssize_t hifs_write(struct kiocb *iocb, struct iov_iter *from)
 	    return 0;
 	}
 	
-	buffer = (char *)bh->b_data + (off % HIFS_DEFAULT_BSIZE);
+	buffer = (char *)bh->b_data + (off % HIFS_DEFAULT_BLOCK_SIZE);
 	if (copy_from_user(buffer, buf, count)) {
 	    brelse(bh);
 	    printk(KERN_ERR "Error copying file content from userspace buffer to kernel space\n");
