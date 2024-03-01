@@ -15,7 +15,7 @@ void execute_sql(char* sql_string)
 {
     PGresult *res = PQexec(sql.hive_conn, sql_string);
     if (PQresultStatus(res) != PGRES_COMMAND_OK) {
-        fprintf(stderr, "SQL execution failed: %s\n", PQerrorMessage(sql.hive_conn));
+        printf("SQL execution failed: %s\n", PQerrorMessage(sql.hive_conn));
         PQclear(res);
         //PQfinish(sql.hive_conn);
         return;
@@ -31,10 +31,13 @@ void init_hive_link(void)
     if (!sql.sql_init) {
         sql.hive_conn = PQconnectdb(DBSTRING);
         if (PQstatus(sql.hive_conn) == CONNECTION_BAD) {
-            fprintf(stderr, "Connection to database failed: %s\n", PQerrorMessage(sql.hive_conn));
+            fprintf(stderr, "hi_command: Connection to remote hive failed: %s\n", PQerrorMessage(sql.hive_conn));
             PQfinish(sql.hive_conn);
             return;
         } else {
+            int sql_v;
+            sql_v = get_hive_vers();
+            printf("hi_command: Connected to remote hive version: %d\n", sql_v);
             register_hive_host(); 
             *sql.sql_init = true;
         }

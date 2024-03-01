@@ -103,7 +103,9 @@ extern struct
  **/
 struct hifs_inode 
 {
+#ifdef __KERNEL__
 	struct list_head hifs_inode_list;
+#endif
 	struct super_block	*i_sb;      /* Superblock position */
     uint8_t     i_version;	/* inode version */
 	uint8_t		i_flags;	/* inode flags: TYPE */

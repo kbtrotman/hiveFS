@@ -38,6 +38,8 @@ int main(int argc, char *argv[])
     atomic_value = read_from_atomic();
     printf("hi-command: Atomic value: %d\n", atomic_value);
 
+    init_hive_link();
+    
     if (atomic_value == 0) {
         write_to_atomic(3);
         printf("hi-command: Atomic value: %d\n", atomic_value);
