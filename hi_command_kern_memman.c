@@ -19,9 +19,9 @@ struct hifs_inode *shared_inode;
 char *shared_block;;
 char *shared_cmd;
 
-
 struct my_device_data {
     char *buffer;
+    char *device_name;
 };
 
 
@@ -139,7 +139,7 @@ ssize_t v_atomic_write(struct file *filep, const char __user *buffer, size_t len
 
 int register_all_comm_queues(void)
 {
-    int err;
+    int class;
     major = register_chrdev(0, DEVICE_FILE_INODE, &inode_fops);
     if (major < 0) {
         pr_err("hivefs: Failed to register inode & block comm queue device\n");
@@ -159,14 +159,21 @@ int register_all_comm_queues(void)
     }
 
  #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 4, 0) 
-    err = class_create(DEVICE_FILE_INODE);
-    err = class_create(DEVICE_FILE_BLOCK);
-    err = class_create(DEVICE_FILE_CMDS);
+    class = class_create(DEVICE_FILE_INODE);
+    device_create(class, NULL, MKDEV(major, 0), NULL, DEVICE_FILE_INODE);
+    class = class_create(DEVICE_FILE_BLOCK);
+    device_create(class, NULL, MKDEV(major, 1), NULL, DEVICE_FILE_BLOCK);
+    class = class_create(DEVICE_FILE_CMDS);
+    device_create(class, NULL, MKDEV(major, 2), NULL, DEVICE_FILE_CMDS);
 #else 
-    err = class_create(THIS_MODULE, DEVICE_FILE_INODE);
-    err = class_create(THIS_MODULE, DEVICE_FILE_BLOCK); 
-    err = class_create(THIS_MODULE, DEVICE_FILE_CMDS);  
+    class = class_create(THIS_MODULE, DEVICE_FILE_INODE);
+    device_create(class, NULL, MKDEV(major, 0), NULL, DEVICE_FILE_INODE);
+    class = class_create(THIS_MODULE, DEVICE_FILE_BLOCK);
+    device_create(class, NULL, MKDEV(major, 1), NULL, DEVICE_FILE_BLOCK); 
+    class = class_create(THIS_MODULE, DEVICE_FILE_CMDS);
+    device_create(class, NULL, MKDEV(major, 2), NULL, DEVICE_FILE_CMDS);  
 #endif
+
     pr_info("hivefs: Queue device created on %s\n", DEVICE_FILE_CMDS);
     pr_info("hivefs: Queue device created on %s\n", DEVICE_FILE_INODE);
     pr_info("hivefs: Queue device created on %s\n", DEVICE_FILE_BLOCK);
