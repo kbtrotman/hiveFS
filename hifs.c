@@ -29,12 +29,13 @@ MODULE_VERSION("0:0.01-001");
 
 extern atomic_t my_atomic_variable;
 extern int major;
-extern struct hifs_inode *shared_inode;
-extern char *shared_block;
-extern char *shared_cmd;
-extern struct vm_operations_struct block_mmap_vm_ops;
-extern struct vm_operations_struct inode_mmap_vm_ops;
-extern struct vm_operations_struct cmd_mmap_vm_ops;
+extern struct hifs_inode *shared_inode_outgoing;    // These six Doubly-Linked Lists are our
+extern struct hifs_blocks *shared_block_outgoing;   // processing queues. They are sent & 
+extern struct hifs_cmds *shared_cmd_outgoing;       // received thru the 3 device files known
+extern struct hifs_inode *shared_inode_incoming;    // as the "queues" (to hi_command). We want
+extern struct hifs_blocks *shared_block_incoming;   // to proces them fast, so they're split into
+extern struct hifs_cmds *shared_cmd_incoming;       // incoming & outgoing queues here.
+extern char *filename;     // The filename we're currently sending/recieving to/from.
 
 
 struct file_system_type hifs_type = 
