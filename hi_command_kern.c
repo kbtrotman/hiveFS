@@ -15,10 +15,15 @@ struct hifs_link hifs_kern_link = {HIFS_COMM_LINK_DOWN, 0, 0, 0};
 struct task_struct *task;
 extern atomic_t my_atomic_variable;
 extern int major;
-extern struct hifs_inode *shared_inode;
-extern char *shared_block;;
-extern char *shared_cmd;
+extern struct hifs_inode *shared_inode_outgoing;    // These six Doubly-Linked Lists are our
+extern struct hifs_blocks *shared_block_outgoing;   // processing queues. They are sent & 
+extern struct hifs_cmds *shared_cmd_outgoing;       // received thru the 3 device files known
+extern struct hifs_inode *shared_inode_incoming;    // as the "queues" (to hi_command). We want
+extern struct hifs_blocks *shared_block_incoming;   // to proces them fast, so they're split into
+extern struct hifs_cmds *shared_cmd_incoming;       // incoming & outgoing queues here.
+extern char *filename;     // The filename we're currently sending/recieving to/from.
 char buffer[4096];
+
 
 void hifs_create_test_inode(void) {
 
@@ -33,8 +38,15 @@ void hifs_create_test_inode(void) {
         .hifs_inode_list = LIST_HEAD_INIT(first_inode.hifs_inode_list)
     };
 
-    shared_inode = &first_inode;
-    // Return the inode
+    struct hifs_cmds first_cmd = {
+        .cmd = "test_cmd",
+        .count = 1,
+        .hifs_cmd_list = LIST_HEAD_INIT(first_cmd.hifs_cmd_list)
+    };
+
+    shared_inode_outgoing = &first_inode;
+    shared_cmd_outgoing = &first_cmd;
+    // Return the cmd & inode
 }
 
 int hifs_thread_fn(void *data) {
@@ -62,17 +74,17 @@ int hifs_thread_fn(void *data) {
     return 0;
 }
 
-int hifs_queue_send(char *buf) {
-    // Send data to the queue here
+int hifs_queue_send(const char *buf) {
+    // Data Sent to queue, now remove it from kernel list now.
+
 
     atomic_set(&my_atomic_variable, HIFS_Q_PROTO_KERNEL_WO_USER);
     return 0;
 }
 
 int hifs_queue_recv(void) {
-    // Recieve data from the queue here
+    // Recieve data from the queue here and process it.
 
-    int fd;
 
     atomic_set(&my_atomic_variable, HIFS_Q_PROTO_UNUSED);
     return 0;

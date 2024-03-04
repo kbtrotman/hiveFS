@@ -11,11 +11,13 @@
 /******************************
  * Queue Management Structures
  ******************************/
+// These definitions are for 3 shared memory areas (queues).
+// The kernel module and hi_command user-space program
+// shared these memory areas to send and receive data.
 #define HIFS_QUEUE_COUNT 3
-#define HIFS_DEVICE_NAME "hifs_dev"
 
 #define DEVICE_FILE_INODE "hivefs_comms_inode"
-#define DEVICE_FILE_BLOCK "hivefs_comms_byblock"
+#define DEVICE_FILE_BLOCK "hivefs_comms_block"
 #define DEVICE_FILE_CMDS "hivefs_comms_cmds"
 #define ATOMIC_DEVICE_NAME "hifs_atomic_sync_device"
 #define ATOMIC_CLASS_NAME "atomic_class"
@@ -23,23 +25,53 @@
 #define HIFS_DEFAULT_BLOCK_SIZE 4096
 #define HIFS_BUFFER_SIZE 4096
 
-#define HIFS_Q_PROTO_VERSION  1
-#define HIFS_Q_PROTO_UNUSED 0
-#define HIFS_Q_PROTO_KERNEL_LOCK 1
-#define HIFS_Q_PROTO_KERNEL_WO_USER 2
-#define HIFS_Q_PROTO_USER_LOCK 3
-#define HIFS_Q_PROTO_USER_WO_KERNEL 4
-#define HIFS_Q_PROTO_ACK_LINK_UP 8
-#define HIFS_Q_PROTO_ACK_LINK_KERN 9
-#define HIFS_Q_PROTO_ACK_LINK_USER 10
+/******************************
+ * Queue Comms Protocol
+ ******************************/
+// Our protocol for comms using the comms queues.
+// these values are set in the atomic variable.
+// The atomic variable is a shared memory space
+// between kernel and user space. For Hi_Command.
+#define HIFS_Q_PROTO_VERSION  1          // Version of the protocol
+#define HIFS_Q_PROTO_UNUSED 0            // Queue is not in use
+#define HIFS_Q_PROTO_KERNEL_LOCK 1       // Kernel has locked the queue
+#define HIFS_Q_PROTO_KERNEL_WO_USER 2    // Kernel is waiting on user
+#define HIFS_Q_PROTO_USER_LOCK 3         // User has locked the queue
+#define HIFS_Q_PROTO_USER_WO_KERNEL 4    // User is waiting on kernel
+// Leave some locking variables here for future use....
+#define HIFS_Q_PROTO_ACK_LINK_UP 8       // Acknowledge link up command
+#define HIFS_Q_PROTO_ACK_LINK_KERN 9     // Kernel initiated a link up command
+#define HIFS_Q_PROTO_ACK_LINK_USER 10    // User initiated a link up command
+
 
 extern int major;
-extern struct hifs_inode *shared_inode;
-extern char *shared_block;
-extern char *shared_cmd;
-extern struct vm_operations_struct block_mmap_vm_ops;
-extern struct vm_operations_struct inode_mmap_vm_ops;
-extern struct vm_operations_struct cmd_mmap_vm_ops;
+extern struct hifs_inode *shared_inode_outgoing;    // These six Doubly-Linked Lists are our
+extern struct hifs_blocks *shared_block_outgoing;   // processing queues. They are sent & 
+extern struct hifs_cmds *shared_cmd_outgoing;       // received thru the 3 device files known
+extern struct hifs_inode *shared_inode_incoming;    // as the "queues" (to hi_command). We want
+extern struct hifs_blocks *shared_block_incoming;   // to proces them fast, so they're split into
+extern struct hifs_cmds *shared_cmd_incoming;       // incoming & outgoing queues here.
+extern char *filename;     // The filename we're currently sending/recieving to/from.
+
+struct hifs_blocks {
+	char *buffer;
+	int count;
+	#ifdef __KERNEL__
+	struct list_head hifs_block_list;
+#else
+	struct hifs_blocks *prev, *next;
+#endif
+};
+
+struct hifs_cmds {
+	char *cmd;
+	int count;
+	#ifdef __KERNEL__
+		struct list_head hifs_cmd_list;
+	#else
+		struct hifs_cmds *prev, *next;
+	#endif
+};
 
 #ifdef __KERNEL__
 #include <linux/jiffies.h>
@@ -59,9 +91,13 @@ struct hifs_link {
 };
 extern struct hifs_link hifs_kern_link;
 extern struct hifs_link hifs_user_link;
+/******************************
+ * END Queue Management Structures
+ ******************************/
+
 
 /***********************
- * HiveFS Structures
+ * Hive FS Structures
  ***********************/
 
 /* Filesystem Settings */
@@ -114,9 +150,6 @@ extern struct
  **/
 struct hifs_inode 
 {
-#ifdef __KERNEL__
-	struct list_head hifs_inode_list;
-#endif
 	struct super_block	*i_sb;      /* Superblock position */
     uint8_t     i_version;	/* inode version */
 	uint8_t		i_flags;	/* inode flags: TYPE */
@@ -138,6 +171,11 @@ struct hifs_inode
 	uint32_t	i_addre[HIFS_INODE_TSIZE];	/* End block of extend ranges */
 	uint32_t	i_blocks;	/* Number of blocks */
 	uint32_t	i_bytes;	/* Number of bytes */
+#ifdef __KERNEL__
+	struct list_head hifs_inode_list;
+#else
+	struct hifs_inode *prev, *next;
+#endif
 };
 struct hifs_dir_entry 
 {
@@ -145,6 +183,10 @@ struct hifs_dir_entry
 	uint32_t name_len;		/* Name length */
 	char name[256];			/* File name, up to HIFS_NAME_LEN */
 };
+/***********************
+ * END Hive FS Structures
+ ***********************/
+
 
 #ifdef HIVEFS_DEBUG
 #define hifs_debug(f, a...)						\
