@@ -17,6 +17,16 @@ extern char device_file_inode[256];
 extern char device_file_block[256];
 extern char device_file_cmd[50];
 
+extern char buffer[4096];
+
+struct hifs_inode *shared_inode_outgoing;    // These six Doubly-Linked Lists are our
+struct hifs_blocks *shared_block_outgoing;   // processing queues. They are sent & 
+struct hifs_cmds *shared_cmd_outgoing;       // received thru the 3 device files known
+struct hifs_inode *shared_inode_incoming;    // as the "queues" (to hi_command). We want
+struct hifs_blocks *shared_block_incoming;   // to proces them fast, so they're split into
+struct hifs_cmds *shared_cmd_incoming;       // incoming & outgoing queues here.
+ 
+
 int main(int argc, char *argv[])
 {
     hifs_user_link.clockstart = GET_TIME();

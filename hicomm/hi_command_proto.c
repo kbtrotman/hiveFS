@@ -14,12 +14,15 @@ char atomic_device_name[256];  // Make sure this is large enough
 char device_file_inode[256];
 char device_file_block[256];
 char device_file_cmd[50];
+extern char buffer[4096];
+
 struct hifs_inode *shared_inode_outgoing;    // These six Doubly-Linked Lists are our
 struct hifs_blocks *shared_block_outgoing;   // processing queues. They are sent & 
 struct hifs_cmds *shared_cmd_outgoing;       // received thru the 3 device files known
 struct hifs_inode *shared_inode_incoming;    // as the "queues" (to hi_command). We want
 struct hifs_blocks *shared_block_incoming;   // to proces them fast, so they're split into
 struct hifs_cmds *shared_cmd_incoming;       // incoming & outgoing queues here.
+
 char *filename;     // The filename we're currently sending/recieving to/from.
 
 void scan_user_queue_and_send(void)
@@ -46,26 +49,19 @@ void read_from_command_queue(void)
     int ret;
     int i;
 
-    fd = open(device_file_cmd, O_RDONLY);
-    if (fd < 0) {
-        printf("hi-command: Error opening device file: %s\n", device_file_cmd);
-        return;
-    }
-
-    ret = read(fd, buffer, sizeof(buffer));
+    ret = read_from_dev(device_file_cmd, sizeof(buffer));
     if (ret < 0) {
         printf("hi-command: Error reading from device file: %s\n", device_file_cmd);
         return;
+    } else {
+        printf("hi-command: Read %d bytes from device file: %s\n", ret, device_file_cmd);
+        for (i = 0; i < ret; i++) {
+            printf("%c", buffer[i]);
+        }
+        printf("\n");
     }
-
-    printf("hi-command: Read %d bytes from device file: %s\n", ret, device_file_cmd);
-    for (i = 0; i < ret; i++) {
-        printf("%c", buffer[i]);
-    }
-    printf("\n");
 
     //Save data to the incoming queue.
 
-    close(fd);
     return;
 }
