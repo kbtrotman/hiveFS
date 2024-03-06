@@ -60,8 +60,8 @@ void hifs_wait_on_link(void);
 /* hi_command_kern_comm_memman.c */
 int hifs_comm_device_open(struct inode *inode, struct file *filp);
 int hifs_comm_device_release(struct inode *inode, struct file *filp);
-ssize_t hi_comm_device_read(struct file *filp, char __user *buf, size_t count, loff_t *f_pos);
 ssize_t hi_comm_device_write(struct file *filp, const char __user *buf, size_t count, loff_t *f_pos);
+ssize_t hi_comm_device_read(struct file *filp, char __user *buf, size_t count, loff_t *f_pos);
 int register_all_comm_queues(void);
 void unregister_all_comm_queues(void);
 int hifs_atomic_init(void);

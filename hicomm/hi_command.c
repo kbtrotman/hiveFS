@@ -41,18 +41,19 @@ int main(int argc, char *argv[])
     init_hive_link();
 
 
- queue_management:   
-    if (atomic_value == 0) {
+ queue_management:
+    // Here we ignore values 1,3,4,8,10   
+    if (atomic_value == HIFS_Q_PROTO_UNUSED) {
         write_to_atomic(3);
         printf("hi-command: Atomic value: %d\n", atomic_value);
         scan_user_queue_and_send();
     }
-    else if (atomic_value == 2) {
+    else if (atomic_value == HIFS_Q_PROTO_KERNEL_WO_USER) {
         write_to_atomic(3);
         printf("hi-command: Atomic value: %d\n", atomic_value);
-        scan_user_queue_and_rec();    
+        scan_user_queue_and_recv();    
     }
-    else if (atomic_value == 9) {
+    else if (atomic_value == HIFS_Q_PROTO_ACK_LINK_KERN) {
         printf("hi-command: Received hivefs Link_Up Command to user-space.\n");
         hifs_user_link.last_state = hifs_user_link.state;
         hifs_user_link.state = HIFS_COMM_LINK_UP;

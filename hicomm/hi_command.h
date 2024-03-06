@@ -15,6 +15,8 @@
 #include <stdlib.h>
 #include <libpq-fe.h>
 #include <string.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 // In the definitions file, those items are common to hi_command in both kernel-space and
 // in user-space.  The definitions file is included in both the kernel-space and user-space
@@ -39,6 +41,8 @@ extern char device_file_cmd[50];
 
 /* hi_command_proto.c */
 void scan_user_queue_and_send(void);
+void scan_user_queue_and_recv(void);
+void read_from_command_queue(void);
 
 /* hi_command_memman.c */
 int read_from_atomic(void);
