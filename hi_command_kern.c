@@ -21,13 +21,29 @@ extern struct hifs_cmds *shared_cmd_outgoing;       // received thru the 3 devic
 extern struct hifs_inode *shared_inode_incoming;    // as the "queues" (to hi_command). We want
 extern struct hifs_blocks *shared_block_incoming;   // to proces them fast, so they're split into
 extern struct hifs_cmds *shared_cmd_incoming;       // incoming & outgoing queues here.
+
+extern struct list_head shared_inode_outgoing_lst;    
+extern struct list_head shared_block_outgoing_lst;    
+extern struct list_head shared_cmd_outgoing_lst;       
+extern struct list_head shared_inode_incoming_lst;    
+extern struct list_head shared_block_incoming_lst;   
+extern struct list_head shared_cmd_incoming_lst;  
+
 extern char *filename;     // The filename we're currently sending/recieving to/from.
 char buffer[4096];
 
 
 void hifs_create_test_inode(void) {
 
-    struct hifs_inode first_inode = {
+    shared_inode_incoming = kmalloc(sizeof(*shared_inode_incoming), GFP_KERNEL);
+    shared_cmd_incoming = kmalloc(sizeof(*shared_cmd_incoming), GFP_KERNEL);
+
+    if (!shared_inode_incoming || !shared_cmd_incoming) {
+        // Handle error
+        //return -ENOMEM;
+    }
+
+    *shared_inode_incoming = (struct hifs_inode) {
         .i_mode = S_IFREG | 0644,
         .i_uid = 000001,
         .i_gid = 010101,
@@ -35,18 +51,18 @@ void hifs_create_test_inode(void) {
         .i_bytes = 512,
         .i_size = 512,
         .i_ino = 1,
-        .hifs_inode_list = LIST_HEAD_INIT(first_inode.hifs_inode_list)
     };
 
-    struct hifs_cmds first_cmd = {
+    *shared_cmd_incoming = (struct hifs_cmds){
         .cmd = "test_cmd",
         .count = 1,
-        .hifs_cmd_list = LIST_HEAD_INIT(first_cmd.hifs_cmd_list)
     };
 
-    shared_inode_outgoing = &first_inode;
-    shared_cmd_outgoing = &first_cmd;
-    // Return the cmd & inode
+    INIT_LIST_HEAD(&shared_inode_incoming_lst);
+    INIT_LIST_HEAD(&shared_cmd_incoming_lst);
+    INIT_LIST_HEAD(&shared_inode_incoming->hifs_inode_list);
+    INIT_LIST_HEAD(&shared_cmd_incoming->hifs_cmd_list);
+
 }
 
 int hifs_thread_fn(void *data) {
@@ -76,6 +92,9 @@ int hifs_thread_fn(void *data) {
 
 int hifs_queue_send(const char *buf) {
     // Data Sent to queue, now remove it from kernel list now.
+
+    // Remove the inode from the kernel disk cache and let user space handle it now.
+
 
 
     atomic_set(&my_atomic_variable, HIFS_Q_PROTO_KERNEL_WO_USER);

@@ -21,7 +21,15 @@ struct hifs_cmds *shared_cmd_outgoing;       // received thru the 3 device files
 struct hifs_inode *shared_inode_incoming;    // as the "queues" (to hi_command). We want
 struct hifs_blocks *shared_block_incoming;   // to proces them fast, so they're split into
 struct hifs_cmds *shared_cmd_incoming;       // incoming & outgoing queues here.
- char *filename;     // The filename we're currently sending/recieving to/from.
+
+struct list_head shared_inode_outgoing_lst;    
+struct list_head shared_block_outgoing_lst;    
+struct list_head shared_cmd_outgoing_lst;       
+struct list_head shared_inode_incoming_lst;    
+struct list_head shared_block_incoming_lst;   
+struct list_head shared_cmd_incoming_lst;   
+
+char *filename;     // The filename we're currently sending/recieving to/from.
 
 
 // Each device queue has it's own file_operations struct.
@@ -205,96 +213,77 @@ int hifs_comm_device_release(struct inode *inode, struct file *filp) {
     return 0;
 }
 
-ssize_t hi_comm_device_read(struct file *filp, const char __user *buf, size_t count, loff_t *f_pos) {
+ssize_t hi_comm_device_read(struct file *filp, char __user *buf, size_t count, loff_t *f_pos) {
     // Write out to user space.
     ssize_t result = 0;
     char *filename = (char *)filp->f_path.dentry->d_name.name;
-    struct list_head *entry;
 
     if (strcmp(filename, DEVICE_FILE_INODE) == 0) {
         struct hifs_inode *send_data;
-        entry = shared_inode_outgoing->hifs_inode_list.next; 
-        send_data = list_entry(entry, struct hifs_inode, hifs_inode_list);
+        send_data = list_last_entry(&shared_inode_outgoing_lst, struct hifs_inode, hifs_inode_list);
         if (copy_to_user((char *)buf, send_data, count) != 0) {
-            result = -EFAULT;
+            result = (ssize_t)-EFAULT;
         } else {
-            result = count;
+            result = (ssize_t)count;
             hifs_queue_send(buf);
         }
     } else if (strcmp(filename, DEVICE_FILE_BLOCK) == 0) {
-        struct hifs_blocks *send_data;
-        entry = shared_block_outgoing->hifs_block_list.next; 
-        send_data = list_entry(entry, struct hifs_blocks, hifs_block_list);
+        struct hifs_blocks *send_data; 
+        send_data = list_last_entry(&shared_block_outgoing_lst, struct hifs_blocks, hifs_block_list);
         if (copy_to_user((char *)buf, send_data, count) != 0) {
-            result = -EFAULT;
+            result = (ssize_t)-EFAULT;
         } else {
-            result = count;
+            result = (ssize_t)count;
             hifs_queue_send(buf);
         }
     } else if (strcmp(filename, DEVICE_FILE_CMDS) == 0) {
         struct hifs_cmds *send_data;
-        entry = shared_cmd_outgoing->hifs_cmd_list.next; 
-        send_data = list_entry(entry, struct hifs_cmds, hifs_cmd_list);
+        send_data = list_last_entry(&shared_cmd_outgoing_lst, struct hifs_cmds, hifs_cmd_list);
         if (copy_to_user((char *)buf, send_data, count) != 0) {
-            result = -EFAULT;
+            result = (ssize_t)-EFAULT;
         } else {
-            result = count;
+            result = (ssize_t)count;
             hifs_queue_send(buf);
         }
     } else {
-        result = -EFAULT;
+        result = (ssize_t)-EFAULT;
     }
 
-    return result;
+    return (ssize_t)result;
 }
 
-ssize_t hi_comm_device_write(struct file *filp, char __user *buf, size_t count, loff_t *f_pos) {
+ssize_t hi_comm_device_write(struct file *filp, const char __user *buf, size_t count, loff_t *f_pos) {
     // Read from user space
     ssize_t result = 0;
     char *filename = (char *)filp->f_path.dentry->d_name.name;
 
     if (strcmp(filename, DEVICE_FILE_INODE) == 0) {
-        struct hifs_inode *new_entry = kmalloc(sizeof(*new_entry), GFP_KERNEL);
-        if (!new_entry) {
-            // Handle error
-            return -ENOMEM;
-        }
-        if (copy_from_user(new_entry, buf, count) != 0) {
-            result = -EFAULT;
+        if (copy_from_user(shared_inode_incoming, buf, count) != 0) {
+            result = (ssize_t)-EFAULT;
         } else {
-            result = count;
-            list_add(&new_entry->hifs_inode_list, shared_inode_incoming->hifs_inode_list);
+            result =(ssize_t)count;
+            list_add(&shared_inode_incoming->hifs_inode_list, &shared_inode_incoming_lst);
             hifs_queue_recv();
         }
     } else if (strcmp(filename, DEVICE_FILE_BLOCK) == 0) {
-        struct hifs_blocks *new_entry = kmalloc(sizeof(*new_entry), GFP_KERNEL);
-        if (!new_entry) {
-            // Handle error
-            return -ENOMEM;
-        }
-        if (copy_from_user(new_entry, buf, count) != 0) {
-            result = -EFAULT;
+        if (copy_from_user(shared_block_incoming, buf, count) != 0) {
+            result = (ssize_t)-EFAULT;
         } else {
-            result = count;
-            list_add(&new_entry->hifs_block_list, &shared_block_incoming);
+            result = (ssize_t)count;
+            list_add(&shared_block_incoming->hifs_block_list, &shared_block_incoming_lst);
             hifs_queue_recv();
         }
-    } else if (strcmp(filename, DEVICE_FILE_CMDS) == 0) {
-        struct hifs_cmds *new_entry = kmalloc(sizeof(*new_entry), GFP_KERNEL);
-        if (!new_entry) {
-            // Handle error
-            return -ENOMEM;
-        }    
-        if (copy_from_user(new_entry, buf, count) != 0) {
-            result = -EFAULT;
+    } else if (strcmp(filename, DEVICE_FILE_CMDS) == 0) {  
+        if (copy_from_user(shared_cmd_incoming, buf, count) != 0) {
+            result = (ssize_t)-EFAULT;
         } else {
-            result = count;
-            list_add(&new_entry->hifs_cmd_list, &shared_cmd_incoming);
+            result = (ssize_t)count;
+            list_add(&shared_cmd_incoming->hifs_cmd_list, &shared_cmd_incoming_lst);
             hifs_queue_recv();
         }
     } else {
-        result = -EFAULT;
+        result = (ssize_t)-EFAULT;
     }
 
-    return result;
+    return (ssize_t)result;
 }

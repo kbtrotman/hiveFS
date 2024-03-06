@@ -35,6 +35,14 @@ extern struct hifs_cmds *shared_cmd_outgoing;       // received thru the 3 devic
 extern struct hifs_inode *shared_inode_incoming;    // as the "queues" (to hi_command). We want
 extern struct hifs_blocks *shared_block_incoming;   // to proces them fast, so they're split into
 extern struct hifs_cmds *shared_cmd_incoming;       // incoming & outgoing queues here.
+
+extern struct list_head shared_inode_outgoing_lst;    
+extern struct list_head shared_block_outgoing_lst;    
+extern struct list_head shared_cmd_outgoing_lst;       
+extern struct list_head shared_inode_incoming_lst;    
+extern struct list_head shared_block_incoming_lst;   
+extern struct list_head shared_cmd_incoming_lst; 
+
 extern char *filename;     // The filename we're currently sending/recieving to/from.
 
 
