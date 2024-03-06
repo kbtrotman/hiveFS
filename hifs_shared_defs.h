@@ -59,6 +59,7 @@ extern struct list_head shared_inode_incoming_lst;
 extern struct list_head shared_block_incoming_lst;   
 extern struct list_head shared_cmd_incoming_lst;       
 extern char *filename;     // The filename we're currently sending/recieving to/from.
+extern char buffer[4096];
 
 struct hifs_blocks {
 	char *buffer;
