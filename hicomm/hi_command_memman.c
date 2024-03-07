@@ -27,6 +27,9 @@ char device_file_inode[256];
 char device_file_block[256];
 char device_file_cmd[50];
 
+char buffer[4096];
+char *filename;
+
 struct hifs_inode *shared_inode_outgoing;    // These six Doubly-Linked Lists are our
 struct hifs_blocks *shared_block_outgoing;   // processing queues. They are sent & 
 struct hifs_cmds *shared_cmd_outgoing;       // received thru the 3 device files known
@@ -69,16 +72,6 @@ int write_to_atomic(int value)
 
     close(fd);
     return value;
-}
-
-int hi_comm_queue_init(void)
-{
-
-
-
-
-
-    return EXIT_SUCCESS;
 }
 
 void hi_comm_close_queues(void)
