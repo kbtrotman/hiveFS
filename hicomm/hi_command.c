@@ -44,7 +44,7 @@ int main(int argc, char *argv[])
     strcat(device_file_cmd, DEVICE_FILE_CMDS);
 
     int atomic_value;
-    hi_comm_queue_init(); 
+    //hi_comm_queue_init(); 
     atomic_value = read_from_atomic();
     printf("hi-command: Atomic value: %d\n", atomic_value);
 

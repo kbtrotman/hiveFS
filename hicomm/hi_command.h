@@ -34,7 +34,7 @@ extern char atomic_device_name[256];
 extern char device_file_inode[256];
 extern char device_file_block[256];
 extern char device_file_cmd[50];
-
+extern int fd_cmd, fd_inode, fd_block;
 // Prototypes Here:
 
 /* hi_command.c */
@@ -47,7 +47,6 @@ void read_from_command_queue(void);
 /* hi_command_memman.c */
 int read_from_atomic(void);
 int write_to_atomic(int value);
-int hi_comm_queue_init(void);
 int write_to_dev(char *buffer, int size, char dev_file);
 int read_from_dev(char dev_file, int size);
 void hi_comm_close_queues(void);
