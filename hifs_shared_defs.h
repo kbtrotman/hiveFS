@@ -30,18 +30,28 @@
  ******************************/
 // Our protocol for comms using the comms queues.
 // these values are set in the atomic variable.
-// The atomic variable is a shared memory space
-// between kernel and user space. For Hi_Command.
+
 #define HIFS_Q_PROTO_VERSION  1          // Version of the protocol
 #define HIFS_Q_PROTO_UNUSED 0            // Queue is not in use
 #define HIFS_Q_PROTO_KERNEL_LOCK 1       // Kernel has locked the queue
 #define HIFS_Q_PROTO_KERNEL_WO_USER 2    // Kernel is waiting on user
 #define HIFS_Q_PROTO_USER_LOCK 3         // User has locked the queue
 #define HIFS_Q_PROTO_USER_WO_KERNEL 4    // User is waiting on kernel
-// Leave some locking variables here for future use....
+// Leave some un-assigned variables here for future use....
 #define HIFS_Q_PROTO_ACK_LINK_UP 8       // Acknowledge link up command
 #define HIFS_Q_PROTO_ACK_LINK_KERN 9     // Kernel initiated a link up command
 #define HIFS_Q_PROTO_ACK_LINK_USER 10    // User initiated a link up command
+
+#define HIFS_Q_PROTO_NUM_CMDS 9
+#define HIFS_Q_PROTO_CMD_FLUSH "cache_flush_all"
+#define HIFS_Q_PROTO_CMD_BLOCK_RECV "block_recv"
+#define HIFS_Q_PROTO_CMD_BLOCK_SEND "block_send"
+#define HIFS_Q_PROTO_CMD_INODE_RECV "inode_recv"
+#define HIFS_Q_PROTO_CMD_INODE_SEND "inode_send"
+#define HIFS_Q_PROTO_CMD_FILE_RECV "file_recv"
+#define HIFS_Q_PROTO_CMD_FILE_SEND "file_send"
+#define HIFS_Q_PROTO_CMD_ENGINE_VERS "engine_version"
+#define HIFS_Q_PROTO_CMD_TEST "test_cmd"
 
 
 extern int major;

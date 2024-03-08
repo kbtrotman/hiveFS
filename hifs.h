@@ -48,7 +48,6 @@ extern struct task_struct *task;
 
 /* hi_command_kern.c */
 void hifs_comm_link_up (void);
-int hifs_comm_rcv_inode( void );
 int hifs_comm_link_init_change( void );
 int hifs_thread_fn(void *data);
 void hifs_comm_link_up_completed(void);

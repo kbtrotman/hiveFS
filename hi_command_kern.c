@@ -54,7 +54,7 @@ void hifs_create_test_inode(void) {
     };
 
     *shared_cmd_incoming = (struct hifs_cmds){
-        .cmd = "test_cmd",
+        .cmd = HIFS_Q_PROTO_CMD_TEST,
         .count = 1,
     };
 
@@ -107,35 +107,6 @@ int hifs_queue_recv(void) {
 
     atomic_set(&my_atomic_variable, HIFS_Q_PROTO_UNUSED);
     return 0;
-}
-
-
-int hifs_comm_rcv_inode( void )
-{
-    char *iname;
-    
-    // Allocate memory for iname
-    iname = kzalloc(50, GFP_KERNEL);
-
-    // READ the inode from the shared queue here......
-
-    if (iname == NULL) {
-        pr_info(KERN_ERR "hivefs: Error allocating memory for iname.\n");
-        return -ENOMEM;
-    }
-
-    // Check if the acknowledgement attribute is present
-    if (1) {
-
-        pr_info(KERN_INFO "hivefs-comm: Received INODE Command.\n");
-        pr_info(KERN_INFO "hivefs-comm: i_name: %s\n", iname);
-        kfree(iname); // Free the allocated memory
-        return 0;
-    } else {
-        pr_info(KERN_ERR "hivefs-comm: Error processing comm INODE Command packet.\n");
-        kfree(iname); // Free the allocated memory
-        return -1;
-    }   
 }
 
 int hifs_comm_link_init_change( void )

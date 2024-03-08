@@ -6,6 +6,7 @@
  * License: GNU GPL as of 2023
  *
  */
+#pragma once
 
 /***********************
  * Database  Definitions
@@ -20,12 +21,13 @@
 #define DBSTRING "user=" USER " dbname=" DATABASE " password=" PASSWORD " hostaddr=" HOST " port=" PORT
 
 /* SQL Connect */
-static struct {
+struct PSQL {
 	PGconn *hive_conn;	/* Connection to hive */
 	PGresult   *last_qury; /* Last query result */
 	PGresult   *last_ins; /* Last insert result */
 	int  rec_count;     /* Number of records in last query */
 	int  row;
 	int  col;
-	bool *sql_init;
-} sql;
+	bool sql_init;
+};
+extern struct PSQL sqldb;

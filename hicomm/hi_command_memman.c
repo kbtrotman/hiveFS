@@ -21,11 +21,11 @@ int ret, fd_cmd, fd_inode, fd_block;
 char buffer[4096];
 
 const char *atomic_device = ATOMIC_DEVICE_NAME;
+char atomic_device_name[256];
 char atomic_path[];
-char atomic_device_name[256];  // Make sure this is large enough
-char device_file_inode[256];
-char device_file_block[256];
-char device_file_cmd[50];
+char *device_file_inode;
+char *device_file_block;
+char *device_file_cmd;
 
 char buffer[4096];
 char *filename;
@@ -45,13 +45,13 @@ int read_from_atomic(void)
 
     fd = open(atomic_device_name, O_RDWR);
     if (fd == -1) {
-        perror("Error opening device file");
+        perror("hi_comm: Error opening device file");
         return -1;
     }
 
     // Reading from the atomic variable in the kernel space
     read(fd, &value, sizeof(int));
-    printf("Read value from kernel: %d\n", value);
+    printf("hi_comm: Read value from kernel: %d\n", value);
     close(fd);
     return value;
 }
@@ -62,13 +62,13 @@ int write_to_atomic(int value)
 
     fd = open( atomic_device_name, O_RDWR);
     if (fd == -1) {
-        perror("Error opening device file");
+        perror("hi_comm: Error opening device file");
         return -1;
     }
 
     // Writing to the atomic variable in the kernel space
     write(fd, &value, sizeof(int));
-    printf("Wrote value to kernel: %d\n", value);
+    printf("hi_comm: Wrote value to kernel: %d\n", value);
 
     close(fd);
     return value;
@@ -84,27 +84,33 @@ void hi_comm_close_queues(void)
     close(fd_cmd);
 }
 
-int read_from_dev(char dev_file, int size)
+int read_from_dev(char *dev_file, int size)
 {
     int ret;
 
-    if (strcmp(&dev_file, device_file_inode) == 0) {
+    if (strcmp(dev_file, device_file_inode) == 0) {
         int fd_inode = open(device_file_inode, O_RDWR);
         if (fd_inode == -1) {
-            perror("Error opening inode device file");
+            perror("hi_comm: Error opening inode device file");
             return EXIT_FAILURE;
         }
         shared_inode_incoming = mmap(0, sizeof(shared_inode_incoming), PROT_READ | PROT_WRITE, MAP_SHARED, fd_inode, 0);
         if (!shared_inode_incoming) {
-            perror("Error mapping shared memory");
+            perror("hi_comm: Error mapping shared memory");
             return -1;
         }
         ret = read(fd_inode, &buffer, size);
+        if (ret >= 0) {
+            buffer[ret] = '\0';  // null-terminate the string, read doesn't play well.
+        } else {
+            // Handle error
+            perror("hi_comm: Error reading from inode device file");
+        }
 
         // Add New Entry to incoming queue
 
         close(fd_inode);
-    } else if (strcmp(&dev_file, device_file_block) == 0) {
+    } else if (strcmp(dev_file, device_file_block) == 0) {
         int fd_block = open(device_file_block, O_RDWR);
         if (fd_block == -1) {
             perror("Error opening block device file");
@@ -116,11 +122,18 @@ int read_from_dev(char dev_file, int size)
             return -2;
         }
         ret = read(fd_block, &buffer, size);
-        
+        if (ret >= 0) {
+            buffer[ret] = '\0';  // null-terminate the string, read doesn't play well.
+        } else {
+            // Handle error
+            perror("hi_comm: Error reading from block device file");
+        }
+
+
         // Add New Entry to incoming queue
 
         close(fd_block);
-    } else if (strcmp(&dev_file, device_file_cmd) == 0) {   
+    } else if (strcmp(dev_file, device_file_cmd) == 0) {   
         int fd_cmd = open(device_file_cmd, O_RDWR);
         if (fd_cmd == -1) {
             perror("Error opening command device file");
@@ -132,6 +145,13 @@ int read_from_dev(char dev_file, int size)
             return -3;
         }
         ret = read(fd_cmd, &buffer, size);
+        if (ret >= 0) {
+            buffer[ret] = '\0';  // null-terminate the string, read doesn't play well.
+        } else {
+            // Handle error
+            perror("hi_comm: Error reading from command device file");
+        }
+
 
         // Add New Entry to incoming queue
 
@@ -149,11 +169,11 @@ int read_from_dev(char dev_file, int size)
 
 }
 
-int write_to_dev(char *buffer, int size, char dev_file)
+int write_to_dev(char *buffer, int size, char *dev_file)
 {
     int ret;
 
-    if (strcmp(&dev_file, device_file_inode) == 0) {
+    if (strcmp(dev_file, device_file_inode) == 0) {
         shared_inode_outgoing = mmap(0, sizeof(shared_inode_outgoing), PROT_READ | PROT_WRITE, MAP_SHARED, fd_inode, 0);
         if (!shared_inode_outgoing) {
             perror("Error mapping shared memory");
@@ -164,7 +184,7 @@ int write_to_dev(char *buffer, int size, char dev_file)
         // Unmap temp shared memory and remove outgoing item from list
 
         close(fd_inode);
-    } else if (strcmp(&dev_file, device_file_block) == 0) {
+    } else if (strcmp(dev_file, device_file_block) == 0) {
         shared_block_outgoing = mmap(0, sizeof(shared_block_outgoing), PROT_READ | PROT_WRITE, MAP_SHARED, fd_block, 0);
         if (!shared_block_outgoing) {
             perror("Error mapping shared memory");
@@ -175,7 +195,7 @@ int write_to_dev(char *buffer, int size, char dev_file)
          // Unmap temp shared memory and remove outgoing item from list
 
         close(fd_block);
-    } else if (strcmp(&dev_file, device_file_cmd) == 0) {
+    } else if (strcmp(dev_file, device_file_cmd) == 0) {
         shared_cmd_outgoing = mmap(0, sizeof(shared_cmd_outgoing), PROT_READ | PROT_WRITE, MAP_SHARED, fd_cmd, 0);
         if (!shared_cmd_outgoing) {
             perror("Error mapping shared memory");

@@ -25,15 +25,17 @@
 #include "../hifs_shared_defs.h"
 // COMMON Definitions Here ONLY!
 
+
+#include "sql/hi_command_sql.h"
 #define prerr(...) fprintf(stderr, "error: " __VA_ARGS__)
 
 /*  This file is for definitions specific to the Hi_Command router in user-space.  */
+extern char atomic_device_name[256];
 extern const char *atomic_device;
 extern char atomic_path[20];
-extern char atomic_device_name[256]; 
-extern char device_file_inode[256];
-extern char device_file_block[256];
-extern char device_file_cmd[50];
+extern char *device_file_inode;
+extern char *device_file_block;
+extern char *device_file_cmd;
 extern int fd_cmd, fd_inode, fd_block;
 // Prototypes Here:
 
@@ -47,8 +49,8 @@ void read_from_command_queue(void);
 /* hi_command_memman.c */
 int read_from_atomic(void);
 int write_to_atomic(int value);
-int write_to_dev(char *buffer, int size, char dev_file);
-int read_from_dev(char dev_file, int size);
+int write_to_dev(char *buffer, int size, char *dev_file);
+int read_from_dev(char *dev_file, int size);
 void hi_comm_close_queues(void);
 
 /* hi_command_sql.c */
