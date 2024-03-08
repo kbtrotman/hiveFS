@@ -13,23 +13,36 @@ struct hifs_link hifs_user_link;
 extern const char *atomic_device;
 extern char atomic_path[20];
 extern char atomic_device_name[256]; 
-extern char device_file_inode[256];
-extern char device_file_block[256];
-extern char device_file_cmd[50];
+extern char *device_file_inode;
+extern char *device_file_block;
+extern char *device_file_cmd;
 
 extern char buffer[4096];
+extern struct PSQL sqldb;
 
 struct hifs_inode *shared_inode_outgoing;    // These six Doubly-Linked Lists are our
-struct hifs_blocks *shared_block_outgoing;   // processing queues. They are sent & 
-struct hifs_cmds *shared_cmd_outgoing;       // received thru the 3 device files known
-struct hifs_inode *shared_inode_incoming;    // as the "queues" (to hi_command). We want
-struct hifs_blocks *shared_block_incoming;   // to proces them fast, so they're split into
-struct hifs_cmds *shared_cmd_incoming;       // incoming & outgoing queues here.
- 
+struct hifs_blocks *shared_block_outgoing;   // processing queues. 
+struct hifs_cmds *shared_cmd_outgoing;       
+struct hifs_inode *shared_inode_incoming;    
+struct hifs_blocks *shared_block_incoming;   
+struct hifs_cmds *shared_cmd_incoming;
+
 
 int main(int argc, char *argv[])
 {
     hifs_user_link.clockstart = GET_TIME();
+    sqldb.hive_conn = NULL;
+    sqldb.last_qury = NULL;
+    sqldb.last_ins = NULL;
+    sqldb.col = 0;
+    sqldb.row = 0;
+    sqldb.rec_count = 0;
+    sqldb.sql_init = false;
+
+    device_file_inode = malloc(256);
+    device_file_block = malloc(256);
+    device_file_cmd = malloc(50);
+
     strcpy(atomic_path, "/dev/");
     strcpy(atomic_device_name, atomic_path);
     strcat(atomic_device_name, atomic_device);
