@@ -53,43 +53,21 @@
 #define HIFS_Q_PROTO_CMD_ENGINE_VERS "engine_version"
 #define HIFS_Q_PROTO_CMD_TEST "test_cmd"
 
-
-extern int major;
-extern struct hifs_inode *shared_inode_outgoing;    // These six Doubly-Linked Lists are our
-extern struct hifs_blocks *shared_block_outgoing;   // processing queues. They are sent & 
-extern struct hifs_cmds *shared_cmd_outgoing;       // received thru the 3 device files known
-extern struct hifs_inode *shared_inode_incoming;    // as the "queues" (to hi_command). We want
-extern struct hifs_blocks *shared_block_incoming;   // to proces them fast, so they're split into
-extern struct hifs_cmds *shared_cmd_incoming;       // incoming & outgoing queues here.
-// List pointers, for initializing the lists
-extern struct list_head shared_inode_outgoing_lst;    
-extern struct list_head shared_block_outgoing_lst;    
-extern struct list_head shared_cmd_outgoing_lst;       
-extern struct list_head shared_inode_incoming_lst;    
-extern struct list_head shared_block_incoming_lst;   
-extern struct list_head shared_cmd_incoming_lst;       
-extern char *filename;     // The filename we're currently sending/recieving to/from.
-extern char buffer[4096];
-
 struct hifs_blocks {
 	char *buffer;
 	int count;
-#ifdef __KERNEL__
 	struct list_head hifs_block_list;
-#else
-	struct hifs_blocks *prev, *next;
-#endif
 };
 
 struct hifs_cmds {
 	char *cmd;
 	int count;
-#ifdef __KERNEL__
-		struct list_head hifs_cmd_list;
-#else
-		struct hifs_cmds *prev, *next;
-#endif
+	struct list_head hifs_cmd_list;
 };
+
+extern int major;  
+extern char *filename;     // The filename we're currently sending/recieving to/from.
+extern char buffer[4096];
 
 
 #ifdef __KERNEL__
@@ -177,7 +155,7 @@ struct hifs_inode
 	uint16_t	i_uid;		/* owner's user id */
 	uint16_t	i_gid;		/* owner's group id */
 	uint16_t	i_hrd_lnk;	/* number of hard links */
-	uint32_t i_atime; /* Archive Time */
+	uint32_t    i_atime; /* Archive Time */
 	uint32_t	i_mtime; /* Modified Time */
 	uint32_t	i_ctime; /* Creation Time */
 	uint32_t	i_size;		/* Number of bytes in file */
@@ -190,14 +168,24 @@ struct hifs_inode
 	uint32_t	i_addre[HIFS_INODE_TSIZE];	/* End block of extend ranges */
 	uint32_t	i_blocks;	/* Number of blocks */
 	uint32_t	i_bytes;	/* Number of bytes */
-#ifdef __KERNEL__
 	struct list_head hifs_inode_list;
-#else
-	struct hifs_inode *prev, *next;
-#endif
 };
 
-extern struct list_head hifs_inode_listhead;
+extern struct hifs_inode *shared_inode_outgoing;    // These six Doubly-Linked Lists are our
+extern struct hifs_blocks *shared_block_outgoing;   // processing queues. They are sent & 
+extern struct hifs_cmds *shared_cmd_outgoing;       // received thru the 3 device files known
+extern struct hifs_inode *shared_inode_incoming;    // as the "queues" (to hi_command). We want
+extern struct hifs_blocks *shared_block_incoming;   // to proces them fast, so they're split into
+extern struct hifs_cmds *shared_cmd_incoming;       // incoming & outgoing queues here.
+// List pointers, for initializing the lists
+extern struct list_head shared_inode_outgoing_lst;    
+extern struct list_head shared_block_outgoing_lst;    
+extern struct list_head shared_cmd_outgoing_lst;       
+extern struct list_head shared_inode_incoming_lst;    
+extern struct list_head shared_block_incoming_lst;   
+extern struct list_head shared_cmd_incoming_lst;     
+
+
 struct hifs_dir_entry 
 {
 	uint32_t inode_nr;		/* inode number */

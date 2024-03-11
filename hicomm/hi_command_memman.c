@@ -37,6 +37,13 @@ struct hifs_inode *shared_inode_incoming;    // as the "queues" (to hi_command).
 struct hifs_blocks *shared_block_incoming;   // to proces them fast, so they're split into
 struct hifs_cmds *shared_cmd_incoming;       // incoming & outgoing queues here.
 
+struct list_head shared_inode_outgoing_lst;    
+struct list_head shared_block_outgoing_lst;    
+struct list_head shared_cmd_outgoing_lst;       
+struct list_head shared_inode_incoming_lst;    
+struct list_head shared_block_incoming_lst;   
+struct list_head shared_cmd_incoming_lst;  
+
 
 int read_from_atomic(void)
 {

@@ -201,13 +201,14 @@ void unregister_all_comm_queues(void)
     kfree(shared_inode_incoming);
     kfree(shared_block_incoming);
     kfree(shared_cmd_incoming);
+    kfree(atomic_class);
+    kfree(atomic_device);
+    kfree(task);
 }
 
 int hifs_comm_device_release(struct inode *inode, struct file *filp) {
-    struct my_device_data *data = filp->private_data;
 
     /* free buffer */
-    kfree(data);
     kfree(filename);
 
     return 0;

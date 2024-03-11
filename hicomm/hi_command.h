@@ -18,6 +18,10 @@
 #include <fcntl.h>
 #include <unistd.h>
 
+// A user-space definition for a kernel-style Doubly Linked List
+// Modified by:  kazutomo@mcs.anl.gov
+#include "ext_kernel_style_linked_list_4_user.h"
+
 // In the definitions file, those items are common to hi_command in both kernel-space and
 // in user-space.  The definitions file is included in both the kernel-space and user-space
 // hi_command files.
@@ -27,6 +31,7 @@
 
 
 #include "sql/hi_command_sql.h"
+
 #define prerr(...) fprintf(stderr, "error: " __VA_ARGS__)
 
 /*  This file is for definitions specific to the Hi_Command router in user-space.  */
