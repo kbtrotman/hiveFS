@@ -71,8 +71,9 @@ int hifs_thread_fn(void *data) {
 
         value = atomic_read(&my_atomic_variable);
         if ( value == HIFS_Q_PROTO_UNUSED) {
-            atomic_set(&my_atomic_variable, HIFS_Q_PROTO_KERNEL_LOCK);;
+            atomic_set(&my_atomic_variable, HIFS_Q_PROTO_KERNEL_LOCK);
             // Call our queue management function to write data to the queue here
+            strcpy(buffer, HIFS_Q_PROTO_CMD_TEST);
             hifs_queue_send(buffer);
         } else if (value == HIFS_Q_PROTO_USER_WO_KERNEL) {
             hifs_queue_recv();
@@ -92,7 +93,6 @@ int hifs_thread_fn(void *data) {
 
 int hifs_queue_send(const char *buf) {
     // Data Sent to queue, now remove it from kernel list now.
-
     // Remove the inode from the kernel disk cache and let user space handle it now.
 
 
