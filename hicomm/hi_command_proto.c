@@ -33,7 +33,7 @@ extern struct list_head shared_cmd_incoming_lst;
 extern char *filename;     // The filename we're currently sending/recieving to/from.
 
 
-void read_from_command_queue(void)
+void read_from_queue(void)
 {
     int ret;
     int i;
@@ -43,7 +43,7 @@ void read_from_command_queue(void)
         printf("hi-command: Memory couldn't be allocated for incoming command queue\n");
         return;
     }
-    ret = read_from_dev(device_file_cmd, sizeof(buffer));
+    ret = read_from_cmd_dev(device_file_cmd, sizeof(buffer));
     if (ret < 0) {
         printf("hi-command: Error reading from device file: %s\n", device_file_cmd);
         return;
@@ -60,7 +60,7 @@ void read_from_command_queue(void)
 
         if (strcmp(incoming_cmd->cmd, HIFS_Q_PROTO_CMD_TEST) == 0) {
             printf("hi-command: Received test command\n");
-            ret = read_from_dev(device_file_inode, sizeof(buffer));
+            ret = read_from_inode_dev(device_file_inode, sizeof(buffer));
             if (ret < 0) {
                 printf("hi-command: Error reading from device file: %s\n", device_file_inode);
                 return;
@@ -73,8 +73,6 @@ void read_from_command_queue(void)
             }
         }
     }
-
-    write_to_atomic(0);
 
 
     //Save data to the incoming queue.

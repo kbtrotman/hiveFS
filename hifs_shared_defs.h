@@ -54,7 +54,8 @@
 #define HIFS_Q_PROTO_CMD_TEST "test_cmd"
 
 struct hifs_blocks {
-	char *buffer;
+	char *block;
+	int block_size;
 	int count;
 	struct list_head hifs_block_list;
 };
