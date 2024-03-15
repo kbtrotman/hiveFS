@@ -72,23 +72,28 @@ int main(int argc, char *argv[])
     atomic_value = read_from_atomic();
     printf("hi-command: Atomic value: %d\n", atomic_value);
     // Here we ignore values 1,3,4,8,10   
-    if (atomic_value == HIFS_Q_PROTO_UNUSED) {
-        //write_to_atomic(3);
-        //printf("hi-command: Atomic value: %d\n", atomic_value);
-        //scan_user_queue_and_send();  
-    }
-    else if (atomic_value == HIFS_Q_PROTO_ACK_LINK_KERN) {
+
+    if (atomic_value == HIFS_Q_PROTO_ACK_LINK_KERN || hifs_user_link.state == HIFS_COMM_LINK_DOWN) {
         //printf("hi-command: Received hivefs Link_Up Command to user-space.\n");
         hifs_user_link.last_state = hifs_user_link.state;
         hifs_user_link.state = HIFS_COMM_LINK_UP;
         printf("hi-command: user link up'd at %ld seconds after hi_command start.\n", (GET_TIME() - hifs_user_link.clockstart));
         hifs_user_link.last_check = 0;
-        write_to_atomic(HIFS_Q_PROTO_UNUSED);
-        printf("hi-command: Atomic value: %d\n", atomic_value);
+        if (atomic_value == HIFS_Q_PROTO_ACK_LINK_KERN) {
+            write_to_atomic(HIFS_Q_PROTO_UNUSED);
+        } else if (hifs_user_link.state == HIFS_COMM_LINK_DOWN) {
+            write_to_atomic(HIFS_Q_PROTO_ACK_LINK_USER);
+        }
     }
-    else {
-        printf("hi-command: Atomic value: %d\n", atomic_value);
-    }
+
+    // Send to the queues: IE Write
+        // If list isn't empty...
+        // If file isn't locked...
+        // Pop a list entry and write it.
+    // Read from the queues: IE Read
+        // If list isn't full...
+        // If file isn't locked...
+        // Read and place entry on lists...
 
     goto queue_management;
     
