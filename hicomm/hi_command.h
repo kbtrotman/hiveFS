@@ -22,9 +22,8 @@
 // Modified by:  kazutomo@mcs.anl.gov
 #include "ext_kernel_style_linked_list_4_user.h"
 
-// In the definitions file, those items are common to hi_command in both kernel-space and
-// in user-space.  The definitions file is included in both the kernel-space and user-space
-// hi_command files.
+// The definitions file is included in both the kernel-space and user-space
+// hi_command file.
 // COMMON Definitions Here ONLY!
 #include "../hifs_shared_defs.h"
 // COMMON Definitions Here ONLY!
@@ -47,7 +46,6 @@ extern int fd_cmd, fd_inode, fd_block;
 /* hi_command.c */
 
 /* hi_command_proto.c */
-void scan_user_queue_and_send(void);
 void scan_user_queue_and_recv(void);
 void read_from_command_queue(void);
 

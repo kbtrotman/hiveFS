@@ -70,18 +70,11 @@ int hifs_thread_fn(void *data) {
         int value;
 
         value = atomic_read(&my_atomic_variable);
-        if ( value == HIFS_Q_PROTO_UNUSED) {
-            atomic_set(&my_atomic_variable, HIFS_Q_PROTO_KERNEL_LOCK);
-            // Call our queue management function to write data to the queue here
-            strcpy(buffer, HIFS_Q_PROTO_CMD_TEST);
-            hifs_queue_send(buffer);
-        } else if (value == HIFS_Q_PROTO_USER_WO_KERNEL) {
-            hifs_queue_recv();
-            atomic_set(&my_atomic_variable, HIFS_Q_PROTO_UNUSED);
-            // Call our queue management function to recieve data from the queue here
-        } else if (value == HIFS_Q_PROTO_ACK_LINK_UP || 
-                    value == HIFS_Q_PROTO_ACK_LINK_KERN || 
-                    value == HIFS_Q_PROTO_ACK_LINK_USER) {
+        if (value == HIFS_Q_PROTO_ACK_LINK_UP || 
+            value == HIFS_Q_PROTO_ACK_LINK_KERN || 
+            value == HIFS_Q_PROTO_ACK_LINK_USER ||
+            hifs_kern_link.state == HIFS_COMM_LINK_DOWN) 
+        {
             // Call to complete a new or a temp aborted link_up here
             pr_info("hivefs_comm: Waiting on link up. Re-trying...\n");
             hifs_comm_link_init_change();
@@ -91,31 +84,12 @@ int hifs_thread_fn(void *data) {
     return 0;
 }
 
-int hifs_queue_send(const char *buf) {
-    // Data Sent to queue, now remove it from kernel list now.
-    // Remove the inode from the kernel disk cache and let user space handle it now.
-
-
-
-    atomic_set(&my_atomic_variable, HIFS_Q_PROTO_KERNEL_WO_USER);
-    return 0;
-}
-
-int hifs_queue_recv(void) {
-    // Recieve data from the queue here and process it.
-
-
-    atomic_set(&my_atomic_variable, HIFS_Q_PROTO_UNUSED);
-    return 0;
-}
-
 int hifs_comm_link_init_change( void )
 {
     int value = HIFS_Q_PROTO_UNUSED;
     value = atomic_read(&my_atomic_variable);
 
-    if (value == HIFS_Q_PROTO_UNUSED) {
-        atomic_set(&my_atomic_variable, HIFS_Q_PROTO_KERNEL_LOCK);
+    if (value == HIFS_Q_PROTO_UNUSED && hifs_kern_link.state == HIFS_COMM_LINK_DOWN) {
         hifs_comm_link_up();
         atomic_set(&my_atomic_variable, HIFS_Q_PROTO_ACK_LINK_KERN);
         hifs_wait_on_link();
@@ -124,10 +98,8 @@ int hifs_comm_link_init_change( void )
     } else if (value ==HIFS_Q_PROTO_ACK_LINK_KERN) {
         hifs_wait_on_link();
     } else if (value == HIFS_Q_PROTO_ACK_LINK_USER) {
-        atomic_set(&my_atomic_variable, HIFS_Q_PROTO_KERNEL_LOCK);
-        hifs_kern_link.remote_state = HIFS_COMM_LINK_UP;
         hifs_comm_link_up();
-        atomic_set(&my_atomic_variable, HIFS_Q_PROTO_UNUSED);
+        hifs_comm_link_up_completed();
     }
 
     return 0;

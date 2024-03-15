@@ -15,6 +15,7 @@ atomic_t my_atomic_variable = ATOMIC_INIT(0);
 struct class *atomic_class = NULL;
 struct device *atomic_device = NULL;
 int major;
+bool new_device_data = false;
 struct hifs_inode *shared_inode_outgoing;    // These six Doubly-Linked Lists are our
 struct hifs_blocks *shared_block_outgoing;   // processing queues. They are sent & 
 struct hifs_cmds *shared_cmd_outgoing;       // received thru the 3 device files known
@@ -31,27 +32,34 @@ struct list_head shared_cmd_incoming_lst;
 
 char *filename;     // The filename we're currently sending/recieving to/from.
 
+DECLARE_WAIT_QUEUE_HEAD(waitqueue);
+DEFINE_MUTEX(inode_mutex);
+DEFINE_MUTEX(block_mutex);
+DEFINE_MUTEX(cmd_mutex);
 
 // Each device queue has it's own file_operations struct.
 struct file_operations inode_fops = {
     .owner = THIS_MODULE,
-    .read = hi_comm_device_read,
-    .write = hi_comm_device_write,
+    .read = hi_comm_inode_device_read,
+    .write = hi_comm_inode_device_write,
     .release = hifs_comm_device_release,
+    .poll = hifs_inode_device_poll,
 };
 
 struct file_operations block_fops = {
     .owner = THIS_MODULE,
-    .read = hi_comm_device_read,
-    .write = hi_comm_device_write,
+    .read = hi_comm_block_device_read,
+    .write = hi_comm_block_device_write,
     .release = hifs_comm_device_release,
+    .poll = hifs_block_device_poll,
 };
 
 struct file_operations cmd_fops = {
     .owner = THIS_MODULE,
-    .read = hi_comm_device_read,
-    .write = hi_comm_device_write,
+    .read = hi_comm_cmd_device_read,
+    .write = hi_comm_cmd_device_write,
     .release = hifs_comm_device_release,
+    .poll = hifs_cmd_device_poll,
 };
 
 // This faops is a single shared atomic variable that holds our protocol integer for comms.
@@ -88,8 +96,6 @@ int hifs_atomic_init(void) {
     }
 
     pr_info("hivefs: Atomic variable module loaded in kernel\n");
-
-    hifs_comm_link_init_change();
 
     // Start the new monitoring kernel thread
     task = kthread_run(hifs_thread_fn, NULL, "hifs_thread");
@@ -187,6 +193,8 @@ int register_all_comm_queues(void)
     pr_info("hivefs: Queue device created on %s\n", DEVICE_FILE_INODE);
     pr_info("hivefs: Queue device created on %s\n", DEVICE_FILE_BLOCK);
 
+    hifs_create_test_inode();
+
     return 0;
 }
 
@@ -207,84 +215,163 @@ void unregister_all_comm_queues(void)
 }
 
 int hifs_comm_device_release(struct inode *inode, struct file *filp) {
-
     /* free buffer */
-    kfree(filename);
-
+    if (filename) kfree(filename);
     return 0;
 }
 
-ssize_t hi_comm_device_read(struct file *filp, char __user *buf, size_t count, loff_t *f_pos) {
+ssize_t hi_comm_inode_device_read(struct file *filp, char __user *buf, size_t count, loff_t *f_pos) {
     // Write out to user space.
     ssize_t result = 0;
-    char *filename = (char *)filp->f_path.dentry->d_name.name;
 
-    if (strcmp(filename, DEVICE_FILE_INODE) == 0) {
-        struct hifs_inode *send_data;
-        send_data = list_last_entry(&shared_inode_outgoing_lst, struct hifs_inode, hifs_inode_list);
-        if (copy_to_user((char *)buf, send_data, count) != 0) {
-            result = (ssize_t)-EFAULT;
-        } else {
-            result = (ssize_t)count;
-            hifs_queue_send(buf);
-        }
-    } else if (strcmp(filename, DEVICE_FILE_BLOCK) == 0) {
-        struct hifs_blocks *send_data; 
-        send_data = list_last_entry(&shared_block_outgoing_lst, struct hifs_blocks, hifs_block_list);
-        if (copy_to_user((char *)buf, send_data, count) != 0) {
-            result = (ssize_t)-EFAULT;
-        } else {
-            result = (ssize_t)count;
-            hifs_queue_send(buf);
-        }
-    } else if (strcmp(filename, DEVICE_FILE_CMDS) == 0) {
-        struct hifs_cmds *send_data;
-        send_data = list_last_entry(&shared_cmd_outgoing_lst, struct hifs_cmds, hifs_cmd_list);
-        if (copy_to_user((char *)buf, send_data, count) != 0) {
-            result = (ssize_t)-EFAULT;
-        } else {
-            result = (ssize_t)count;
-            hifs_queue_send(buf);
-        }
-    } else {
-        result = (ssize_t)-EFAULT;
+    //wait_event_interruptible(waitqueue, device_open > 0);
+
+    struct hifs_inode *send_data;
+    send_data = list_last_entry(&shared_inode_outgoing_lst, struct hifs_inode, hifs_inode_list);
+
+    if (!mutex_trylock(&inode_mutex)) {
+        printk(KERN_INFO "hifs_comm: [Inode] Another process is accessing the device. Waiting...\n");
+        return -EBUSY;
     }
+
+    if (copy_to_user((char *)buf, send_data, count) != 0) {
+        result = (ssize_t)-EFAULT;
+    } else {
+        result = (ssize_t)count;
+    }
+
+    mutex_unlock(&inode_mutex);
+    return (ssize_t)result;
+}
+
+ssize_t hi_comm_block_device_read(struct file *filp, char __user *buf, size_t count, loff_t *f_pos) {
+    // Write out to user space.
+    ssize_t result = 0;
+
+    //wait_event_interruptible(waitqueue, device_open > 0);
+
+    struct hifs_blocks *send_data; 
+    send_data = list_last_entry(&shared_block_outgoing_lst, struct hifs_blocks, hifs_block_list);
+
+    if (!mutex_trylock(&block_mutex)) {
+        printk(KERN_INFO "hifs_comm: [Block] Another process is accessing the device. Waiting...\n");
+        return -EBUSY;
+    }
+
+    if (copy_to_user((char *)buf, send_data, count) != 0) {
+        result = (ssize_t)-EFAULT;
+    } else {
+        result = (ssize_t)count;
+    }
+
+    mutex_unlock(&block_mutex);
+    return (ssize_t)result;
+}
+
+ssize_t hi_comm_cmd_device_read(struct file *filp, char __user *buf, size_t count, loff_t *f_pos) {
+    // Write out to user space.
+    ssize_t result = 0;
+
+    //wait_event_interruptible(waitqueue, device_open > 0);
+
+    struct hifs_cmds *send_data;
+    send_data = list_last_entry(&shared_cmd_outgoing_lst, struct hifs_cmds, hifs_cmd_list);
+
+    if (!mutex_trylock(&cmd_mutex)) {
+        printk(KERN_INFO "hifs_comm: [Cmd] Another process is accessing the device. Waiting...\n");
+        return -EBUSY;
+    }
+
+    if (copy_to_user((char *)buf, send_data, count) != 0) {
+        result = (ssize_t)-EFAULT;
+    } else {
+        result = (ssize_t)count;
+    }
+
+    mutex_unlock(&cmd_mutex);
+    return (ssize_t)result;
+}
+
+ssize_t hi_comm_inode_device_write(struct file *filp, const char __user *buf, size_t count, loff_t *f_pos) {
+    // Read from user space
+    ssize_t result = 0;
+
+    if (copy_from_user(shared_inode_incoming, buf, count) != 0) {
+        result = (ssize_t)-EFAULT;
+    } else {
+        result =(ssize_t)count;
+        list_add(&shared_inode_incoming->hifs_inode_list, &shared_inode_incoming_lst);
+    }
+
+    //wake_up_interruptible(&waitqueue);
 
     return (ssize_t)result;
 }
 
-ssize_t hi_comm_device_write(struct file *filp, const char __user *buf, size_t count, loff_t *f_pos) {
+ssize_t hi_comm_block_device_write(struct file *filp, const char __user *buf, size_t count, loff_t *f_pos) {
     // Read from user space
     ssize_t result = 0;
-    char *filename = (char *)filp->f_path.dentry->d_name.name;
 
-    if (strcmp(filename, DEVICE_FILE_INODE) == 0) {
-        if (copy_from_user(shared_inode_incoming, buf, count) != 0) {
-            result = (ssize_t)-EFAULT;
-        } else {
-            result =(ssize_t)count;
-            list_add(&shared_inode_incoming->hifs_inode_list, &shared_inode_incoming_lst);
-            hifs_queue_recv();
-        }
-    } else if (strcmp(filename, DEVICE_FILE_BLOCK) == 0) {
-        if (copy_from_user(shared_block_incoming, buf, count) != 0) {
-            result = (ssize_t)-EFAULT;
-        } else {
-            result = (ssize_t)count;
-            list_add(&shared_block_incoming->hifs_block_list, &shared_block_incoming_lst);
-            hifs_queue_recv();
-        }
-    } else if (strcmp(filename, DEVICE_FILE_CMDS) == 0) {  
-        if (copy_from_user(shared_cmd_incoming, buf, count) != 0) {
-            result = (ssize_t)-EFAULT;
-        } else {
-            result = (ssize_t)count;
-            list_add(&shared_cmd_incoming->hifs_cmd_list, &shared_cmd_incoming_lst);
-            hifs_queue_recv();
-        }
-    } else {
+    if (copy_from_user(shared_block_incoming, buf, count) != 0) {
         result = (ssize_t)-EFAULT;
+    } else {
+        result = (ssize_t)count;
+        list_add(&shared_block_incoming->hifs_block_list, &shared_block_incoming_lst);
     }
 
+    //wake_up_interruptible(&waitqueue);
+
     return (ssize_t)result;
+}
+
+ssize_t hi_comm_cmd_device_write(struct file *filp, const char __user *buf, size_t count, loff_t *f_pos) {
+    // Read from user space
+    ssize_t result = 0;
+
+    if (copy_from_user(shared_cmd_incoming, buf, count) != 0) {
+        result = (ssize_t)-EFAULT;
+    } else {
+        result = (ssize_t)count;
+        list_add(&shared_cmd_incoming->hifs_cmd_list, &shared_cmd_incoming_lst);
+    }
+
+    //wake_up_interruptible(&waitqueue);
+
+    return (ssize_t)result;
+}
+
+__poll_t hifs_inode_device_poll (struct file *filp, poll_table *wait) {
+    __poll_t mask = 0;
+    poll_wait(filp, &waitqueue, wait);
+
+    if (new_device_data)
+        mask |= POLLIN | POLLRDNORM;
+    if (!new_device_data)
+        mask |= POLLOUT | POLLWRNORM;
+
+    return mask;
+}
+
+__poll_t hifs_block_device_poll (struct file *filp, poll_table *wait) {
+    __poll_t mask = 0;
+    poll_wait(filp, &waitqueue, wait);
+
+    if (new_device_data)
+        mask |= POLLIN | POLLRDNORM;
+    if (!new_device_data)
+        mask |= POLLOUT | POLLWRNORM;
+
+    return mask;
+}
+
+__poll_t hifs_cmd_device_poll (struct file *filp, poll_table *wait) {
+    __poll_t mask = 0;
+    poll_wait(filp, &waitqueue, wait);
+
+    if (new_device_data)
+        mask |= POLLIN | POLLRDNORM;
+    if (!new_device_data)
+        mask |= POLLOUT | POLLWRNORM;
+
+    return mask;
 }
