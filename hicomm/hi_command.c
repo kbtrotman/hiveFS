@@ -75,12 +75,7 @@ int main(int argc, char *argv[])
     if (atomic_value == HIFS_Q_PROTO_UNUSED) {
         //write_to_atomic(3);
         //printf("hi-command: Atomic value: %d\n", atomic_value);
-        //scan_user_queue_and_send();
-    }
-    else if (atomic_value == HIFS_Q_PROTO_KERNEL_WO_USER) {
-        write_to_atomic(3);
-        printf("hi-command: Atomic value: %d\n", atomic_value);
-        scan_user_queue_and_recv();    
+        //scan_user_queue_and_send();  
     }
     else if (atomic_value == HIFS_Q_PROTO_ACK_LINK_KERN) {
         //printf("hi-command: Received hivefs Link_Up Command to user-space.\n");

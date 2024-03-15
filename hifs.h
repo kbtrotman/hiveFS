@@ -29,8 +29,11 @@
 #include <linux/kthread.h>
 #include <linux/delay.h>
 #include <linux/list.h>
+#include <linux/poll.h>
+#include <linux/mutex.h>
 
-// In the definitions file, those items are common to hi_command in both kernel-space and
+
+// The definitions file is included in both kernel-space and
 // in user-space.
 // COMMON Definitions Here ONLY!
 #include "hifs_shared_defs.h"
@@ -51,16 +54,21 @@ void hifs_comm_link_up (void);
 int hifs_comm_link_init_change( void );
 int hifs_thread_fn(void *data);
 void hifs_comm_link_up_completed(void);
-int hifs_queue_send(const char *buf);
-int hifs_queue_recv(void);
 void hifs_create_test_inode(void);
 void hifs_wait_on_link(void);
 
 /* hi_command_kern_comm_memman.c */
 int hifs_comm_device_open(struct inode *inode, struct file *filp);
 int hifs_comm_device_release(struct inode *inode, struct file *filp);
-ssize_t hi_comm_device_write(struct file *filp, const char __user *buf, size_t count, loff_t *f_pos);
-ssize_t hi_comm_device_read(struct file *filp, char __user *buf, size_t count, loff_t *f_pos);
+ssize_t hi_comm_inode_device_write(struct file *filp, const char __user *buf, size_t count, loff_t *f_pos);
+ssize_t hi_comm_block_device_write(struct file *filp, const char __user *buf, size_t count, loff_t *f_pos);
+ssize_t hi_comm_cmd_device_write(struct file *filp, const char __user *buf, size_t count, loff_t *f_pos);
+ssize_t hi_comm_inode_device_read(struct file *filp, char __user *buf, size_t count, loff_t *f_pos);
+ssize_t hi_comm_block_device_read(struct file *filp, char __user *buf, size_t count, loff_t *f_pos);
+ssize_t hi_comm_cmd_device_read(struct file *filp, char __user *buf, size_t count, loff_t *f_pos);
+__poll_t hifs_inode_device_poll (struct file *filp, poll_table *wait);
+__poll_t hifs_block_device_poll (struct file *filp, poll_table *wait);
+__poll_t hifs_cmd_device_poll (struct file *filp, poll_table *wait);
 int register_all_comm_queues(void);
 void unregister_all_comm_queues(void);
 int hifs_atomic_init(void);

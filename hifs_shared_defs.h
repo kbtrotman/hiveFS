@@ -68,7 +68,7 @@ struct hifs_cmds {
 extern int major;  
 extern char *filename;     // The filename we're currently sending/recieving to/from.
 extern char buffer[4096];
-
+extern bool new_device_data;
 
 #ifdef __KERNEL__
 #include <linux/jiffies.h>

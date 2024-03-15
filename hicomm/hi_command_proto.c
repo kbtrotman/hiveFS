@@ -32,22 +32,6 @@ extern struct list_head shared_cmd_incoming_lst;
 
 extern char *filename;     // The filename we're currently sending/recieving to/from.
 
-void scan_user_queue_and_send(void)
-{
-
-
-
-    write_to_atomic(4);
-    return;
-}
-
-void scan_user_queue_and_recv(void)
-{
-    read_from_command_queue();
-    // We have the data, so acknowledge to the kernel.
-    write_to_atomic(0);
-    return;
-}
 
 void read_from_command_queue(void)
 {
@@ -61,6 +45,7 @@ void read_from_command_queue(void)
     }
     ret = read_from_dev(device_file_cmd, sizeof(buffer));
     if (ret < 0) {
+        printf("hi-command: Error reading from device file: %s\n", device_file_cmd);
         return;
     } else {
         printf("hi-command: Read %d bytes from device file: %s\n", ret, device_file_cmd);
@@ -88,6 +73,8 @@ void read_from_command_queue(void)
             }
         }
     }
+
+    write_to_atomic(0);
 
 
     //Save data to the incoming queue.
