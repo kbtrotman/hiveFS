@@ -22,7 +22,7 @@ char buffer[4096];
 
 const char *atomic_device = ATOMIC_DEVICE_NAME;
 char atomic_device_name[256];
-char atomic_path[];
+char atomic_path[20];
 char *device_file_inode;
 char *device_file_block;
 char *device_file_cmd;
@@ -67,7 +67,7 @@ int write_to_atomic(int value)
 {
     int fd;
 
-    fd = open( atomic_device_name, O_RDWR);
+    fd = open(atomic_device_name, O_RDWR);
     if (fd == -1) {
         perror("hi_comm: Error opening device file");
         return -1;
@@ -183,13 +183,7 @@ int read_from_cmd_dev(char *dev_file, int size)
     return ret;
 }
 
-
-
-
-
-
-
-int write_to_inode_dev(char *buffer, int size, char *dev_file)
+int write_to_inode_dev(char *buffer, int size)
 {
     int ret;
     if (fd_inode == -1) {
@@ -215,7 +209,7 @@ int write_to_inode_dev(char *buffer, int size, char *dev_file)
 
 }
 
-int write_to_block_dev(char *buffer, int size, char *dev_file)
+int write_to_block_dev(char *buffer, int size)
 {
     int ret;
     if (fd_block == -1) {
@@ -241,7 +235,7 @@ int write_to_block_dev(char *buffer, int size, char *dev_file)
 
 }
 
-int write_to_cmd_dev(char *buffer, int size, char *dev_file)
+int write_to_cmd_dev(char *buffer, int size)
 {
     int ret;
     if (fd_cmd == -1) {
