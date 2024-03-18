@@ -46,15 +46,15 @@ extern int fd_cmd, fd_inode, fd_block;
 /* hi_command.c */
 
 /* hi_command_proto.c */
-void scan_user_queue_and_recv(void);
+void write_to_queue(void);
 void read_from_queue(void);
 
 /* hi_command_memman.c */
 int read_from_atomic(void);
 int write_to_atomic(int value);
-int write_to_inode_dev(char *buffer, int size, char *dev_file);
-int write_to_block_dev(char *buffer, int size, char *dev_file);
-int write_to_cmd_dev(char *buffer, int size, char *dev_file);
+int write_to_inode_dev(char *buffer, int size);
+int write_to_block_dev(char *buffer, int size);
+int write_to_cmd_dev(char *buffer, int size);
 int read_from_inode_dev(char *dev_file, int size);
 int read_from_block_dev(char *dev_file, int size);
 int read_from_cmd_dev(char *dev_file, int size);

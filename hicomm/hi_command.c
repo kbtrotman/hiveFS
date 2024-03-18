@@ -69,12 +69,12 @@ int main(int argc, char *argv[])
 
 
  queue_management:
+ 
     atomic_value = read_from_atomic();
     printf("hi-command: Atomic value: %d\n", atomic_value);
-    // Here we ignore values 1,3,4,8,10   
-
+    
+    // Here we ignore values 1,3,4,8,10
     if (atomic_value == HIFS_Q_PROTO_ACK_LINK_KERN || hifs_user_link.state == HIFS_COMM_LINK_DOWN) {
-        //printf("hi-command: Received hivefs Link_Up Command to user-space.\n");
         hifs_user_link.last_state = hifs_user_link.state;
         hifs_user_link.state = HIFS_COMM_LINK_UP;
         printf("hi-command: user link up'd at %ld seconds after hi_command start.\n", (GET_TIME() - hifs_user_link.clockstart));
@@ -93,7 +93,7 @@ int main(int argc, char *argv[])
     // Read from the queues: IE Read
         // If list isn't full...
         // If file isn't locked...
-        // Read and place entry on lists...
+        hifs_user_link.state == HIFS_COMM_LINK_UP ? read_from_queue() : 0;
 
     goto queue_management;
     
