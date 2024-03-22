@@ -193,8 +193,6 @@ int register_all_comm_queues(void)
     pr_info("hivefs: Queue device created on %s\n", DEVICE_FILE_INODE);
     pr_info("hivefs: Queue device created on %s\n", DEVICE_FILE_BLOCK);
 
-    hifs_create_test_inode();
-
     return 0;
 }
 

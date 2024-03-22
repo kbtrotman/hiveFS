@@ -69,6 +69,7 @@ int hifs_thread_fn(void *data) {
     while (!kthread_should_stop()) {
         int value;
 
+        hifs_create_test_inode();
         value = atomic_read(&my_atomic_variable);
         if (value == HIFS_Q_PROTO_ACK_LINK_UP || 
             value == HIFS_Q_PROTO_ACK_LINK_KERN || 
@@ -78,6 +79,9 @@ int hifs_thread_fn(void *data) {
             // Call to complete a new or a temp aborted link_up here
             pr_info("hivefs_comm: Waiting on link up. Re-trying...\n");
             hifs_comm_link_init_change();
+        } else {
+            // Call to manage the queue contents
+            hifs_manage_queue_contents();
         }
         msleep(5);  // Sleep for 5 ms
     }
@@ -131,4 +135,40 @@ void hifs_wait_on_link(void)
         }
         msleep(10);
     }
+}
+
+int hifs_manage_queue_contents(void)
+{
+    // Check if command file is locked. If it is, we can't do anything.
+    if (shared_cmd_outgoing->cmd == HIFS_Q_PROTO_CMD_LOCKED) {
+        pr_info("hivefs_comm: Command file is locked. Waiting for unlock.\n");
+        return -1;
+    }
+
+    // Check if the outgoing queue is empty. If it is, we can't do anything.
+    While (list_empty(&shared_inode_outgoing_lst) && list_empty(&shared_block_outgoing_lst) && list_empty(&shared_cmd_outgoing_lst)) {
+        pr_info("hivefs_comm: Outgoing queue is empty. Waiting for data.\n");
+        return -1;
+    }
+
+    // Check if the incoming queue is empty. If it is, we can't do anything.
+    if (list_empty(&shared_inode_incoming_lst) && list_empty(&shared_block_incoming_lst) && list_empty(&shared_cmd_incoming_lst)) {
+        pr_info("hivefs_comm: Incoming queue is empty. Waiting for data.\n");
+        return -1;
+    }
+
+    // Pop data from the incoming queue and process it.
+    if (!list_empty(&shared_inode_incoming_lst) || !list_empty(&shared_block_incoming_lst) || !list_empty(&shared_cmd_incoming_lst)) {
+        pr_info("hivefs_comm: Incoming queue has data. Processing...\n");
+        hifs_process_incoming_queue();
+    }
+
+    // Check if the outgoing queue has data. If it does, process it.
+    if (!list_empty(&shared_inode_outgoing_lst) || !list_empty(&shared_block_outgoing_lst) || !list_empty(&shared_cmd_outgoing_lst)) {
+        pr_info("hivefs_comm: Outgoing queue has data. Processing...\n");
+        hifs_process_outgoing_queue();
+    }
+
+    return 0;
+
 }
