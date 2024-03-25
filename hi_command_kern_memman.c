@@ -32,10 +32,14 @@ struct list_head shared_cmd_incoming_lst;
 
 char *filename;     // The filename we're currently sending/recieving to/from.
 
+bool can_write = false;
+bool can_read  = false;
+
 DECLARE_WAIT_QUEUE_HEAD(waitqueue);
 DEFINE_MUTEX(inode_mutex);
 DEFINE_MUTEX(block_mutex);
 DEFINE_MUTEX(cmd_mutex);
+init_waitqueue_head(&waitqueue);
 
 // Each device queue has it's own file_operations struct.
 struct file_operations inode_fops = {
@@ -222,14 +226,17 @@ ssize_t hi_comm_inode_device_read(struct file *filp, char __user *buf, size_t co
     // Write out to user space.
     ssize_t result = 0;
 
-    //wait_event_interruptible(waitqueue, device_open > 0);
-
     struct hifs_inode *send_data;
     send_data = list_last_entry(&shared_inode_outgoing_lst, struct hifs_inode, hifs_inode_list);
 
-    if (!mutex_trylock(&inode_mutex)) {
-        printk(KERN_INFO "hifs_comm: [Inode] Another process is accessing the device. Waiting...\n");
-        return -EBUSY;
+    for (int lock = 0; lock < 100; lock++){
+        if (mutex_trylock(&inode_mutex)) {
+            break;
+        } else {
+            printk(KERN_INFO "hifs_comm: [Inode] Another process is accessing the device. Waiting...\n");
+            msleep(10);
+        }
+        if (lock == 100) { return -EBUSY; }
     }
 
     if (copy_to_user((char *)buf, send_data, count) != 0) {
@@ -237,6 +244,10 @@ ssize_t hi_comm_inode_device_read(struct file *filp, char __user *buf, size_t co
     } else {
         result = (ssize_t)count;
     }
+
+    can_write = true;
+    //wake up the waitqueue
+    wake_up(&wait_queue_etx_data);
 
     mutex_unlock(&inode_mutex);
     return (ssize_t)result;
@@ -246,14 +257,17 @@ ssize_t hi_comm_block_device_read(struct file *filp, char __user *buf, size_t co
     // Write out to user space.
     ssize_t result = 0;
 
-    //wait_event_interruptible(waitqueue, device_open > 0);
-
     struct hifs_blocks *send_data; 
     send_data = list_last_entry(&shared_block_outgoing_lst, struct hifs_blocks, hifs_block_list);
 
-    if (!mutex_trylock(&block_mutex)) {
-        printk(KERN_INFO "hifs_comm: [Block] Another process is accessing the device. Waiting...\n");
-        return -EBUSY;
+    for (int lock = 0; lock < 100; lock++){
+        if (mutex_trylock(&block_mutex)) {
+            break;
+        } else {
+            printk(KERN_INFO "hifs_comm: [Block] Another process is accessing the device. Waiting...\n");
+            msleep(10);
+        }
+        if (lock == 100) { return -EBUSY; }
     }
 
     if (copy_to_user((char *)buf, send_data, count) != 0) {
@@ -261,6 +275,10 @@ ssize_t hi_comm_block_device_read(struct file *filp, char __user *buf, size_t co
     } else {
         result = (ssize_t)count;
     }
+
+    can_write = true;
+    //wake up the waitqueue
+    wake_up(&wait_queue_etx_data);
 
     mutex_unlock(&block_mutex);
     return (ssize_t)result;
@@ -270,21 +288,29 @@ ssize_t hi_comm_cmd_device_read(struct file *filp, char __user *buf, size_t coun
     // Write out to user space.
     ssize_t result = 0;
 
-    //wait_event_interruptible(waitqueue, device_open > 0);
-
     struct hifs_cmds *send_data;
     send_data = list_last_entry(&shared_cmd_outgoing_lst, struct hifs_cmds, hifs_cmd_list);
 
-    if (!mutex_trylock(&cmd_mutex)) {
-        printk(KERN_INFO "hifs_comm: [Cmd] Another process is accessing the device. Waiting...\n");
-        return -EBUSY;
+    for (int lock = 0; lock < 100; lock++){
+        if (mutex_trylock(&cmd_mutex)) {
+            break;
+        } else {
+            printk(KERN_INFO "hifs_comm: [CMD] Another process is accessing the device. Waiting...\n");
+            msleep(10);
+        }
+        if (lock == 100) { return -EBUSY; }
     }
+
 
     if (copy_to_user((char *)buf, send_data, count) != 0) {
         result = (ssize_t)-EFAULT;
     } else {
         result = (ssize_t)count;
     }
+
+    can_write = true;
+    //wake up the waitqueue
+    wake_up(&wait_queue_etx_data);
 
     mutex_unlock(&cmd_mutex);
     return (ssize_t)result;
@@ -301,7 +327,10 @@ ssize_t hi_comm_inode_device_write(struct file *filp, const char __user *buf, si
         list_add(&shared_inode_incoming->hifs_inode_list, &shared_inode_incoming_lst);
     }
 
-    //wake_up_interruptible(&waitqueue);
+
+    can_read = true;
+    //wake up the waitqueue
+    wake_up(&waitqueue);
 
     return (ssize_t)result;
 }
@@ -317,7 +346,10 @@ ssize_t hi_comm_block_device_write(struct file *filp, const char __user *buf, si
         list_add(&shared_block_incoming->hifs_block_list, &shared_block_incoming_lst);
     }
 
-    //wake_up_interruptible(&waitqueue);
+
+    can_read = true;
+    //wake up the waitqueue
+    wake_up(&waitqueue);
 
     return (ssize_t)result;
 }
@@ -333,7 +365,9 @@ ssize_t hi_comm_cmd_device_write(struct file *filp, const char __user *buf, size
         list_add(&shared_cmd_incoming->hifs_cmd_list, &shared_cmd_incoming_lst);
     }
 
-    //wake_up_interruptible(&waitqueue);
+    can_read = true;
+    //wake up the waitqueue
+    wake_up(&waitqueue);
 
     return (ssize_t)result;
 }
@@ -342,10 +376,21 @@ __poll_t hifs_inode_device_poll (struct file *filp, poll_table *wait) {
     __poll_t mask = 0;
     poll_wait(filp, &waitqueue, wait);
 
-    if (new_device_data)
-        mask |= POLLIN | POLLRDNORM;
-    if (!new_device_data)
-        mask |= POLLOUT | POLLWRNORM;
+  if( can_read )
+  {
+    can_read = false;
+    mask |= ( POLLIN | POLLRDNORM );
+  }
+  
+  if( can_write )
+  {
+    can_write = false;
+    mask |= ( POLLOUT | POLLWRNORM );
+  }
+
+
+
+    // Go through Queues
 
     return mask;
 }
@@ -354,10 +399,22 @@ __poll_t hifs_block_device_poll (struct file *filp, poll_table *wait) {
     __poll_t mask = 0;
     poll_wait(filp, &waitqueue, wait);
 
-    if (new_device_data)
-        mask |= POLLIN | POLLRDNORM;
-    if (!new_device_data)
-        mask |= POLLOUT | POLLWRNORM;
+    if( can_read )
+    {
+        can_read = false;
+        mask |= ( POLLIN | POLLRDNORM );
+    }
+
+    if( can_write )
+    {
+        can_write = false;
+        mask |= ( POLLOUT | POLLWRNORM );
+    }
+
+
+
+    // Go through Queues
+
 
     return mask;
 }
@@ -366,10 +423,22 @@ __poll_t hifs_cmd_device_poll (struct file *filp, poll_table *wait) {
     __poll_t mask = 0;
     poll_wait(filp, &waitqueue, wait);
 
-    if (new_device_data)
-        mask |= POLLIN | POLLRDNORM;
-    if (!new_device_data)
-        mask |= POLLOUT | POLLWRNORM;
+    if( can_read )
+    {
+        can_read = false;
+        mask |= ( POLLIN | POLLRDNORM );
+    }
+
+    if( can_write )
+    {
+        can_write = false;
+        mask |= ( POLLOUT | POLLWRNORM );
+    }
+
+
+
+    // Go through Queues
+
 
     return mask;
 }

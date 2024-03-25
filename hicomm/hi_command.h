@@ -17,6 +17,8 @@
 #include <string.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <assert.h>
+#include <poll.h>
 
 // A user-space definition for a kernel-style Doubly Linked List
 // Modified by:  kazutomo@mcs.anl.gov

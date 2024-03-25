@@ -29,20 +29,27 @@
 #include <linux/kthread.h>
 #include <linux/delay.h>
 #include <linux/list.h>
-#include <linux/poll.h>
 #include <linux/mutex.h>
+#include <linux/poll.h>
+#include <linux/wait.h>
 
 
 // The definitions file is included in both kernel-space and
 // in user-space.
 // COMMON Definitions Here ONLY!
 #include "hifs_shared_defs.h"
-// COMMON Definitions Here ONLY!
+// COMMON Definitions Here ONLY
+/* Definitions past this point should be specific only to the kernel-space module! */
+
+extern DECLARE_WAIT_QUEUE_HEAD(waitqueue);
+extern DEFINE_MUTEX(cmd_mutex);
+extern DEFINE_MUTEX(inode_mutex);
+extern DEFINE_MUTEX(block_mutex);
+
 extern atomic_t my_atomic_variable;
 extern struct class* atomic_class;
 extern struct task_struct *task;
 
-/* Definitions past this point should be specific only to the kernel-space module! */
 
 // Prototypes Here:
 

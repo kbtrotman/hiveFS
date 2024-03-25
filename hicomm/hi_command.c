@@ -16,6 +16,7 @@ extern char atomic_device_name[256];
 extern char *device_file_inode;
 extern char *device_file_block;
 extern char *device_file_cmd;
+extern int fd_cmd, fd_inode, fd_block;
 
 extern char buffer[4096];
 extern struct PSQL sqldb;
@@ -38,6 +39,10 @@ extern struct list_head shared_cmd_incoming_lst;
 int main(int argc, char *argv[])
 {
     int atomic_value;
+    char kernel_val[20];
+    int fd, ret, n;
+    struct pollfd pfd;
+    bool queue_empty = true; // Add a flag to track whether the queue is empty
 
     hifs_user_link.clockstart = GET_TIME();
     sqldb.hive_conn = NULL;
@@ -67,6 +72,18 @@ int main(int argc, char *argv[])
 
     init_hive_link();
 
+    fd_cmd = open(device_file_cmd, O_RDWR | O_NONBLOCK);   
+    if( fd_cmd == -1 )  { perror("open"); exit(EXIT_FAILURE); }
+
+    fd_inode = open(device_file_cmd, O_RDWR | O_NONBLOCK);   
+    if( fd_inode == -1 )  { perror("open"); exit(EXIT_FAILURE); }
+
+    fd_block = open(device_file_cmd, O_RDWR | O_NONBLOCK);   
+    if( fd_block == -1 )  { perror("open"); exit(EXIT_FAILURE); }
+
+    pfd.fd = fd_cmd;
+    pfd.events = ( POLLIN | POLLRDNORM | POLLOUT | POLLWRNORM );
+
 
  queue_management:
  
@@ -86,14 +103,31 @@ int main(int argc, char *argv[])
         }
     }
 
-    // Send to the queues: IE Write
-        // If list isn't empty...
-        // If file isn't locked...
-        // Pop a list entry and write it.
-    // Read from the queues: IE Read
-        // If list isn't full...
-        // If file isn't locked...
-        hifs_user_link.state == HIFS_COMM_LINK_UP ? read_from_queue() : 0;
+
+
+    puts("Starting poll...");
+    ret = poll(&pfd, (unsigned long)1, 5000);   //wait for 5secs
+    
+    if( ret < 0 ) 
+    {
+        perror("poll");
+        assert(0);
+    }
+    
+    if( ( pfd.revents & POLLIN )  == POLLIN )
+    {
+        read(pfd.fd, &kernel_val, sizeof(kernel_val));
+        printf("POLLIN : Kernel_val = %s\n", kernel_val);
+    }
+    
+    if( ( pfd.revents & POLLOUT )  == POLLOUT )
+    {
+        strcpy( kernel_val, "User Space");
+        write(pfd.fd, &kernel_val, strlen(kernel_val));
+        printf("POLLOUT : Kernel_val = %s\n", kernel_val);
+    }
+
+    hifs_user_link.state == HIFS_COMM_LINK_UP ? read_from_queue() : 0;
 
     goto queue_management;
     
