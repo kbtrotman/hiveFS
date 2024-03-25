@@ -103,8 +103,6 @@ int main(int argc, char *argv[])
         }
     }
 
-
-
     puts("Starting poll...");
     ret = poll(&pfd, (unsigned long)1, 5000);   //wait for 5secs
     
