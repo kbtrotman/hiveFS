@@ -41,15 +41,9 @@
 // COMMON Definitions Here ONLY
 /* Definitions past this point should be specific only to the kernel-space module! */
 
-extern DECLARE_WAIT_QUEUE_HEAD(waitqueue);
-extern DEFINE_MUTEX(cmd_mutex);
-extern DEFINE_MUTEX(inode_mutex);
-extern DEFINE_MUTEX(block_mutex);
-
 extern atomic_t my_atomic_variable;
 extern struct class* atomic_class;
 extern struct task_struct *task;
-
 
 // Prototypes Here:
 
@@ -63,6 +57,7 @@ int hifs_thread_fn(void *data);
 void hifs_comm_link_up_completed(void);
 void hifs_create_test_inode(void);
 void hifs_wait_on_link(void);
+int hifs_manage_queue_contents(void);
 
 /* hi_command_kern_comm_memman.c */
 int hifs_comm_device_open(struct inode *inode, struct file *filp);

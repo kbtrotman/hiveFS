@@ -139,34 +139,28 @@ void hifs_wait_on_link(void)
 
 int hifs_manage_queue_contents(void)
 {
-    // Check if command file is locked. If it is, we can't do anything.
-    if (shared_cmd_outgoing->cmd == HIFS_Q_PROTO_CMD_LOCKED) {
-        pr_info("hivefs_comm: Command file is locked. Waiting for unlock.\n");
-        return -1;
-    }
-
     // Check if the outgoing queue is empty. If it is, we can't do anything.
-    While (list_empty(&shared_inode_outgoing_lst) && list_empty(&shared_block_outgoing_lst) && list_empty(&shared_cmd_outgoing_lst)) {
+    if (list_empty(&shared_inode_outgoing_lst) && list_empty(&shared_block_outgoing_lst) && list_empty(&shared_cmd_outgoing_lst)) {
         pr_info("hivefs_comm: Outgoing queue is empty. Waiting for data.\n");
         return -1;
+    } else {
+        // Check if the outgoing queue has data. If it does, process it.
+        if (!list_empty(&shared_inode_outgoing_lst) || !list_empty(&shared_block_outgoing_lst) || !list_empty(&shared_cmd_outgoing_lst)) {
+            pr_info("hivefs_comm: Outgoing queue has data. Processing...\n");
+            //hifs_process_outgoing_queue();
+        }
     }
 
     // Check if the incoming queue is empty. If it is, we can't do anything.
     if (list_empty(&shared_inode_incoming_lst) && list_empty(&shared_block_incoming_lst) && list_empty(&shared_cmd_incoming_lst)) {
         pr_info("hivefs_comm: Incoming queue is empty. Waiting for data.\n");
         return -1;
-    }
-
-    // Pop data from the incoming queue and process it.
-    if (!list_empty(&shared_inode_incoming_lst) || !list_empty(&shared_block_incoming_lst) || !list_empty(&shared_cmd_incoming_lst)) {
-        pr_info("hivefs_comm: Incoming queue has data. Processing...\n");
-        hifs_process_incoming_queue();
-    }
-
-    // Check if the outgoing queue has data. If it does, process it.
-    if (!list_empty(&shared_inode_outgoing_lst) || !list_empty(&shared_block_outgoing_lst) || !list_empty(&shared_cmd_outgoing_lst)) {
-        pr_info("hivefs_comm: Outgoing queue has data. Processing...\n");
-        hifs_process_outgoing_queue();
+    } else {
+        // Pop data from the incoming queue and process it.
+        if (!list_empty(&shared_inode_incoming_lst) || !list_empty(&shared_block_incoming_lst) || !list_empty(&shared_cmd_incoming_lst)) {
+            pr_info("hivefs_comm: Incoming queue has data. Processing...\n");
+            //hifs_process_incoming_queue();
+        }
     }
 
     return 0;

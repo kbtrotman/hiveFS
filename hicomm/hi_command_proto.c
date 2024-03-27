@@ -99,7 +99,7 @@ void read_from_queue(void)
         }
     }
 
-
+    free(incoming_cmd);
     //Save data to the incoming queue.
 
     return;
