@@ -16,6 +16,8 @@ struct class *atomic_class = NULL;
 struct device *atomic_device = NULL;
 int major;
 bool new_device_data = false;
+wait_queue_head_t waitqueue;
+
 struct hifs_inode *shared_inode_outgoing;    // These six Doubly-Linked Lists are our
 struct hifs_blocks *shared_block_outgoing;   // processing queues. They are sent & 
 struct hifs_cmds *shared_cmd_outgoing;       // received thru the 3 device files known
@@ -39,7 +41,6 @@ DECLARE_WAIT_QUEUE_HEAD(waitqueue);
 DEFINE_MUTEX(inode_mutex);
 DEFINE_MUTEX(block_mutex);
 DEFINE_MUTEX(cmd_mutex);
-init_waitqueue_head(&waitqueue);
 
 // Each device queue has it's own file_operations struct.
 struct file_operations inode_fops = {
@@ -67,9 +68,6 @@ struct file_operations cmd_fops = {
 };
 
 // This faops is a single shared atomic variable that holds our protocol integer for comms.
-// (Queues are opened by user-space only, but this is a shared variable that can be written
-// to by both kernel-space and user-space.) This enforces proper kernel use and that the queues
-// are only used when the kernel is ready for data comms.
 struct file_operations faops = {
     .open = v_atomic_open,   //virtual defs
     .read = v_atomic_read,
@@ -247,7 +245,7 @@ ssize_t hi_comm_inode_device_read(struct file *filp, char __user *buf, size_t co
 
     can_write = true;
     //wake up the waitqueue
-    wake_up(&wait_queue_etx_data);
+    wake_up(&waitqueue);
 
     mutex_unlock(&inode_mutex);
     return (ssize_t)result;
@@ -278,7 +276,7 @@ ssize_t hi_comm_block_device_read(struct file *filp, char __user *buf, size_t co
 
     can_write = true;
     //wake up the waitqueue
-    wake_up(&wait_queue_etx_data);
+    wake_up(&waitqueue);
 
     mutex_unlock(&block_mutex);
     return (ssize_t)result;
@@ -310,7 +308,7 @@ ssize_t hi_comm_cmd_device_read(struct file *filp, char __user *buf, size_t coun
 
     can_write = true;
     //wake up the waitqueue
-    wake_up(&wait_queue_etx_data);
+    wake_up(&waitqueue);
 
     mutex_unlock(&cmd_mutex);
     return (ssize_t)result;
@@ -376,19 +374,17 @@ __poll_t hifs_inode_device_poll (struct file *filp, poll_table *wait) {
     __poll_t mask = 0;
     poll_wait(filp, &waitqueue, wait);
 
-  if( can_read )
-  {
-    can_read = false;
-    mask |= ( POLLIN | POLLRDNORM );
-  }
-  
-  if( can_write )
-  {
-    can_write = false;
-    mask |= ( POLLOUT | POLLWRNORM );
-  }
+    if( can_read )
+    {
+        can_read = false;
+        mask |= ( POLLIN | POLLRDNORM );
+    }
 
-
+    if( can_write )
+    {
+        can_write = false;
+        mask |= ( POLLOUT | POLLWRNORM );
+    }
 
     // Go through Queues
 
@@ -411,10 +407,7 @@ __poll_t hifs_block_device_poll (struct file *filp, poll_table *wait) {
         mask |= ( POLLOUT | POLLWRNORM );
     }
 
-
-
     // Go through Queues
-
 
     return mask;
 }
@@ -435,10 +428,7 @@ __poll_t hifs_cmd_device_poll (struct file *filp, poll_table *wait) {
         mask |= ( POLLOUT | POLLWRNORM );
     }
 
-
-
     // Go through Queues
-
 
     return mask;
 }

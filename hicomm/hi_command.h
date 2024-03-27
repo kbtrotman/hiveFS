@@ -32,7 +32,6 @@
 
 
 #include "sql/hi_command_sql.h"
-
 #define prerr(...) fprintf(stderr, "error: " __VA_ARGS__)
 
 /*  This file is for definitions specific to the Hi_Command router in user-space.  */

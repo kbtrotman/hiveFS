@@ -44,7 +44,7 @@ extern struct list_head shared_block_incoming_lst;
 extern struct list_head shared_cmd_incoming_lst; 
 
 extern char *filename;     // The filename we're currently sending/recieving to/from.
-
+extern wait_queue_head_t waitqueue;
 
 struct file_system_type hifs_type = 
 {

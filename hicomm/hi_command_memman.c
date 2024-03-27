@@ -95,11 +95,6 @@ int read_from_inode_dev(char *dev_file, int size)
 {
     int ret;
 
-    int fd_inode = open(device_file_inode, O_RDWR);
-    if (fd_inode == -1) {
-        perror("hi_comm: Error opening inode device file");
-        return EXIT_FAILURE;
-    }
     shared_inode_incoming = mmap(0, sizeof(shared_inode_incoming), PROT_READ | PROT_WRITE, MAP_SHARED, fd_inode, 0);
     if (!shared_inode_incoming) {
         perror("hi_comm: Error mapping shared memory");
@@ -117,7 +112,6 @@ int read_from_inode_dev(char *dev_file, int size)
     // Add New Entry to incoming queue
     list_add(&shared_inode_incoming->hifs_inode_list, &shared_inode_incoming_lst);
 
-    close(fd_inode);
     return ret;
 }
 
@@ -125,11 +119,6 @@ int read_from_block_dev(char *dev_file, int size)
 {
     int ret;
 
-    int fd_block = open(device_file_block, O_RDWR);
-    if (fd_block == -1) {
-        perror("hi_comm: Error opening block device file");
-        return EXIT_FAILURE;
-    }
     shared_block_incoming = mmap(0, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd_block, 0);
     if (!shared_block_incoming) {
         perror("hi_comm: Error mapping shared memory");
@@ -149,7 +138,6 @@ int read_from_block_dev(char *dev_file, int size)
     // Add New Entry to incoming queue
     list_add(&shared_inode_incoming->hifs_inode_list, &shared_inode_incoming_lst);
 
-    close(fd_block);
     return ret;
 }
 
@@ -157,11 +145,6 @@ int read_from_cmd_dev(char *dev_file, int size)
 {
     int ret;
 
-    int fd_cmd = open(device_file_cmd, O_RDWR);
-    if (fd_cmd == -1) {
-        perror("hi_comm: Error opening command device file");
-        return EXIT_FAILURE;
-    }
     shared_cmd_incoming = mmap(0, sizeof(shared_cmd_incoming), PROT_READ | PROT_WRITE, MAP_SHARED, fd_cmd, 0);
     if (!shared_cmd_incoming) {
         perror("hi_comm: Error mapping shared memory");
@@ -179,17 +162,13 @@ int read_from_cmd_dev(char *dev_file, int size)
     // Add New Entry to incoming queue.
     list_add(&shared_inode_incoming->hifs_inode_list, &shared_inode_incoming_lst);
 
-    close(fd_cmd);
     return ret;
 }
 
 int write_to_inode_dev(char *buffer, int size)
 {
     int ret;
-    if (fd_inode == -1) {
-        perror("hi_comm: Error opening command device file");
-        return EXIT_FAILURE;
-    }
+
     shared_inode_outgoing = mmap(0, sizeof(shared_inode_outgoing), PROT_READ | PROT_WRITE, MAP_SHARED, fd_inode, 0);
     if (!shared_inode_outgoing) {
         perror("hi_comm: Error mapping shared memory");
@@ -198,8 +177,6 @@ int write_to_inode_dev(char *buffer, int size)
     ret = write(fd_inode, &buffer, size);
 
     // Unmap temp shared memory and remove outgoing item from list
-
-    close(fd_inode);
 
     if (ret == -1) {
         perror("hi_comm: Error writing to device file");
@@ -212,10 +189,7 @@ int write_to_inode_dev(char *buffer, int size)
 int write_to_block_dev(char *buffer, int size)
 {
     int ret;
-    if (fd_block == -1) {
-        perror("hi_comm: Error opening command device file");
-        return EXIT_FAILURE;
-    }
+
     shared_block_outgoing = mmap(0, sizeof(shared_block_outgoing), PROT_READ | PROT_WRITE, MAP_SHARED, fd_block, 0);
     if (!shared_block_outgoing) {
         perror("hi_comm: Error mapping shared memory");
@@ -224,8 +198,6 @@ int write_to_block_dev(char *buffer, int size)
     ret = write(fd_block, &buffer, size);
 
     // Unmap temp shared memory and remove outgoing item from list
-
-    close(fd_block);
 
     if (ret == -1) {
         perror("hi_comm: Error writing to device file");
@@ -238,10 +210,7 @@ int write_to_block_dev(char *buffer, int size)
 int write_to_cmd_dev(char *buffer, int size)
 {
     int ret;
-    if (fd_cmd == -1) {
-        perror("hi_comm: Error opening command device file");
-        return EXIT_FAILURE;
-    }
+
     shared_cmd_outgoing = mmap(0, sizeof(shared_cmd_outgoing), PROT_READ | PROT_WRITE, MAP_SHARED, fd_cmd, 0);
     if (!shared_cmd_outgoing) {
         perror("hi_comm: Error mapping shared memory");
@@ -250,8 +219,6 @@ int write_to_cmd_dev(char *buffer, int size)
     ret = write(fd_cmd, &buffer, size);
 
     // Unmap temp shared memory and remove outgoing item from list
-
-    close(fd_cmd);
 
     if (ret == -1) {
         perror("hi_comm: Error writing to device file");

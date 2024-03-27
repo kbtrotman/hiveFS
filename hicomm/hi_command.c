@@ -38,11 +38,10 @@ extern struct list_head shared_cmd_incoming_lst;
 
 int main(int argc, char *argv[])
 {
+    int ret;
     int atomic_value;
-    char kernel_val[20];
-    int fd, ret, n;
     struct pollfd pfd;
-    bool queue_empty = true; // Add a flag to track whether the queue is empty
+    //bool queue_empty = true; // Add a flag to track whether the queue is empty
 
     hifs_user_link.clockstart = GET_TIME();
     sqldb.hive_conn = NULL;
@@ -82,7 +81,7 @@ int main(int argc, char *argv[])
     if( fd_block == -1 )  { perror("open"); exit(EXIT_FAILURE); }
 
     pfd.fd = fd_cmd;
-    pfd.events = ( POLLIN | POLLRDNORM | POLLOUT | POLLWRNORM );
+    pfd.events = ( POLLIN | POLLOUT );
 
 
  queue_management:
@@ -112,17 +111,17 @@ int main(int argc, char *argv[])
         assert(0);
     }
     
+    //User-space has total access to this file, so the order here determines which direction is processed first.
     if( ( pfd.revents & POLLIN )  == POLLIN )
     {
-        read(pfd.fd, &kernel_val, sizeof(kernel_val));
-        printf("POLLIN : Kernel_val = %s\n", kernel_val);
+        read_from_queue();
+        printf("hifs: POLLIN");
     }
     
     if( ( pfd.revents & POLLOUT )  == POLLOUT )
     {
-        strcpy( kernel_val, "User Space");
-        write(pfd.fd, &kernel_val, strlen(kernel_val));
-        printf("POLLOUT : Kernel_val = %s\n", kernel_val);
+        write_to_queue();
+        printf("hifs: POLLOUT\n");
     }
 
     hifs_user_link.state == HIFS_COMM_LINK_UP ? read_from_queue() : 0;
