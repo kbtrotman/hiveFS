@@ -65,7 +65,7 @@ int read_from_atomic(void)
 
 int write_to_atomic(int value)
 {
-    int fd;
+    int fd, ret;
 
     fd = open(atomic_device_name, O_RDWR);
     if (fd == -1) {
@@ -74,11 +74,11 @@ int write_to_atomic(int value)
     }
 
     // Writing to the atomic variable in the kernel space
-    write(fd, &value, sizeof(int));
+    ret = write(fd, &value, sizeof(int));
     printf("hi_comm: Wrote value to kernel: %d\n", value);
 
     close(fd);
-    return value;
+    return ret;
 }
 
 void hi_comm_close_queues(void)

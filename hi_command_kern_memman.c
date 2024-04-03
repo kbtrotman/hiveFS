@@ -14,7 +14,7 @@
 atomic_t my_atomic_variable = ATOMIC_INIT(0);
 struct class *atomic_class = NULL;
 struct device *atomic_device = NULL;
-int major;
+int major, i_major, b_major, c_major;
 bool new_device_data = false;
 wait_queue_head_t waitqueue;
 
@@ -99,14 +99,6 @@ int hifs_atomic_init(void) {
 
     pr_info("hivefs: Atomic variable module loaded in kernel\n");
 
-    // Start the new monitoring kernel thread
-    task = kthread_run(hifs_thread_fn, NULL, "hifs_thread");
-    if (IS_ERR(task)) {
-        pr_err("hivefs: Failed to create the atomic variable monitoring kernel thread\n");
-        return PTR_ERR(task);
-    }
-    pr_info("hivefs: A new kernel thread was forked to monitor/manage communications\n");
-
     return 0;
 }
 
@@ -156,39 +148,39 @@ ssize_t v_atomic_write(struct file *filep, const char __user *buffer, size_t len
 
 int register_all_comm_queues(void)
 {
-    struct class *dev_class;
-    major = register_chrdev(0, DEVICE_FILE_INODE, &inode_fops);
-    if (major < 0) {
+    struct class *inode_dev_class, *block_dev_class, *cmd_dev_class;
+    i_major = register_chrdev(0, DEVICE_FILE_INODE, &inode_fops);
+    if (i_major < 0) {
         pr_err("hivefs: Failed to register inode & block comm queue device\n");
-        return major;
+        return i_major;
     }
 
-    major = register_chrdev(0, DEVICE_FILE_BLOCK "_block", &block_fops);
-    if (major < 0) {
+    b_major = register_chrdev(0, DEVICE_FILE_BLOCK "_block", &block_fops);
+    if (b_major < 0) {
         pr_err("hivefs: Failed to register block (file) comm queue device\n");
-        return major;
+        return b_major;
     }
 
-    major = register_chrdev(0, DEVICE_FILE_CMDS, &cmd_fops);
-    if (major < 0) {
+    c_major = register_chrdev(0, DEVICE_FILE_CMDS, &cmd_fops);
+    if (c_major < 0) {
         pr_err("hivefs: Failed to register command comm queue device\n");
-        return major;
+        return c_major;
     }
 
  #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 4, 0) 
-    dev_class = class_create(DEVICE_FILE_INODE);
-    device_create(dev_class, NULL, MKDEV(major, 0), NULL, DEVICE_FILE_INODE);
-    dev_class = class_create(DEVICE_FILE_BLOCK);
-    device_create(dev_class, NULL, MKDEV(major, 1), NULL, DEVICE_FILE_BLOCK);
-    dev_class = class_create(DEVICE_FILE_CMDS);
-    device_create(dev_class, NULL, MKDEV(major, 2), NULL, DEVICE_FILE_CMDS);
+    inode_dev_class = class_create(DEVICE_FILE_INODE);
+    device_create(inode_dev_class, NULL, MKDEV(i_major, 0), NULL, DEVICE_FILE_INODE);
+    block_dev_class = class_create(DEVICE_FILE_BLOCK);
+    device_create(block_dev_class, NULL, MKDEV(b_major, 1), NULL, DEVICE_FILE_BLOCK);
+    cmd_dev_class = class_create(DEVICE_FILE_CMDS);
+    device_create(cmd_dev_class, NULL, MKDEV(c_major, 2), NULL, DEVICE_FILE_CMDS);
 #else 
-    dev_class = class_create(THIS_MODULE, DEVICE_FILE_INODE);
-    device_create(dev_class, NULL, MKDEV(major, 0), NULL, DEVICE_FILE_INODE);
-    dev_class = class_create(THIS_MODULE, DEVICE_FILE_BLOCK);
-    device_create(dev_class, NULL, MKDEV(major, 1), NULL, DEVICE_FILE_BLOCK); 
-    dev_class = class_create(THIS_MODULE, DEVICE_FILE_CMDS);
-    device_create(dev_class, NULL, MKDEV(major, 2), NULL, DEVICE_FILE_CMDS);  
+    inode_dev_class = class_create(THIS_MODULE, DEVICE_FILE_INODE);
+    device_create(inode_dev_class, NULL, MKDEV(i_major, 0), NULL, DEVICE_FILE_INODE);
+    block_dev_class = class_create(THIS_MODULE, DEVICE_FILE_BLOCK);
+    device_create(block_dev_class, NULL, MKDEV(b_major, 1), NULL, DEVICE_FILE_BLOCK); 
+    cmd_dev_class = class_create(THIS_MODULE, DEVICE_FILE_CMDS);
+    device_create(cmd_dev_class, NULL, MKDEV(c_major, 2), NULL, DEVICE_FILE_CMDS);  
 #endif
 
     pr_info("hivefs: Queue device created on %s\n", DEVICE_FILE_CMDS);
@@ -200,9 +192,10 @@ int register_all_comm_queues(void)
 
 void unregister_all_comm_queues(void)
 {
-    unregister_chrdev(major, DEVICE_FILE_INODE);     
-    unregister_chrdev(major, DEVICE_FILE_BLOCK "_block");
-    unregister_chrdev(major, DEVICE_FILE_CMDS);
+    unregister_chrdev(i_major, DEVICE_FILE_INODE);     
+    unregister_chrdev(b_major, DEVICE_FILE_BLOCK "_block");
+    unregister_chrdev(c_major, DEVICE_FILE_CMDS);
+    unregister_chrdev(major, ATOMIC_DEVICE_NAME);
     kfree(shared_inode_outgoing);
     kfree(shared_block_outgoing);
     kfree(shared_cmd_outgoing);
@@ -289,6 +282,7 @@ ssize_t hi_comm_cmd_device_read(struct file *filp, char __user *buf, size_t coun
     struct hifs_cmds *send_data;
     send_data = list_last_entry(&shared_cmd_outgoing_lst, struct hifs_cmds, hifs_cmd_list);
 
+    printk(KERN_INFO "hifs_comm: [CMD] Trasnferring command [%s] to buffer [%s] with [%lu characters\n", send_data->cmd, buf, count);
     for (int lock = 0; lock < 100; lock++){
         if (mutex_trylock(&cmd_mutex)) {
             break;
@@ -300,7 +294,7 @@ ssize_t hi_comm_cmd_device_read(struct file *filp, char __user *buf, size_t coun
     }
 
 
-    if (copy_to_user((char *)buf, send_data, count) != 0) {
+    if (copy_to_user(buf, send_data, count) != 0) {
         result = (ssize_t)-EFAULT;
     } else {
         result = (ssize_t)count;

@@ -29,6 +29,7 @@ extern struct list_head shared_inode_incoming_lst;
 extern struct list_head shared_block_incoming_lst;   
 extern struct list_head shared_cmd_incoming_lst;  
 
+static bool stop_thread = false;
 extern char *filename;     // The filename we're currently sending/recieving to/from.
 char buffer[4096];
 
@@ -66,7 +67,7 @@ void hifs_create_test_inode(void) {
 }
 
 int hifs_thread_fn(void *data) {
-    while (!kthread_should_stop()) {
+    while (!kthread_should_stop() && !stop_thread) {
         int value;
 
         hifs_create_test_inode();
@@ -98,12 +99,11 @@ int hifs_comm_link_init_change( void )
         atomic_set(&my_atomic_variable, HIFS_Q_PROTO_ACK_LINK_KERN);
         hifs_wait_on_link();
     } else if (value == HIFS_Q_PROTO_ACK_LINK_UP) {
-        hifs_comm_link_up_completed();
+        hifs_comm_link_up();
     } else if (value ==HIFS_Q_PROTO_ACK_LINK_KERN) {
         hifs_wait_on_link();
     } else if (value == HIFS_Q_PROTO_ACK_LINK_USER) {
         hifs_comm_link_up();
-        hifs_comm_link_up_completed();
     }
 
     return 0;
@@ -116,21 +116,14 @@ void hifs_comm_link_up (void)
     hifs_kern_link.state = HIFS_COMM_LINK_UP;
     pr_info(KERN_INFO "hivefs: kern link up'd at %ld seconds after hifs start, waiting on hi_command.\n", (GET_TIME() - hifs_kern_link.clockstart));
     hifs_kern_link.last_check = 0;
-}
-
-void hifs_comm_link_up_completed (void)
-{
-    // Link up to hi_command completed.
-    hifs_kern_link.remote_state = HIFS_COMM_LINK_UP;
     atomic_set(&my_atomic_variable, HIFS_Q_PROTO_UNUSED);
-    pr_info("hivefs_comm: Link to hi_command completed at %ld seconds after hifs start.\n", (GET_TIME() - hifs_kern_link.clockstart));
 }
 
 void hifs_wait_on_link(void)
 {
     for (int i = 0; i < 100; i++) {
         if (atomic_read(&my_atomic_variable) == HIFS_Q_PROTO_ACK_LINK_UP) {
-            hifs_comm_link_up_completed();
+            hifs_comm_link_up();
             break;
         }
         msleep(10);
@@ -165,4 +158,25 @@ int hifs_manage_queue_contents(void)
 
     return 0;
 
+}
+
+int hifs_start_queue_thread(void)
+{
+    // Start the new monitoring kernel thread
+    task = kthread_run(hifs_thread_fn, NULL, "hifs_thread");
+    if (IS_ERR(task)) {
+        pr_err("hivefs: Failed to create the atomic variable monitoring kernel thread\n");
+        return PTR_ERR(task);
+    }
+    pr_info("hivefs: A new kernel thread was forked to monitor/manage communications\n");
+    return 0;
+}
+
+int hifs_stop_queue_thread(void)
+{
+    // Stop the new monitoring kernel thread
+    stop_thread = true;
+    kthread_stop(task);
+    pr_info("hivefs: Shutting down hivefs queue management thread\n");
+    return 0;
 }

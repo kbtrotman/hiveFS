@@ -16,11 +16,11 @@
 // shared these memory areas to send and receive data.
 #define HIFS_QUEUE_COUNT 3
 
-#define DEVICE_FILE_INODE "hivefs_comms_inode"
-#define DEVICE_FILE_BLOCK "hivefs_comms_block"
-#define DEVICE_FILE_CMDS "hivefs_comms_cmds"
-#define ATOMIC_DEVICE_NAME "hifs_atomic_sync_device"
-#define ATOMIC_CLASS_NAME "atomic_class"
+#define DEVICE_FILE_INODE "hivefs_comq_inode"
+#define DEVICE_FILE_BLOCK "hivefs_comq_block"
+#define DEVICE_FILE_CMDS "hivefs_comq_cmds"
+#define ATOMIC_DEVICE_NAME "hivefs_sync_device"
+#define ATOMIC_CLASS_NAME "hivefs_atomic_class"
 
 #define HIFS_DEFAULT_BLOCK_SIZE 4096
 #define HIFS_BUFFER_SIZE 4096
