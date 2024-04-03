@@ -149,6 +149,8 @@ static int __init hifs_init(void)
     }
     return 0;
 
+    ret = hifs_start_queue_thread();
+
 failure:
     return -1;
 }
@@ -157,8 +159,9 @@ static void __exit hifs_exit(void)
 {
     int ret;
 
-    hifs_atomic_exit();
+    hifs_stop_queue_thread();
     unregister_all_comm_queues();
+    hifs_atomic_exit();
     ret = unregister_filesystem(&hifs_type);
     if (ret != 0) {
         printk(KERN_ERR "hivefs: Failed to unregister filesystem\n");

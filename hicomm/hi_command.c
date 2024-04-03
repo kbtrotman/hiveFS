@@ -84,8 +84,8 @@ int main(int argc, char *argv[])
     pfd.events = ( POLLIN | POLLOUT );
 
 
- queue_management:
- 
+queue_management:
+
     atomic_value = read_from_atomic();
     printf("hi-command: Atomic value: %d\n", atomic_value);
     
@@ -98,6 +98,10 @@ int main(int argc, char *argv[])
         if (atomic_value == HIFS_Q_PROTO_ACK_LINK_KERN) {
             write_to_atomic(HIFS_Q_PROTO_UNUSED);
         } else if (hifs_user_link.state == HIFS_COMM_LINK_DOWN) {
+            hifs_user_link.last_state = hifs_user_link.state;
+            hifs_user_link.state = HIFS_COMM_LINK_UP;
+            printf("hi-command: user link up'd at %ld seconds after hi_command start.\n", (GET_TIME() - hifs_user_link.clockstart));
+            hifs_user_link.last_check = 0;
             write_to_atomic(HIFS_Q_PROTO_ACK_LINK_USER);
         }
     }
