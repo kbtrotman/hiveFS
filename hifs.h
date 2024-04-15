@@ -54,7 +54,7 @@ extern struct task_struct *task;
 void hifs_comm_link_up (void);
 int hifs_comm_link_init_change( void );
 int hifs_thread_fn(void *data);
-void hifs_create_test_inode(void);
+int hifs_create_test_inode(void);
 void hifs_wait_on_link(void);
 int hifs_manage_queue_contents(void);
 int hifs_stop_queue_thread(void);

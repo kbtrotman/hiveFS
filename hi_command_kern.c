@@ -31,17 +31,16 @@ extern struct list_head shared_cmd_incoming_lst;
 
 static bool stop_thread = false;
 extern char *filename;     // The filename we're currently sending/recieving to/from.
-char buffer[4096];
+char buffer[HIFS_DEFAULT_BLOCK_SIZE];
 
 
-void hifs_create_test_inode(void) {
+int hifs_create_test_inode(void) {
 
     shared_inode_incoming = kmalloc(sizeof(*shared_inode_incoming), GFP_KERNEL);
     shared_cmd_incoming = kmalloc(sizeof(*shared_cmd_incoming), GFP_KERNEL);
 
     if (!shared_inode_incoming || !shared_cmd_incoming) {
-        // Handle error
-        //return -ENOMEM;
+        return -ENOMEM;
     }
 
     *shared_inode_incoming = (struct hifs_inode) {
@@ -63,7 +62,7 @@ void hifs_create_test_inode(void) {
     INIT_LIST_HEAD(&shared_cmd_incoming_lst);
     INIT_LIST_HEAD(&shared_inode_incoming->hifs_inode_list);
     INIT_LIST_HEAD(&shared_cmd_incoming->hifs_cmd_list);
-
+    return 0;
 }
 
 int hifs_thread_fn(void *data) {

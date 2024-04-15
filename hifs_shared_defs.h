@@ -9,6 +9,15 @@
 #pragma once
 
 /******************************
+ * Base FS Information
+ ******************************/
+/* FS Name */
+#define HIFS_NAME		"hivefs"
+#define HIFS_VERSION	"0.1"
+/* Layout version */
+#define HIFS_LAYOUT_VER		1
+
+/******************************
  * Queue Management Structures
  ******************************/
 // These definitions are for 3 shared memory areas (queues).
@@ -24,6 +33,8 @@
 
 #define HIFS_DEFAULT_BLOCK_SIZE 4096
 #define HIFS_BUFFER_SIZE 4096
+#define HIFS_MAX_CMD_SIZE 50
+#define HIFS_MAX_NAME_SIZE 256
 
 /******************************
  * Queue Comms Protocol
@@ -101,18 +112,16 @@ extern struct hifs_link hifs_user_link;
 /* Filesystem Settings */
 extern struct 
 {
-	char mount_point[255];
+	char mount_point[HIFS_MAX_NAME_SIZE];
+	int block_size;
 } settings;
-
-/* Layout version */
-#define HIFS_LAYOUT_VER		1
 
 /* FS SIZE/OFFSET CONST */
 #define HIFS_INODE_TSIZE		3
 #define HIFS_SUPER_OFFSET		0
-#define HIFS_OLT_OFFSET		(HIFS_SUPER_OFFSET + 1)
+#define HIFS_OLT_OFFSET		    (HIFS_SUPER_OFFSET + 1)
 #define HIFS_INODE_TABLE_OFFSET	(HIFS_OLT_OFFSET + 1)
-#define HIFS_INODE_BITMAP_OFFSET	(HIFS_INODE_TABLE_OFFSET + HIFS_INODE_TABLE_SIZE + 1)
+#define HIFS_INODE_BITMAP_OFFSET (HIFS_INODE_TABLE_OFFSET + HIFS_INODE_TABLE_SIZE + 1)
 #define HIFS_ROOT_INODE_OFFSET	(HIFS_INODE_BITMAP_OFFSET + 1)
 #define HIFS_ROOT_IN_EXT_OFF	(HIFS_ROOT_INODE_OFFSET + 1)
 #define HIFS_LF_INODE_OFFSET	(HIFS_ROOT_IN_EXT_OFF + HIFS_DEF_ALLOC)
@@ -160,7 +169,7 @@ struct hifs_inode
 	uint32_t	i_mtime; /* Modified Time */
 	uint32_t	i_ctime; /* Creation Time */
 	uint32_t	i_size;		/* Number of bytes in file */
-	char    	i_name[50]; /* File name */
+	char    	i_name[HIFS_MAX_NAME_SIZE]; /* File name */
 	void		*i_private;  /* Private/Unpublished filesystrem member */
 	const struct inode_operations	*i_op;       /* operation */
 	const struct file_operations	*i_fop;	      /* file operation */
@@ -171,6 +180,32 @@ struct hifs_inode
 	uint32_t	i_bytes;	/* Number of bytes */
 	struct list_head hifs_inode_list;
 };
+
+struct hifs_inode_user 
+{
+	//const struct super_block	i_sb;      /* Superblock position */
+    uint8_t     i_version;	/* inode version */
+	uint8_t		i_flags;	/* inode flags: TYPE */
+	uint32_t	i_mode;		/* File mode */
+	uint64_t	i_ino;		/* inode number */
+	uint16_t	i_uid;		/* owner's user id */
+	uint16_t	i_gid;		/* owner's group id */
+	uint16_t	i_hrd_lnk;	/* number of hard links */
+	uint32_t    i_atime; /* Archive Time */
+	uint32_t	i_mtime; /* Modified Time */
+	uint32_t	i_ctime; /* Creation Time */
+	uint32_t	i_size;		/* Number of bytes in file */
+	char    	i_name[HIFS_MAX_NAME_SIZE]; /* File name */
+	//void		*i_private;  /* Private/Unpublished filesystrem member */
+	//const struct inode_operations	i_op;       /* operation */
+	//const struct file_operations	i_fop;	      /* file operation */
+	/* address begin - end block, range exclusive: addres end (last block) does not belogs to extend! */
+	uint32_t	i_addrb[HIFS_INODE_TSIZE];	/* Start block of extend ranges */
+	uint32_t	i_addre[HIFS_INODE_TSIZE];	/* End block of extend ranges */
+	uint32_t	i_blocks;	/* Number of blocks */
+	uint32_t	i_bytes;	/* Number of bytes */
+};
+
 
 extern struct hifs_inode *shared_inode_outgoing;    // These six Doubly-Linked Lists are our
 extern struct hifs_blocks *shared_block_outgoing;   // processing queues. They are sent & 
