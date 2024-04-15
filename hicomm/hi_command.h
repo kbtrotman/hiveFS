@@ -42,6 +42,7 @@ extern char *device_file_inode;
 extern char *device_file_block;
 extern char *device_file_cmd;
 extern int fd_cmd, fd_inode, fd_block;
+
 // Prototypes Here:
 
 /* hi_command.c */

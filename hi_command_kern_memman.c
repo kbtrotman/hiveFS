@@ -17,6 +17,7 @@ struct device *atomic_device = NULL;
 int major, i_major, b_major, c_major;
 bool new_device_data = false;
 wait_queue_head_t waitqueue;
+struct class *inode_dev_class, *block_dev_class, *cmd_dev_class;
 
 struct hifs_inode *shared_inode_outgoing;    // These six Doubly-Linked Lists are our
 struct hifs_blocks *shared_block_outgoing;   // processing queues. They are sent & 
@@ -148,7 +149,6 @@ ssize_t v_atomic_write(struct file *filep, const char __user *buffer, size_t len
 
 int register_all_comm_queues(void)
 {
-    struct class *inode_dev_class, *block_dev_class, *cmd_dev_class;
     i_major = register_chrdev(0, DEVICE_FILE_INODE, &inode_fops);
     if (i_major < 0) {
         pr_err("hivefs: Failed to register inode & block comm queue device\n");
@@ -192,6 +192,14 @@ int register_all_comm_queues(void)
 
 void unregister_all_comm_queues(void)
 {
+    device_destroy(inode_dev_class, MKDEV(i_major, 0));
+    device_destroy(block_dev_class, MKDEV(b_major, 1));
+    device_destroy(cmd_dev_class, MKDEV(c_major, 2));
+    device_destroy(atomic_class, MKDEV(major, 02));
+    class_unregister(inode_dev_class);
+    class_unregister(block_dev_class);
+    class_unregister(cmd_dev_class);
+    class_unregister(atomic_class);
     unregister_chrdev(i_major, DEVICE_FILE_INODE);     
     unregister_chrdev(b_major, DEVICE_FILE_BLOCK "_block");
     unregister_chrdev(c_major, DEVICE_FILE_CMDS);
@@ -213,12 +221,15 @@ int hifs_comm_device_release(struct inode *inode, struct file *filp) {
     return 0;
 }
 
-ssize_t hi_comm_inode_device_read(struct file *filp, char __user *buf, size_t count, loff_t *f_pos) {
+ssize_t hi_comm_inode_device_read(struct file *filep, char *buf, size_t count, loff_t *offset) {
     // Write out to user space.
     ssize_t result = 0;
 
     struct hifs_inode *send_data;
-    send_data = list_last_entry(&shared_inode_outgoing_lst, struct hifs_inode, hifs_inode_list);
+    if (!list_empty(&shared_inode_outgoing_lst)) {
+        send_data = list_last_entry(&shared_inode_outgoing_lst, struct hifs_inode, hifs_inode_list);
+        list_del(&send_data->hifs_inode_list);
+    }    
 
     for (int lock = 0; lock < 100; lock++){
         if (mutex_trylock(&inode_mutex)) {
@@ -229,11 +240,26 @@ ssize_t hi_comm_inode_device_read(struct file *filp, char __user *buf, size_t co
         }
         if (lock == 100) { return -EBUSY; }
     }
-
-    if (copy_to_user((char *)buf, send_data, count) != 0) {
-        result = (ssize_t)-EFAULT;
+    if (send_data != NULL) {
+        struct hifs_inode_user send_data_user;
+        strncpy(send_data_user.i_name, send_data->i_name, HIFS_MAX_NAME_SIZE);
+        memcpy(send_data_user.i_addre, send_data->i_addre, sizeof(send_data_user.i_addre));
+        memcpy(send_data_user.i_addrb, send_data->i_addrb, sizeof(send_data_user.i_addrb));
+        send_data_user.i_size = send_data->i_size;
+        send_data_user.i_mode = send_data->i_mode;
+        send_data_user.i_uid = send_data->i_uid;
+        send_data_user.i_gid = send_data->i_gid;
+        send_data_user.i_blocks = send_data->i_blocks;
+        send_data_user.i_bytes = send_data->i_bytes;
+        send_data_user.i_size = send_data->i_size;
+        send_data_user.i_ino = send_data->i_ino;
+        if (copy_to_user(buf, &send_data_user, sizeof(send_data_user)) != 0) {
+            result = (ssize_t)-EFAULT;
+        } else {
+            result = (ssize_t)count;
+        }
     } else {
-        result = (ssize_t)count;
+        result = (ssize_t)-EFAULT;
     }
 
     can_write = true;
@@ -244,12 +270,21 @@ ssize_t hi_comm_inode_device_read(struct file *filp, char __user *buf, size_t co
     return (ssize_t)result;
 }
 
-ssize_t hi_comm_block_device_read(struct file *filp, char __user *buf, size_t count, loff_t *f_pos) {
+ssize_t hi_comm_block_device_read(struct file *filep, char *buf, size_t count, loff_t *offset) {
     // Write out to user space.
     ssize_t result = 0;
 
-    struct hifs_blocks *send_data; 
-    send_data = list_last_entry(&shared_block_outgoing_lst, struct hifs_blocks, hifs_block_list);
+    struct hifs_blocks_user {
+        char block[HIFS_DEFAULT_BLOCK_SIZE];
+        int block_size;
+        int count;
+    };
+
+    struct hifs_blocks *send_data;
+    if (!list_empty(&shared_block_outgoing_lst)) { 
+        send_data = list_last_entry(&shared_block_outgoing_lst, struct hifs_blocks, hifs_block_list);
+        list_del(&send_data->hifs_block_list);
+    }
 
     for (int lock = 0; lock < 100; lock++){
         if (mutex_trylock(&block_mutex)) {
@@ -261,10 +296,21 @@ ssize_t hi_comm_block_device_read(struct file *filp, char __user *buf, size_t co
         if (lock == 100) { return -EBUSY; }
     }
 
-    if (copy_to_user((char *)buf, send_data, count) != 0) {
-        result = (ssize_t)-EFAULT;
+    if (send_data != NULL) {
+        //We don't want to put a 4k block on the stack, so we'll use kernel mem w/ kmalloc.
+        struct hifs_blocks_user *send_data_user = kmalloc(sizeof(struct hifs_blocks_user), GFP_KERNEL);
+        if (!send_data_user) { return -ENOMEM; }
+        strncpy(send_data_user->block, send_data->block, send_data->block_size);
+        send_data_user->block_size = send_data->block_size;
+        send_data_user->count = send_data->count;
+        if (copy_to_user(buf, &send_data_user, sizeof(send_data_user)) != 0) {
+            result = (ssize_t)-EFAULT;
+        } else {
+            result = (ssize_t)count;
+        }
+        kfree(send_data_user);
     } else {
-        result = (ssize_t)count;
+        result = (ssize_t)-EFAULT;
     }
 
     can_write = true;
@@ -275,12 +321,19 @@ ssize_t hi_comm_block_device_read(struct file *filp, char __user *buf, size_t co
     return (ssize_t)result;
 }
 
-ssize_t hi_comm_cmd_device_read(struct file *filp, char __user *buf, size_t count, loff_t *f_pos) {
+ssize_t hi_comm_cmd_device_read(struct file *filep, char *buf, size_t count, loff_t *offset) {
     // Write out to user space.
     ssize_t result = 0;
-
+    
+    struct hifs_cmds_user {
+        char cmd[HIFS_MAX_CMD_SIZE];  // MAX_CMD_SIZE is the maximum size of a command
+        int count;
+    };
     struct hifs_cmds *send_data;
-    send_data = list_last_entry(&shared_cmd_outgoing_lst, struct hifs_cmds, hifs_cmd_list);
+    if (!list_empty(&shared_cmd_outgoing_lst)) { 
+        send_data = list_last_entry(&shared_cmd_outgoing_lst, struct hifs_cmds, hifs_cmd_list);
+        list_del(&send_data->hifs_cmd_list);
+    }
 
     printk(KERN_INFO "hifs_comm: [CMD] Trasnferring command [%s] to buffer [%s] with [%lu characters\n", send_data->cmd, buf, count);
     for (int lock = 0; lock < 100; lock++){
@@ -293,11 +346,17 @@ ssize_t hi_comm_cmd_device_read(struct file *filp, char __user *buf, size_t coun
         if (lock == 100) { return -EBUSY; }
     }
 
-
-    if (copy_to_user(buf, send_data, count) != 0) {
-        result = (ssize_t)-EFAULT;
+    if (send_data != NULL) {
+        struct hifs_cmds_user send_data_user;
+        strncpy(send_data_user.cmd, send_data->cmd, HIFS_MAX_CMD_SIZE);
+        send_data_user.count = send_data->count;
+        if (copy_to_user(buf, &send_data_user, sizeof(send_data_user)) != 0) {
+            result = (ssize_t)-EFAULT;
+        } else {
+            result = (ssize_t)count;
+        }
     } else {
-        result = (ssize_t)count;
+        result = (ssize_t)-EFAULT;
     }
 
     can_write = true;
@@ -308,60 +367,59 @@ ssize_t hi_comm_cmd_device_read(struct file *filp, char __user *buf, size_t coun
     return (ssize_t)result;
 }
 
-ssize_t hi_comm_inode_device_write(struct file *filp, const char __user *buf, size_t count, loff_t *f_pos) {
+ssize_t hi_comm_inode_device_write(struct file *filep, const char *buffer, size_t count, loff_t *offset) {
     // Read from user space
     ssize_t result = 0;
 
-    if (copy_from_user(shared_inode_incoming, buf, count) != 0) {
-        result = (ssize_t)-EFAULT;
-    } else {
-        result =(ssize_t)count;
-        list_add(&shared_inode_incoming->hifs_inode_list, &shared_inode_incoming_lst);
+    if (copy_from_user(shared_inode_incoming, buffer, min(sizeof(*shared_inode_incoming), count))) {
+        // handle error
+        return -EFAULT;
     }
 
+    result = min(sizeof(*shared_inode_incoming), count);
+    list_add(&shared_inode_incoming->hifs_inode_list, &shared_inode_incoming_lst);
 
     can_read = true;
     //wake up the waitqueue
     wake_up(&waitqueue);
 
-    return (ssize_t)result;
+    return result;
 }
 
-ssize_t hi_comm_block_device_write(struct file *filp, const char __user *buf, size_t count, loff_t *f_pos) {
+ssize_t hi_comm_block_device_write(struct file *filep, const char *buffer, size_t count, loff_t *offset) {
     // Read from user space
     ssize_t result = 0;
 
-    if (copy_from_user(shared_block_incoming, buf, count) != 0) {
-        result = (ssize_t)-EFAULT;
-    } else {
-        result = (ssize_t)count;
-        list_add(&shared_block_incoming->hifs_block_list, &shared_block_incoming_lst);
+    if (copy_from_user(shared_block_incoming, buffer, min(sizeof(*shared_block_incoming), count))) {
+        return -EFAULT;
     }
 
+    result = min(sizeof(*shared_block_incoming), count);
+    list_add(&shared_block_incoming->hifs_block_list, &shared_block_incoming_lst);
 
     can_read = true;
     //wake up the waitqueue
     wake_up(&waitqueue);
 
-    return (ssize_t)result;
+    return result;
 }
 
-ssize_t hi_comm_cmd_device_write(struct file *filp, const char __user *buf, size_t count, loff_t *f_pos) {
+ssize_t hi_comm_cmd_device_write(struct file *filep, const char *buffer, size_t count, loff_t *offset) {
     // Read from user space
     ssize_t result = 0;
 
-    if (copy_from_user(shared_cmd_incoming, buf, count) != 0) {
-        result = (ssize_t)-EFAULT;
-    } else {
-        result = (ssize_t)count;
-        list_add(&shared_cmd_incoming->hifs_cmd_list, &shared_cmd_incoming_lst);
+    if (copy_from_user(shared_cmd_incoming, buffer, min(sizeof(*shared_cmd_incoming), count))) {
+        return -EFAULT;
     }
+
+    result = min(sizeof(*shared_cmd_incoming), count);
+    list_add(&shared_cmd_incoming->hifs_cmd_list, &shared_cmd_incoming_lst);
 
     can_read = true;
     //wake up the waitqueue
     wake_up(&waitqueue);
 
-    return (ssize_t)result;
+    return result;
 }
 
 __poll_t hifs_inode_device_poll (struct file *filp, poll_table *wait) {
