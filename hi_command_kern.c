@@ -60,8 +60,18 @@ int hifs_create_test_inode(void) {
 
     INIT_LIST_HEAD(&shared_inode_incoming_lst);
     INIT_LIST_HEAD(&shared_cmd_incoming_lst);
+    INIT_LIST_HEAD(&shared_block_incoming_lst);
     INIT_LIST_HEAD(&shared_inode_incoming->hifs_inode_list);
     INIT_LIST_HEAD(&shared_cmd_incoming->hifs_cmd_list);
+    INIT_LIST_HEAD(&shared_block_incoming->hifs_block_list);
+
+    INIT_LIST_HEAD(&shared_inode_outgoing_lst);
+    INIT_LIST_HEAD(&shared_cmd_outgoing_lst);
+    INIT_LIST_HEAD(&shared_block_outgoing_lst);
+    INIT_LIST_HEAD(&shared_inode_outgoing->hifs_inode_list);
+    INIT_LIST_HEAD(&shared_cmd_outgoing->hifs_cmd_list);
+    INIT_LIST_HEAD(&shared_block_outgoing->hifs_block_list);
+
     return 0;
 }
 

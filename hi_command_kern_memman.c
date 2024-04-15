@@ -332,28 +332,31 @@ ssize_t hi_comm_cmd_device_read(struct file *filep, char *buf, size_t count, lof
     struct hifs_cmds *send_data;
     if (!list_empty(&shared_cmd_outgoing_lst)) { 
         send_data = list_last_entry(&shared_cmd_outgoing_lst, struct hifs_cmds, hifs_cmd_list);
-        list_del(&send_data->hifs_cmd_list);
-    }
+        if (send_data != NULL) {
+            list_del(&send_data->hifs_cmd_list);
 
-    printk(KERN_INFO "hifs_comm: [CMD] Trasnferring command [%s] to buffer [%s] with [%lu characters\n", send_data->cmd, buf, count);
-    for (int lock = 0; lock < 100; lock++){
-        if (mutex_trylock(&cmd_mutex)) {
-            break;
+            printk(KERN_INFO "hifs_comm: [CMD] Trasnferring command [%s] to buffer [%s] with [%lu characters\n", send_data->cmd, buf, count);
+            for (int lock = 0; lock < 100; lock++){
+                if (mutex_trylock(&cmd_mutex)) {
+                    break;
+                } else {
+                    printk(KERN_INFO "hifs_comm: [CMD] Another process is accessing the device. Waiting...\n");
+                    msleep(10);
+                }
+                if (lock == 100) { return -EBUSY; }
+            }
+
+            struct hifs_cmds_user send_data_user;
+            strncpy(send_data_user.cmd, send_data->cmd, HIFS_MAX_CMD_SIZE);
+            send_data_user.count = send_data->count;
+            if (copy_to_user(buf, &send_data_user, sizeof(send_data_user)) != 0) {
+                result = (ssize_t)-EFAULT;
+            } else {
+                result = (ssize_t)count;
+            }
         } else {
-            printk(KERN_INFO "hifs_comm: [CMD] Another process is accessing the device. Waiting...\n");
-            msleep(10);
-        }
-        if (lock == 100) { return -EBUSY; }
-    }
-
-    if (send_data != NULL) {
-        struct hifs_cmds_user send_data_user;
-        strncpy(send_data_user.cmd, send_data->cmd, HIFS_MAX_CMD_SIZE);
-        send_data_user.count = send_data->count;
-        if (copy_to_user(buf, &send_data_user, sizeof(send_data_user)) != 0) {
+            printk(KERN_INFO "hifs_comm: [CMD] The command queue is empty, waiting for data to transfer...\n");
             result = (ssize_t)-EFAULT;
-        } else {
-            result = (ssize_t)count;
         }
     } else {
         result = (ssize_t)-EFAULT;
