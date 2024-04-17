@@ -8,7 +8,7 @@ INCS = -I /usr/lib/gcc/x86_64-redhat-linux/8/include -I /usr/include/ -I /usr/in
 LIBS = -L/usr/lib/ -L/usr/lib64/ -L/usr/ -lpq -lnl-3 -lnl-genl-3
 
 # Define any compile-time flags
-CFLAGS = -std=c11 -Wall -g $(INCS) $(LIBS)
+CFLAGS = -std=gnu11 -Wall -g $(INCS) $(LIBS)
 
 # Define the C source files
 SRCS = hi_command.c hi_command_memman.c hi_command_sql.c hi_command_proto.c hi_command_cache.c

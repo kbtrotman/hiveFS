@@ -19,6 +19,9 @@
  */
 #pragma once
 
+// Notes by Kevin Trotman:
+// Requires one of the two extensions -std=gnu11 or -std=gnu99
+// to compile. This is because of the use of the __typeof__ keyword.
 
 /**
  * @name from other kernel headers

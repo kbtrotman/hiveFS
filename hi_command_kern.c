@@ -29,7 +29,7 @@ extern struct list_head shared_inode_incoming_lst;
 extern struct list_head shared_block_incoming_lst;   
 extern struct list_head shared_cmd_incoming_lst;  
 
-static bool stop_thread = false;
+//static bool stop_thread = false;
 extern char *filename;     // The filename we're currently sending/recieving to/from.
 char buffer[HIFS_DEFAULT_BLOCK_SIZE];
 
@@ -38,12 +38,27 @@ int hifs_create_test_inode(void) {
 
     shared_inode_incoming = kmalloc(sizeof(*shared_inode_incoming), GFP_KERNEL);
     shared_cmd_incoming = kmalloc(sizeof(*shared_cmd_incoming), GFP_KERNEL);
+    shared_block_incoming = kmalloc(sizeof(*shared_block_incoming), GFP_KERNEL);
 
-    if (!shared_inode_incoming || !shared_cmd_incoming) {
+    if (!shared_inode_incoming || !shared_cmd_incoming || !shared_block_incoming) {
+        if (shared_cmd_incoming) { kfree(shared_cmd_incoming); }
+        if (shared_inode_incoming) { kfree(shared_inode_incoming); }
+        if (shared_block_incoming) { kfree(shared_block_incoming); }
         return -ENOMEM;
     }
 
-    *shared_inode_incoming = (struct hifs_inode) {
+    shared_inode_outgoing = kmalloc(sizeof(*shared_inode_incoming), GFP_KERNEL);
+    shared_cmd_outgoing = kmalloc(sizeof(*shared_cmd_incoming), GFP_KERNEL);
+    shared_block_outgoing = kmalloc(sizeof(*shared_block_incoming), GFP_KERNEL);   
+
+    if (!shared_inode_outgoing || !shared_cmd_outgoing || !shared_block_outgoing) {
+        if (shared_cmd_outgoing) { kfree(shared_cmd_outgoing); }
+        if (shared_inode_outgoing) { kfree(shared_inode_outgoing); }
+        if (shared_block_outgoing) { kfree(shared_block_outgoing); }
+        return -ENOMEM;
+    }
+
+    *shared_inode_outgoing = (struct hifs_inode) {
         .i_mode = S_IFREG | 0644,
         .i_uid = 000001,
         .i_gid = 010101,
@@ -53,33 +68,42 @@ int hifs_create_test_inode(void) {
         .i_ino = 1,
     };
 
-    *shared_cmd_incoming = (struct hifs_cmds){
+    *shared_cmd_outgoing = (struct hifs_cmds){
         .cmd = HIFS_Q_PROTO_CMD_TEST,
         .count = 1,
     };
 
-    INIT_LIST_HEAD(&shared_inode_incoming_lst);
-    INIT_LIST_HEAD(&shared_cmd_incoming_lst);
-    INIT_LIST_HEAD(&shared_block_incoming_lst);
     INIT_LIST_HEAD(&shared_inode_incoming->hifs_inode_list);
     INIT_LIST_HEAD(&shared_cmd_incoming->hifs_cmd_list);
     INIT_LIST_HEAD(&shared_block_incoming->hifs_block_list);
-
-    INIT_LIST_HEAD(&shared_inode_outgoing_lst);
-    INIT_LIST_HEAD(&shared_cmd_outgoing_lst);
-    INIT_LIST_HEAD(&shared_block_outgoing_lst);
     INIT_LIST_HEAD(&shared_inode_outgoing->hifs_inode_list);
     INIT_LIST_HEAD(&shared_cmd_outgoing->hifs_cmd_list);
     INIT_LIST_HEAD(&shared_block_outgoing->hifs_block_list);
 
+    INIT_LIST_HEAD(&shared_inode_outgoing_lst);
+    INIT_LIST_HEAD(&shared_block_outgoing_lst);
+    INIT_LIST_HEAD(&shared_cmd_outgoing_lst);
+    INIT_LIST_HEAD(&shared_inode_incoming_lst);
+    INIT_LIST_HEAD(&shared_block_incoming_lst);
+    INIT_LIST_HEAD(&shared_cmd_incoming_lst);
+
+    list_add_tail(&shared_cmd_outgoing->hifs_cmd_list, &shared_cmd_outgoing_lst);
+    list_add_tail(&shared_inode_outgoing->hifs_inode_list, &shared_inode_outgoing_lst);
+
     return 0;
 }
 
-int hifs_thread_fn(void *data) {
-    while (!kthread_should_stop() && !stop_thread) {
-        int value;
+int hifs_thread_fn(void) {
+    //while (!kthread_should_stop() && !stop_thread) {
+    int value;
+    value = hifs_create_test_inode();
 
-        hifs_create_test_inode();
+    if (value < 0) {
+        pr_err("hivefs_comm: Failed to create test data\n");
+        return value;
+    }
+
+    while (1) {
         value = atomic_read(&my_atomic_variable);
         if (value == HIFS_Q_PROTO_ACK_LINK_UP || 
             value == HIFS_Q_PROTO_ACK_LINK_KERN || 
@@ -91,9 +115,8 @@ int hifs_thread_fn(void *data) {
             hifs_comm_link_init_change();
         } else {
             // Call to manage the queue contents
-            hifs_manage_queue_contents();
         }
-        msleep(5);  // Sleep for 5 ms
+        msleep(20);  // Sleep for 20 ms
     }
     return 0;
 }
@@ -139,36 +162,7 @@ void hifs_wait_on_link(void)
     }
 }
 
-int hifs_manage_queue_contents(void)
-{
-    // Check if the outgoing queue is empty. If it is, we can't do anything.
-    if (list_empty(&shared_inode_outgoing_lst) && list_empty(&shared_block_outgoing_lst) && list_empty(&shared_cmd_outgoing_lst)) {
-        pr_info("hivefs_comm: Outgoing queue is empty. Waiting for data.\n");
-        return -1;
-    } else {
-        // Check if the outgoing queue has data. If it does, process it.
-        if (!list_empty(&shared_inode_outgoing_lst) || !list_empty(&shared_block_outgoing_lst) || !list_empty(&shared_cmd_outgoing_lst)) {
-            pr_info("hivefs_comm: Outgoing queue has data. Processing...\n");
-            //hifs_process_outgoing_queue();
-        }
-    }
-
-    // Check if the incoming queue is empty. If it is, we can't do anything.
-    if (list_empty(&shared_inode_incoming_lst) && list_empty(&shared_block_incoming_lst) && list_empty(&shared_cmd_incoming_lst)) {
-        pr_info("hivefs_comm: Incoming queue is empty. Waiting for data.\n");
-        return -1;
-    } else {
-        // Pop data from the incoming queue and process it.
-        if (!list_empty(&shared_inode_incoming_lst) || !list_empty(&shared_block_incoming_lst) || !list_empty(&shared_cmd_incoming_lst)) {
-            pr_info("hivefs_comm: Incoming queue has data. Processing...\n");
-            //hifs_process_incoming_queue();
-        }
-    }
-
-    return 0;
-
-}
-
+/*
 int hifs_start_queue_thread(void)
 {
     // Start the new monitoring kernel thread
@@ -189,3 +183,5 @@ int hifs_stop_queue_thread(void)
     pr_info("hivefs: Shutting down hivefs queue management thread\n");
     return 0;
 }
+
+*/

@@ -100,6 +100,15 @@ struct hifs_link {
 };
 extern struct hifs_link hifs_kern_link;
 extern struct hifs_link hifs_user_link;
+
+#define free_a_list(lia, type, member) \
+do { \
+    type *node, *tmp; \
+    list_for_each_entry_safe(node, tmp, lia, member) { \
+        list_del(&node->member); \
+        kfree(node); \
+    } \
+} while (0)
 /******************************
  * END Queue Management Structures
  ******************************/
