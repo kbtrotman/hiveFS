@@ -80,6 +80,8 @@ int main(int argc, char *argv[])
     fd_block = open(device_file_cmd, O_RDWR | O_NONBLOCK);   
     if( fd_block == -1 )  { perror("open"); exit(EXIT_FAILURE); }
 
+    hifs_init_queues();
+
     pfd.fd = fd_cmd;
     pfd.events = ( POLLIN | POLLOUT );
 
@@ -106,7 +108,7 @@ queue_management:
         }
     }
 
-    puts("Starting poll...");
+    puts("Looping polls...");
     ret = poll(&pfd, (unsigned long)1, 5000);   //wait for 5secs
     
     if( ret < 0 ) 
@@ -127,8 +129,6 @@ queue_management:
         write_to_queue();
         printf("hifs: POLLOUT\n");
     }
-
-    hifs_user_link.state == HIFS_COMM_LINK_UP ? read_from_queue() : 0;
 
     goto queue_management;
     
