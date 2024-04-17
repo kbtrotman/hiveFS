@@ -51,13 +51,13 @@ int read_from_atomic(void)
 
     fd = open(atomic_device_name, O_RDWR);
     if (fd == -1) {
-        perror("hi_comm: Error opening device file");
+        perror("hi_command: Error opening device file");
         return -1;
     }
 
     // Reading from the atomic variable in the kernel space
     read(fd, &value, sizeof(int));
-    printf("hi_comm: Read value from kernel: %d\n", value);
+    printf("hi_command: Read value from kernel: %d\n", value);
     close(fd);
     return value;
 }
@@ -68,13 +68,13 @@ int write_to_atomic(int value)
 
     fd = open(atomic_device_name, O_RDWR);
     if (fd == -1) {
-        perror("hi_comm: Error opening device file");
+        perror("hi_command: Error opening device file");
         return -1;
     }
 
     // Writing to the atomic variable in the kernel space
     ret = write(fd, &value, sizeof(int));
-    printf("hi_comm: Wrote value to kernel: %d\n", value);
+    printf("hi_command: Wrote value to kernel: %d\n", value);
 
     close(fd);
     return ret;
@@ -96,158 +96,171 @@ void hi_comm_close_queues(void)
     close(fd_cmd);
 }
 
-int read_from_inode_dev(char *dev_file, int size)
+int read_from_inode_dev(char *dev_file)
 {
-    int ret;
+    int result = 0;
 
-    shared_inode_incoming = mmap(0, sizeof(shared_inode_incoming), PROT_READ | PROT_WRITE, MAP_SHARED, fd_inode, 0);
-    if (!shared_inode_incoming) {
-        perror("hi_comm: Error mapping shared memory");
-        return -1;
-    }
-    ret = read(fd_inode, &shared_inode_incoming, size);
-    if (ret >= 0) {
-        //shared_inode_incoming[ret] = '\0';  // null-terminate the string, read doesn't play well.
-        printf("hi_comm: Read %d bytes from device file: %s\n", ret, dev_file);
+    result = read(fd_cmd, &shared_inode_incoming, sizeof(shared_inode_incoming));
+    if (result >= 0) {
+        printf("hi_command: Read %d bytes from device file: %s\n", result, dev_file);
+        printf("hi_command: Received inode [%s] with [%d] file size\n", shared_inode_incoming->i_name, shared_inode_incoming->i_bytes);
     } else {
         // Handle error
-        perror("hi_comm: Error reading from inode device file");
-        return ret;
+        perror("hi_command: Error reading from command device file");
+        return result;
     }
 
-    // Add New Entry to incoming queue
-    list_add_tail(&shared_inode_incoming->hifs_inode_list, &shared_inode_incoming_lst);
+    result = sizeof(*shared_inode_incoming);
+    list_add(&shared_inode_incoming->hifs_inode_list, &shared_inode_incoming_lst);
 
-    return ret;
+    return result;
 }
 
-int read_from_block_dev(char *dev_file, int size)
+int read_from_block_dev(char *dev_file)
 {
-    int ret;
+    int result = 0;
 
-    shared_block_incoming = mmap(0, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd_block, 0);
-    if (!shared_block_incoming) {
-        perror("hi_comm: Error mapping shared memory");
-        return -1;
-    }
-    ret = read(fd_block, &shared_block_incoming, size);
-    if (ret >= 0) {
-        //shared_block_incoming->block[ret] = '\0';  // null-terminate the string, read doesn't play well.
-        printf("hi_comm: Read %d bytes from device file: %s\n", ret, dev_file);
+    result = read(fd_cmd, &shared_block_incoming, sizeof(shared_block_incoming));
+    if (result >= 0) {
+        printf("hi_command: Read %d bytes from device file: %s\n", result, dev_file);
+        printf("hi_command: Received block [%s] with [%d] block size\n", shared_block_incoming->block, shared_block_incoming->block_size);
     } else {
         // Handle error
-        perror("hi_comm: Error reading from inode device file");
-        return ret;
+        perror("hi_command: Error reading from command device file");
+        return result;
     }
+    result = sizeof(*shared_block_incoming);
+    list_add(&shared_block_incoming->hifs_block_list, &shared_block_incoming_lst);
 
-    // Add New Entry to incoming queue
-    list_add_tail(&shared_block_incoming->hifs_block_list, &shared_block_incoming_lst);
-
-    return ret;
+    return result;
 }
 
 int read_from_cmd_dev(char *dev_file)
 {
-    int ret;
-    struct hifs_cmds_user {
-        char cmd[HIFS_MAX_CMD_SIZE];  // MAX_CMD_SIZE is the maximum size of a command
-        int count;
-    };
-    struct hifs_cmds_user send_data_user;
-
-    ret = read(fd_cmd, &send_data_user, sizeof(send_data_user));
-    if (ret >= 0) {
-        printf("hi_comm: Read %d bytes from device file: %s\n", ret, dev_file);
-        printf("hi_comm: Received command [%s] with [%d] count\n", send_data_user.cmd, send_data_user.count);
+    int result = 0;
+    result = read(fd_cmd, &shared_cmd_incoming, sizeof(shared_cmd_incoming));
+    if (result >= 0) {
+        printf("hi_command: Read %d bytes from device file: %s\n", result, dev_file);
+        printf("hi_command: Received command [%s] with [%d] count\n", shared_cmd_incoming->cmd, shared_cmd_incoming->count);
     } else {
         // Handle error
-        perror("hi_comm: Error reading from command device file");
-        return ret;
+        perror("hi_command: Error reading from command device file");
+        return result;
     }
 
-    list_add_tail(&shared_cmd_incoming->hifs_cmd_list, &shared_cmd_incoming_lst);
+    result = sizeof(*shared_cmd_incoming);
+    list_add(&shared_cmd_incoming->hifs_cmd_list, &shared_cmd_incoming_lst);
 
-    return ret;
+    return result;
 }
 
-int write_to_inode_dev(char *buffer, int size)
+int write_to_inode_dev(void)
 {
-    int ret;
+    // Write out to user space.
+    int result = 0;
+    struct hifs_inode *send_data = NULL;
+    struct hifs_inode_user send_data_user;
 
-    shared_inode_outgoing = mmap(0, sizeof(shared_inode_outgoing), PROT_READ | PROT_WRITE, MAP_SHARED, fd_inode, 0);
-    if (!shared_inode_outgoing) {
-        perror("hi_comm: Error mapping shared memory");
-        return -1;
+    if (!list_empty(&shared_inode_outgoing_lst)) { 
+        send_data = list_entry(&shared_inode_outgoing_lst, struct hifs_inode, hifs_inode_list);
+        if (send_data) {
+            list_del(&send_data->hifs_inode_list);
+        } else {
+            printf("hi_command: [INODE] send_data is empty, dropping out to process next queue message\n");
+            return -EFAULT;
+        }
+        printf("hi_command: [INODE] Transferring inode [%s]\n", send_data->i_name);
+        strncpy(send_data_user.i_name, send_data->i_name, HIFS_MAX_NAME_SIZE);
+        memcpy(send_data_user.i_addre, send_data->i_addre, sizeof(send_data_user.i_addre));
+        memcpy(send_data_user.i_addrb, send_data->i_addrb, sizeof(send_data_user.i_addrb));
+        send_data_user.i_size = send_data->i_size;
+        send_data_user.i_mode = send_data->i_mode;
+        send_data_user.i_uid = send_data->i_uid;
+        send_data_user.i_gid = send_data->i_gid;
+        send_data_user.i_blocks = send_data->i_blocks;
+        send_data_user.i_bytes = send_data->i_bytes;
+        send_data_user.i_size = send_data->i_size;
+        send_data_user.i_ino = send_data->i_ino;
+        ret = write(fd_inode, &send_data_user, sizeof(send_data_user));
+        if (ret == -1) {
+            perror("hi_command: Error writing to device file");
+            return -1;
+        } else {
+            printf("hi_command: Wrote %d bytes to device file: %s\n", ret, device_file_cmd);
+        }
+    } else {
+        result = -EFAULT;
     }
-    ret = write(fd_inode, &buffer, size);
-
-    // Unmap temp shared memory and remove outgoing item from list
-
-    if (ret == -1) {
-        perror("hi_comm: Error writing to device file");
-        return -1;
-    }
-    return ret;
-
+    free(send_data);
+    return result;
 }
 
-int write_to_block_dev(char *buffer, int size)
+int write_to_block_dev(void)
 {
-    int ret;
-
-    shared_block_outgoing = mmap(0, sizeof(shared_block_outgoing), PROT_READ | PROT_WRITE, MAP_SHARED, fd_block, 0);
-    if (!shared_block_outgoing) {
-        perror("hi_comm: Error mapping shared memory");
-        return -1;
+    struct hifs_block_user {
+        char block[HIFS_DEFAULT_BLOCK_SIZE];  // MAX_CMD_SIZE is the maximum size of a command
+        int block_size;
+    };
+    int result = 0;
+    struct hifs_blocks *send_data = NULL;
+    struct hifs_block_user *send_data_user = mmap(0, sizeof(struct hifs_block_user), PROT_READ | PROT_WRITE, MAP_SHARED, fd_block, 0);
+    if (!list_empty(&shared_block_outgoing_lst)) { 
+        send_data = list_entry(&shared_block_outgoing_lst, struct hifs_blocks, hifs_block_list);
+        if (send_data) {
+            list_del(&send_data->hifs_block_list);
+        } else {
+            printf("hi_command: [BLOCK] send_data is empty, dropping out to process next queue message\n");
+            return -EFAULT;
+        }
+        printf("hi_command: [BLOCK] Transferring block [%s] with [%d] characters\n", send_data->block, send_data->block_size);
+        strncpy(send_data_user->block, send_data->block, HIFS_DEFAULT_BLOCK_SIZE);
+        send_data_user->block_size = send_data->block_size;
+        ret = write(fd_block, &send_data_user, sizeof(send_data_user));
+        if (ret == -1) {
+            perror("hi_command: Error writing to device file");
+            return -1;
+        } else {
+            printf("hi_command: Wrote %d bytes to device file: %s\n", ret, device_file_cmd);
+        }
+    } else {
+        result = -EFAULT;
     }
-    ret = write(fd_block, &buffer, size);
-
-    // Unmap temp shared memory and remove outgoing item from list
-
-    if (ret == -1) {
-        perror("hi_comm: Error writing to device file");
-        return -1;
-    }
-    return ret;
-
+    free(send_data);
+    return result;
 }
 
 int write_to_cmd_dev(void)
 {
-    int ret;
+    // Write out to user space.
+    int result = 0;
     struct hifs_cmds_user {
         char cmd[HIFS_MAX_CMD_SIZE];  // MAX_CMD_SIZE is the maximum size of a command
         int count;
     };
-    struct hifs_cmds *send_data;
-
-    send_data = mmap(0, sizeof(shared_cmd_outgoing), PROT_READ | PROT_WRITE, MAP_SHARED, fd_cmd, 0);
-    if (!send_data) {
-        perror("hi_comm: Error mapping shared memory");
-        return -1;
-    }
-
+    struct hifs_cmds *send_data = NULL;
+    struct hifs_cmds_user send_data_user;
     if (!list_empty(&shared_cmd_outgoing_lst)) { 
         send_data = list_entry(&shared_cmd_outgoing_lst, struct hifs_cmds, hifs_cmd_list);
-        struct hifs_cmds_user send_data_user;
-        list_del(&send_data->hifs_cmd_list);
-
-        printf("hifs_comm: [CMD] Transferring command [%s] with [%ld] characters\n", send_data->cmd, sizeof(send_data->cmd));
-
+        if (send_data) {
+            list_del(&send_data->hifs_cmd_list);
+        } else {
+            printf("hi_command: [CMD] send_data is empty, dropping out to process next queue message\n");
+            return -EFAULT;
+        }
+        printf("hi_command: [CMD] Transferring command [%s] with [%d] characters\n", send_data->cmd, send_data->count);
         strncpy(send_data_user.cmd, send_data->cmd, HIFS_MAX_CMD_SIZE);
         send_data_user.count = send_data->count;
         ret = write(fd_cmd, &send_data_user, sizeof(send_data_user));
         if (ret == -1) {
-            perror("hi_comm: Error writing to device file");
+            perror("hi_command: Error writing to device file");
             return -1;
+        } else {
+            printf("hi_command: Wrote %d bytes to device file: %s\n", ret, device_file_cmd);
         }
+
     } else {
-        printf("hifs_comm: [CMD] No commands to send\n");
-        return -1;
+        result = -EFAULT;
     }
-    // Unmap temp shared memory
     free(send_data);
-
-    return ret;
-
+    return result;
 }

@@ -50,15 +50,16 @@ extern int fd_cmd, fd_inode, fd_block;
 /* hi_command_proto.c */
 void write_to_queue(void);
 void read_from_queue(void);
+int hifs_init_queues(void);
 
 /* hi_command_memman.c */
 int read_from_atomic(void);
 int write_to_atomic(int value);
-int write_to_inode_dev(char *buffer, int size);
-int write_to_block_dev(char *buffer, int size);
+int write_to_inode_dev(void);
+int write_to_block_dev(void);
 int write_to_cmd_dev(void);
-int read_from_inode_dev(char *dev_file, int size);
-int read_from_block_dev(char *dev_file, int size);
+int read_from_inode_dev(char *dev_file);
+int read_from_block_dev(char *dev_file);
 int read_from_cmd_dev(char *dev_file);
 void hi_comm_close_queues(void);
 

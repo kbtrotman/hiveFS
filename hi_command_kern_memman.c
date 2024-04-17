@@ -223,25 +223,35 @@ int hifs_comm_device_release(struct inode *inode, struct file *filp) {
 
 ssize_t hi_comm_inode_device_read(struct file *filep, char *buf, size_t count, loff_t *offset) {
     // Write out to user space.
+    int lock;
     ssize_t result = 0;
 
-    struct hifs_inode *send_data;
-    if (!list_empty(&shared_inode_outgoing_lst)) {
-        send_data = list_last_entry(&shared_inode_outgoing_lst, struct hifs_inode, hifs_inode_list);
-        if (send_data != NULL) {
-            //We don't want to put a 4k block on the stack, so we'll use kernel mem w/ kmalloc.
-            struct hifs_inode_user send_data_user;
-            list_del(&send_data->hifs_inode_list);    
+    struct hifs_inode *send_data = NULL;
+    struct hifs_inode_user send_data_user;
+    if (!list_empty(&shared_inode_outgoing_lst)) { 
+        send_data = list_first_entry(&shared_inode_outgoing_lst, struct hifs_inode, hifs_inode_list);
+        if (send_data) {
+            list_del(&send_data->hifs_inode_list);
+        } else {
+            printk(KERN_INFO "hifs_comm: [INODE] send_data is empty, dropping out to process next queue message\n");
+            return -EFAULT;
+        }
 
-            for (int lock = 0; lock < 100; lock++){
-                if (mutex_trylock(&inode_mutex)) {
-                    break;
-                } else {
-                    printk(KERN_INFO "hifs_comm: [Inode] Another process is accessing the device. Waiting...\n");
-                    msleep(10);
-                }
-                if (lock == 100) { return -EBUSY; }
+        printk(KERN_INFO "hifs_comm: [INODE] Transferring inode [%s]\n", send_data->i_name);
+        for (lock = 0; lock < 100; lock++){
+            if (!mutex_trylock(&inode_mutex)) {
+                break;
+            } else {
+                printk(KERN_INFO "hifs_comm: [INODE] Another process is accessing the device. Waiting...\n");
+                msleep(10);
             }
+        }
+        if (lock > 99) { 
+            mutex_unlock(&inode_mutex);
+            kfree(send_data);
+            return -EBUSY; 
+        }
+
             strncpy(send_data_user.i_name, send_data->i_name, HIFS_MAX_NAME_SIZE);
             memcpy(send_data_user.i_addre, send_data->i_addre, sizeof(send_data_user.i_addre));
             memcpy(send_data_user.i_addrb, send_data->i_addrb, sizeof(send_data_user.i_addrb));
@@ -256,26 +266,24 @@ ssize_t hi_comm_inode_device_read(struct file *filep, char *buf, size_t count, l
             if (copy_to_user(buf, &send_data_user, sizeof(send_data_user)) != 0) {
                 result = (ssize_t)-EFAULT;
             } else {
-                result = (ssize_t)count;
+                result = (ssize_t) sizeof(send_data_user);
             }
+
+            can_write = true;
+            //wake up the waitqueue
+            wake_up(&waitqueue);
+
+            mutex_unlock(&block_mutex);
         } else {
-            printk(KERN_INFO "hifs_comm: [INODE] The command queue is empty, waiting for data to transfer...\n");
-            result = (ssize_t)-EFAULT;
+            result = -EFAULT;
         }
-    } else {
-        result = (ssize_t)-EFAULT;
-    }
-
-    can_write = true;
-    //wake up the waitqueue
-    wake_up(&waitqueue);
-
-    mutex_unlock(&inode_mutex);
-    return (ssize_t)result;
+    kfree(send_data);
+    return result;
 }
 
 ssize_t hi_comm_block_device_read(struct file *filep, char *buf, size_t count, loff_t *offset) {
     // Write out to user space.
+    int lock;
     ssize_t result = 0;
 
     struct hifs_blocks_user {
@@ -283,49 +291,49 @@ ssize_t hi_comm_block_device_read(struct file *filep, char *buf, size_t count, l
         int block_size;
         int count;
     };
-
-    struct hifs_blocks *send_data = kmalloc(sizeof(struct hifs_blocks_user), GFP_KERNEL);
+    struct hifs_blocks *send_data = NULL;
     struct hifs_blocks_user *send_data_user = kmalloc(sizeof(struct hifs_blocks_user), GFP_KERNEL);
     if (!list_empty(&shared_block_outgoing_lst)) { 
-        send_data = list_last_entry(&shared_block_outgoing_lst, struct hifs_blocks, hifs_block_list);
-        if (send_data != NULL) {
-            //We don't want to put a 4k block on the stack, so we'll use kernel mem w/ kmalloc.
-
+        send_data = list_first_entry(&shared_block_outgoing_lst, struct hifs_blocks, hifs_block_list);
+        if (send_data) {
             list_del(&send_data->hifs_block_list);
-
-            for (int lock = 0; lock < 100; lock++){
-                if (mutex_trylock(&block_mutex)) {
-                    break;
-                } else {
-                    printk(KERN_INFO "hifs_comm: [Block] Another process is accessing the device. Waiting...\n");
-                    msleep(10);
-                }
-                if (lock == 100) { return -EBUSY; }
-            }
-
-            strncpy(send_data_user->block, send_data->block, send_data->block_size);
-            send_data_user->block_size = send_data->block_size;
-            send_data_user->count = send_data->count;
-            if (copy_to_user(buf, &send_data_user, sizeof(send_data_user)) != 0) {
-                result = (ssize_t)-EFAULT;
-            } else {
-                result = (ssize_t)count;
-            }
-            kfree(send_data_user);
         } else {
-            printk(KERN_INFO "hifs_comm: [CMD] The command queue is empty, waiting for data to transfer...\n");
-            result = (ssize_t)-EFAULT;
+            printk(KERN_INFO "hifs_comm: [BLOCK] send_data is empty, dropping out to process next queue message\n");
+            return -EFAULT;
         }
+
+        printk(KERN_INFO "hifs_comm: [BLOCK] Transferring block [%s] with [%d] characters\n", send_data->block, send_data->block_size);
+        for (lock = 0; lock < 100; lock++){
+            if (!mutex_trylock(&block_mutex)) {
+                break;
+            } else {
+                printk(KERN_INFO "hifs_comm: [BLOCK] Another process is accessing the device. Waiting...\n");
+                msleep(10);
+            }
+        }
+        if (lock > 99) { 
+            mutex_unlock(&block_mutex);
+            kfree(send_data);
+            return -EBUSY; 
+        }
+
+        strncpy(send_data_user->block, send_data->block, HIFS_DEFAULT_BLOCK_SIZE);
+        send_data_user->block_size = send_data->block_size;
+        if (copy_to_user(buf, &send_data_user, sizeof(send_data_user)) != 0) {
+            result = -EFAULT;
+        } else {
+            result = send_data_user->block_size;
+        }
+        can_write = true;
+        //wake up the waitqueue
+        wake_up(&waitqueue);
+
+        mutex_unlock(&block_mutex);
     } else {
-        result = (ssize_t)-EFAULT;
+        result = -EFAULT;
     }
-
-    can_write = true;
-    //wake up the waitqueue
-    wake_up(&waitqueue);
-
-    mutex_unlock(&block_mutex);
-    return (ssize_t)result;
+    kfree(send_data);
+    return result;
 }
 
 ssize_t hi_comm_cmd_device_read(struct file *filep, char *buf, size_t count, loff_t *offset) {
@@ -347,7 +355,7 @@ ssize_t hi_comm_cmd_device_read(struct file *filep, char *buf, size_t count, lof
             return -EFAULT;
         }
 
-        printk(KERN_INFO "hifs_comm: [CMD] Transferring command [%s] with [%lu] characters\n", send_data->cmd, count);
+        printk(KERN_INFO "hifs_comm: [CMD] Transferring command [%s] with [%d] characters\n", send_data->cmd, send_data->count);
         for (lock = 0; lock < 100; lock++){
             if (!mutex_trylock(&cmd_mutex)) {
                 break;

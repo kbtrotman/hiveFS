@@ -114,7 +114,7 @@ int hifs_thread_fn(void) {
             pr_info("hivefs_comm: Waiting on link up. Re-trying...\n");
             hifs_comm_link_init_change();
         } else {
-            // Call to manage the queue contents
+            // Queue contents manage themselves, so do nothing here....
         }
         msleep(20);  // Sleep for 20 ms
     }
