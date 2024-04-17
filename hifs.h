@@ -49,16 +49,18 @@ extern struct task_struct *task;
 
 /* hifs.c */
 //static int hifs_mkfs(struct file_system_type *fs_type, int flags, const char *dev_name, void *data);
+void __exit hifs_exit(void);
+int __init hifs_init(void);
 
 /* hi_command_kern.c */
 void hifs_comm_link_up (void);
 int hifs_comm_link_init_change( void );
-int hifs_thread_fn(void *data);
+int hifs_thread_fn(void);
 int hifs_create_test_inode(void);
 void hifs_wait_on_link(void);
 int hifs_manage_queue_contents(void);
-int hifs_stop_queue_thread(void);
-int hifs_start_queue_thread(void);
+//int hifs_stop_queue_thread(void);
+//int hifs_start_queue_thread(void);
 
 /* hi_command_kern_comm_memman.c */
 int hifs_comm_device_open(struct inode *inode, struct file *filp);

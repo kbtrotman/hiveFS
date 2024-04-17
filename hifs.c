@@ -120,7 +120,7 @@ static int hifs_mkfs(struct file_system_type *fs_type, int flags, const char *de
     return 0;
 }
 
-static int __init hifs_init(void)
+int __init hifs_init(void)
 {
     int ret;
 
@@ -147,19 +147,25 @@ static int __init hifs_init(void)
     } else {
         printk(KERN_INFO "hivefs: Memory Mapped Communication queues registered to kernel\n");
     }
-    return 0;
 
-    ret = hifs_start_queue_thread();
+    ret = hifs_thread_fn();
+    if (ret != 0) {
+        printk(KERN_ERR "hivefs: Failed to start hivefs management routine\n");
+    } else {
+        printk(KERN_INFO "hivefs: hivefs manager started\n");
+    }
+    return ret;
 
 failure:
-    return -1;
+    printk(KERN_ERR "hivefs: There were errors when attempting to register the filesystem\n");
+    return ret;
 }
 
-static void __exit hifs_exit(void)
+void __exit hifs_exit(void)
 {
     int ret;
 
-    hifs_stop_queue_thread();
+    //hifs_stop_queue_thread();
     unregister_all_comm_queues();
     hifs_atomic_exit();
     ret = unregister_filesystem(&hifs_type);
