@@ -15,6 +15,8 @@ extern char *device_file_inode;
 extern char *device_file_block;
 extern char *device_file_cmd;
 extern char buffer[4096];
+extern int atomic_value;
+extern struct hifs_link hifs_user_link;
 
 extern struct hifs_inode *shared_inode_outgoing;    // These six Doubly-Linked Lists are our
 extern struct hifs_blocks *shared_block_outgoing;   // processing queues. They are sent & 
@@ -123,4 +125,43 @@ int hifs_init_queues(void) {
     list_add_tail(&shared_inode_outgoing->hifs_inode_list, &shared_inode_outgoing_lst);
 
     return 0;
+}
+
+int hifs_comm_link_init_change( void )
+{
+    int value = HIFS_Q_PROTO_UNUSED;
+    atomic_value = read_from_atomic();
+
+    // We skip value 8 here and 9 & 10 are reversed from kernel space. And write_to_atomic is changed to HIFS_Q_PROTO_ACK_LINK_USER.
+    if (value == HIFS_Q_PROTO_UNUSED && hifs_user_link.state == HIFS_COMM_LINK_DOWN) {
+        hifs_comm_link_up();
+        write_to_atomic(HIFS_Q_PROTO_ACK_LINK_USER);
+        hifs_wait_on_link();
+    } else if (value ==HIFS_Q_PROTO_ACK_LINK_KERN) {
+        hifs_comm_link_up();
+    } else if (value == HIFS_Q_PROTO_ACK_LINK_USER) {
+        hifs_wait_on_link();
+    }
+
+    return 0;
+}
+
+void hifs_comm_link_up (void) 
+{
+    printf( "hi_command: Received hivefs Link_Up Command.\n");
+    hifs_user_link.last_state = hifs_user_link.state;
+    hifs_user_link.state = HIFS_COMM_LINK_UP;
+    printf( "hi_command: link up'd at %ld seconds after hifs start, waiting on hi_command.\n", (GET_TIME() - hifs_user_link.clockstart));
+    hifs_user_link.last_check = 0;
+    write_to_atomic(HIFS_Q_PROTO_UNUSED);
+}
+
+void hifs_wait_on_link(void)
+{
+    for (int i = 0; i < 100; i++) {
+        if (read_from_atomic() == HIFS_Q_PROTO_ACK_LINK_UP) {
+            hifs_comm_link_up();
+            break;
+        }
+    }
 }

@@ -42,6 +42,7 @@ extern char *device_file_inode;
 extern char *device_file_block;
 extern char *device_file_cmd;
 extern int fd_cmd, fd_inode, fd_block;
+extern int atomic_value;
 
 // Prototypes Here:
 
@@ -51,6 +52,9 @@ extern int fd_cmd, fd_inode, fd_block;
 void write_to_queue(void);
 void read_from_queue(void);
 int hifs_init_queues(void);
+int hifs_comm_link_init_change( void );
+void hifs_wait_on_link(void);
+void hifs_comm_link_up (void);
 
 /* hi_command_memman.c */
 int read_from_atomic(void);

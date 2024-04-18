@@ -20,6 +20,8 @@ extern int fd_cmd, fd_inode, fd_block;
 
 extern char buffer[4096];
 extern struct PSQL sqldb;
+extern int atomic_value;
+extern struct hifs_link hifs_user_link;
 
 extern struct hifs_inode *shared_inode_outgoing;    // These six Doubly-Linked Lists are our
 extern struct hifs_blocks *shared_block_outgoing;   // processing queues. They are sent & 
@@ -39,7 +41,6 @@ extern struct list_head shared_cmd_incoming_lst;
 int main(int argc, char *argv[])
 {
     int ret;
-    int atomic_value;
     struct pollfd pfd;
     //bool queue_empty = true; // Add a flag to track whether the queue is empty
 
@@ -72,13 +73,13 @@ int main(int argc, char *argv[])
     init_hive_link();
 
     fd_cmd = open(device_file_cmd, O_RDWR | O_NONBLOCK);   
-    if( fd_cmd == -1 )  { perror("open"); exit(EXIT_FAILURE); }
+    if( fd_cmd == -1 )  { perror("hi-command: open [CMD queue]"); exit(EXIT_FAILURE); }
 
     fd_inode = open(device_file_cmd, O_RDWR | O_NONBLOCK);   
-    if( fd_inode == -1 )  { perror("open"); exit(EXIT_FAILURE); }
+    if( fd_inode == -1 )  { perror("hi-command: open [INODE queue]"); exit(EXIT_FAILURE); }
 
     fd_block = open(device_file_cmd, O_RDWR | O_NONBLOCK);   
-    if( fd_block == -1 )  { perror("open"); exit(EXIT_FAILURE); }
+    if( fd_block == -1 )  { perror("hi-command: open [BLOCK queue]"); exit(EXIT_FAILURE); }
 
     hifs_init_queues();
 
@@ -92,28 +93,23 @@ queue_management:
     printf("hi-command: Atomic value: %d\n", atomic_value);
     
     // Here we ignore values 1,3,4,8,10
-    if (atomic_value == HIFS_Q_PROTO_ACK_LINK_KERN || hifs_user_link.state == HIFS_COMM_LINK_DOWN) {
-        hifs_user_link.last_state = hifs_user_link.state;
-        hifs_user_link.state = HIFS_COMM_LINK_UP;
-        printf("hi-command: user link up'd at %ld seconds after hi_command start.\n", (GET_TIME() - hifs_user_link.clockstart));
-        hifs_user_link.last_check = 0;
-        if (atomic_value == HIFS_Q_PROTO_ACK_LINK_KERN) {
-            write_to_atomic(HIFS_Q_PROTO_UNUSED);
-        } else if (hifs_user_link.state == HIFS_COMM_LINK_DOWN) {
-            hifs_user_link.last_state = hifs_user_link.state;
-            hifs_user_link.state = HIFS_COMM_LINK_UP;
-            printf("hi-command: user link up'd at %ld seconds after hi_command start.\n", (GET_TIME() - hifs_user_link.clockstart));
-            hifs_user_link.last_check = 0;
-            write_to_atomic(HIFS_Q_PROTO_ACK_LINK_USER);
-        }
+    if (atomic_value == HIFS_Q_PROTO_ACK_LINK_KERN || 
+        atomic_value == HIFS_Q_PROTO_ACK_LINK_USER ||
+        hifs_user_link.state == HIFS_COMM_LINK_DOWN)
+    {
+        // Call to complete a new or a temp aborted link_up here
+        printf("hi_command: Waiting on link up. Re-trying...\n");
+        hifs_comm_link_init_change();
+    } else {
+        // Queue contents manage themselves, so do nothing here....
     }
 
-    puts("Looping polls...");
+    puts("hi-command: Looping polls...");
     ret = poll(&pfd, (unsigned long)1, 5000);   //wait for 5secs
     
     if( ret < 0 ) 
     {
-        perror("poll");
+        perror("hi-command: poll");
         assert(0);
     }
     
@@ -121,13 +117,13 @@ queue_management:
     if( ( pfd.revents & POLLIN )  == POLLIN )
     {
         read_from_queue();
-        printf("hifs: POLLIN");
+        printf("hi-command: POLLIN");
     }
     
     if( ( pfd.revents & POLLOUT )  == POLLOUT )
     {
         write_to_queue();
-        printf("hifs: POLLOUT\n");
+        printf("hi-command: POLLOUT\n");
     }
 
     goto queue_management;

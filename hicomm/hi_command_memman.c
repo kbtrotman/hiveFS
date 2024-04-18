@@ -15,7 +15,7 @@
 
 #include "hi_command.h"
 
-int ret, fd_cmd, fd_inode, fd_block;
+int ret, fd_cmd, fd_inode, fd_block, atomic_value;
 
 char buffer[4096];
 
@@ -28,6 +28,7 @@ char *device_file_cmd;
 
 char buffer[4096];
 char *filename;
+struct hifs_link hifs_user_link;
 
 struct hifs_inode *shared_inode_outgoing;    // These six Doubly-Linked Lists are our
 struct hifs_blocks *shared_block_outgoing;   // processing queues. They are sent & 
