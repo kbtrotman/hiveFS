@@ -9,10 +9,18 @@
 
 #include "hi_command.h"
 
-struct hifs_link hifs_user_link;
-extern const char *atomic_device;
-extern char atomic_path[20];
-extern char atomic_device_name[256]; 
+extern struct hifs_link hifs_kern_link;
+extern struct hifs_link hifs_user_link;
+
+extern const char *kern_atomic_device;
+extern const char *user_atomic_device;
+extern char kern_atomic_device_name[256];
+extern char user_atomic_device_name[256];
+extern char kern_atomic_path[20];
+extern char user_atomic_path[20];
+extern int kern_atomic_value;
+extern int user_atomic_value;
+
 extern char *device_file_inode;
 extern char *device_file_block;
 extern char *device_file_cmd;
@@ -20,8 +28,6 @@ extern int fd_cmd, fd_inode, fd_block;
 
 extern char buffer[4096];
 extern struct PSQL sqldb;
-extern int atomic_value;
-extern struct hifs_link hifs_user_link;
 
 extern struct hifs_inode *shared_inode_outgoing;    // These six Doubly-Linked Lists are our
 extern struct hifs_blocks *shared_block_outgoing;   // processing queues. They are sent & 
@@ -57,17 +63,21 @@ int main(int argc, char *argv[])
     device_file_block = malloc(256);
     device_file_cmd = malloc(50);
 
-    strcpy(atomic_path, "/dev/");
-    strcpy(atomic_device_name, atomic_path);
-    strcat(atomic_device_name, atomic_device);
+    strcpy(kern_atomic_path, "/dev/");
+    strcpy(kern_atomic_device_name, kern_atomic_path);
+    strcat(kern_atomic_device_name, kern_atomic_device);
 
-    strcpy(device_file_inode, atomic_path);
+    strcpy(user_atomic_path, "/dev/");
+    strcpy(user_atomic_device_name, user_atomic_path);
+    strcat(user_atomic_device_name, user_atomic_device);
+
+    strcpy(device_file_inode, user_atomic_path);
     strcat(device_file_inode, DEVICE_FILE_INODE);
 
-    strcpy(device_file_block, atomic_path);
+    strcpy(device_file_block, user_atomic_path);
     strcat(device_file_block, DEVICE_FILE_BLOCK);
 
-    strcpy(device_file_cmd, atomic_path);
+    strcpy(device_file_cmd, user_atomic_path);
     strcat(device_file_cmd, DEVICE_FILE_CMDS);
 
     init_hive_link();
@@ -86,25 +96,18 @@ int main(int argc, char *argv[])
     pfd.fd = fd_cmd;
     pfd.events = ( POLLIN | POLLOUT );
 
+    hifs_comm_set_program_up(HIFS_COMM_PROGRAM_USER_HICOMM);
 
 queue_management:
 
-    atomic_value = read_from_atomic();
-    printf("hi-command: Atomic value: %d\n", atomic_value);
-    
-    // Here we ignore values 1,3,4,8,10
-    if (atomic_value == HIFS_Q_PROTO_ACK_LINK_KERN || 
-        atomic_value == HIFS_Q_PROTO_ACK_LINK_USER ||
-        hifs_user_link.state == HIFS_COMM_LINK_DOWN)
-    {
-        // Call to complete a new or a temp aborted link_up here
-        printf("hi_command: Waiting on link up. Re-trying...\n");
-        hifs_comm_link_init_change();
-    } else {
-        // Queue contents manage themselves, so do nothing here....
+    kern_atomic_value = read_from_atomic(HIFS_COMM_PROGRAM_KERN_MOD);
+    if (kern_atomic_value == HIFS_COMM_LINK_DOWN) {
+        printf("hi-command: Kernel link is down. Waiting for kernel module to come up...\n");
+        goto queue_management;
     }
 
-    puts("hi-command: Looping polls...");
+
+    printf("hi-command: Looping polls...");
     ret = poll(&pfd, (unsigned long)1, 5000);   //wait for 5secs
     
     if( ret < 0 ) 
@@ -126,6 +129,8 @@ queue_management:
         printf("hi-command: POLLOUT\n");
     }
 
+    printf("hi-command: kernel module status is: %d\n", hifs_kern_link.state);
+    printf("hi-command: user-space status is: %d\n", hifs_user_link.state);
     goto queue_management;
     
 }

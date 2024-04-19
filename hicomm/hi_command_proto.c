@@ -9,14 +9,23 @@
 
 #include "hi_command.h"
 
+//Globals
+extern const char *kern_atomic_device;
+extern const char *user_atomic_device;
+extern char kern_atomic_device_name[256];
+extern char user_atomic_device_name[256];
+extern char kern_atomic_path[20];
+extern char user_atomic_path[20];
+extern int kern_atomic_value;
+extern int user_atomic_value;
 
-extern char atomic_device_name[256];  // Make sure this is large enough
+extern struct hifs_link hifs_user_link;
+extern struct hifs_link hifs_kern_link;
+
 extern char *device_file_inode;
 extern char *device_file_block;
 extern char *device_file_cmd;
 extern char buffer[4096];
-extern int atomic_value;
-extern struct hifs_link hifs_user_link;
 
 extern struct hifs_inode *shared_inode_outgoing;    // These six Doubly-Linked Lists are our
 extern struct hifs_blocks *shared_block_outgoing;   // processing queues. They are sent & 
@@ -127,44 +136,63 @@ int hifs_init_queues(void) {
     return 0;
 }
 
-int hifs_comm_link_init_change( void )
-{
-
-    atomic_value = read_from_atomic();
-
-    // We skip value 8 here and 9 & 10 are reversed from kernel space. And write_to_atomic is changed to HIFS_Q_PROTO_ACK_LINK_USER.
-    if (atomic_value == HIFS_Q_PROTO_UNUSED && hifs_user_link.state == HIFS_COMM_LINK_DOWN) {
-        hifs_comm_link_up();
-        write_to_atomic(HIFS_Q_PROTO_ACK_LINK_USER);
-        hifs_wait_on_link();
-        return 0;
-    } else if (atomic_value ==HIFS_Q_PROTO_ACK_LINK_KERN) {
-        hifs_comm_link_up();
-        return 0;
-    } else if (atomic_value == HIFS_Q_PROTO_ACK_LINK_USER) {
-        hifs_wait_on_link();
-        return 0;
+int hifs_comm_check_program_up(int program) {
+    int value;
+    if (program == HIFS_COMM_PROGRAM_KERN_MOD) {
+        value = read_from_atomic(HIFS_COMM_PROGRAM_KERN_MOD);
+    } else if (program == HIFS_COMM_PROGRAM_USER_HICOMM) {
+        value = read_from_atomic(HIFS_COMM_PROGRAM_USER_HICOMM);
     }
 
-    return 0;
+    return value;
 }
 
-void hifs_comm_link_up (void) 
-{
-    printf( "hi_command: Received hivefs Link_Up Command from kernel module.\n");
-    hifs_user_link.last_state = hifs_user_link.state;
-    hifs_user_link.state = HIFS_COMM_LINK_UP;
-    printf( "hi_command: link up'd at %ld seconds after hi_command start.\n", (GET_TIME() - hifs_user_link.clockstart));
-    hifs_user_link.last_check = 0;
-    write_to_atomic(HIFS_Q_PROTO_UNUSED);
-}
-
-int hifs_wait_on_link(void)
-{
-    for (int i = 0; i < 100; i++) {
-        if (read_from_atomic() == HIFS_Q_PROTO_ACK_LINK_UP) {
-            hifs_comm_link_up();
-            return 0;
+int hifs_comm_set_program_up( int program ) {
+    int value;
+    if (program == HIFS_COMM_PROGRAM_KERN_MOD) {
+        // Hi_Command should never set this mem location. It's owned by the kernel.
+        value = hifs_comm_check_program_up(HIFS_COMM_PROGRAM_KERN_MOD);
+        if (value ==HIFS_COMM_LINK_UP) {
+            hifs_kern_link.last_state = hifs_kern_link.state;
+            hifs_kern_link.state = HIFS_COMM_LINK_UP;
+            hifs_kern_link.last_check = 0;
         }
+        printf("hi_command: kern link up'd at %ld seconds after hi_command start, waiting on hi_command.\n", (GET_TIME() - hifs_kern_link.clockstart));
+    } else if (program == HIFS_COMM_PROGRAM_USER_HICOMM) {
+        //...The kernel should never set this mem location. It's owned by user space.
+        write_to_atomic(HIFS_COMM_LINK_UP, HIFS_COMM_PROGRAM_USER_HICOMM);
+        hifs_user_link.last_state = hifs_user_link.state;
+        hifs_user_link.state = HIFS_COMM_LINK_UP;
+        hifs_user_link.last_check = 0;
+        value = 1;
+        printf("hi_command: user link up'd at %ld seconds after hifs start, waiting on kernel if applicable.\n", (GET_TIME() - hifs_user_link.clockstart));
+    } else {
+        value = 0;
     }
+
+    return value;
+}
+
+int hifs_comm_set_program_down(int program) {
+    int value;
+    if (program == HIFS_COMM_PROGRAM_KERN_MOD) {  
+        //...User Space should never set this mem location. It's owned by kernel space.
+        value = hifs_comm_check_program_up(HIFS_COMM_PROGRAM_KERN_MOD);
+        if (value == HIFS_COMM_LINK_UP) {
+            // We don't want to do this! The Kernel Module has to flush and shutdown the kernel side of the link! Do nothing.
+            value = 0;
+        }
+        printf("hi_command: kern link down attempted and rejected at %ld seconds after hi_command start, waiting on kernel.\n", (GET_TIME() - hifs_kern_link.clockstart));
+    } else if (program == HIFS_COMM_PROGRAM_USER_HICOMM) {
+        write_to_atomic(HIFS_COMM_LINK_UP, HIFS_COMM_PROGRAM_USER_HICOMM);
+        hifs_user_link.last_state = hifs_user_link.state;
+        hifs_user_link.last_check = 0;
+        hifs_user_link.state = HIFS_COMM_LINK_UP;
+        value = 1;
+        printf("hi_command: user link up'd at %ld seconds after hi_command start, waiting on kernel if applicable.\n", (GET_TIME() - hifs_user_link.clockstart));
+    } else {
+        value = 0;
+    }
+
+    return value;
 }
