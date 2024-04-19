@@ -124,7 +124,7 @@ link_and_queue_management:
     } else if (hifs_kern_link.state == HIFS_COMM_LINK_DOWN) {
         // Our link is down, but clearly the module is active, so let's set it up. Flush the cache 1st just in case.
         pr_info("hivefs_comm: Kernel link found to be down. Re-trying...\n");
-        value = hifs_comm_set_program_up(HIFS_COM_PROGRAM_KERN_MOD);
+        value = hifs_comm_set_program_up(HIFS_COMM_PROGRAM_KERN_MOD);
     } else {
         // Queue contents manage themselves, so do nothing here....
     }
@@ -138,7 +138,7 @@ link_and_queue_management:
 
 int hifs_comm_check_program_up( int program ) {
     int value;
-    if (program == HIFS_COM_PROGRAM_KERN_MOD) {
+    if (program == HIFS_COMM_PROGRAM_KERN_MOD) {
         value = atomic_read(&kern_atomic_variable);
     } else if (program == HIFS_COMM_PROGRAM_USER_HICOMM) {
         value = atomic_read(&user_atomic_variable);
@@ -149,7 +149,7 @@ int hifs_comm_check_program_up( int program ) {
 
 int hifs_comm_set_program_up( int program ) {
     int value;
-    if (program == HIFS_COM_PROGRAM_KERN_MOD) {  
+    if (program == HIFS_COMM_PROGRAM_KERN_MOD) {  
         atomic_set(&kern_atomic_variable, HIFS_COMM_LINK_UP);
         hifs_kern_link.last_state = hifs_kern_link.state;
         hifs_kern_link.last_check = 0;
@@ -174,7 +174,7 @@ int hifs_comm_set_program_up( int program ) {
 
 int hifs_comm_set_program_down( int program ) {
     int value;
-    if (program == HIFS_COM_PROGRAM_KERN_MOD) {  
+    if (program == HIFS_COMM_PROGRAM_KERN_MOD) {  
         atomic_set(&kern_atomic_variable, HIFS_COMM_LINK_DOWN);
         hifs_kern_link.last_state = hifs_kern_link.state;
         hifs_kern_link.last_check = 0;
