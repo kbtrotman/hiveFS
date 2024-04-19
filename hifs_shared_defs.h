@@ -14,7 +14,7 @@
 /* FS Name */
 #define HIFS_NAME		"hivefs"
 #define HIFS_VERSION	"0.1"
-/* Layout version */
+/* FS Layout version/schema */
 #define HIFS_LAYOUT_VER		1
 
 /******************************
@@ -25,16 +25,18 @@
 // shared these memory areas to send and receive data.
 #define HIFS_QUEUE_COUNT 3
 
-#define DEVICE_FILE_INODE "hivefs_comq_inode"
+#define DEVICE_FILE_INODE "hivefs_comq_inode"     //Device queue names
 #define DEVICE_FILE_BLOCK "hivefs_comq_block"
 #define DEVICE_FILE_CMDS "hivefs_comq_cmds"
-#define ATOMIC_DEVICE_NAME "hivefs_sync_device"
-#define ATOMIC_CLASS_NAME "hivefs_atomic_class"
+#define ATOMIC_KERN_DEVICE_NAME "hivefs_kern_link_device"   //Atomic sync device. Used to ensure we have a link to send data.
+#define ATOMIC_KERN_CLASS_NAME "hivefs_kern_atomic_class"
+#define ATOMIC_USER_DEVICE_NAME "hivefs_user_link_device"   //Atomic sync device. Used to ensure we have a link to send data.
+#define ATOMIC_USER_CLASS_NAME "hivefs_user_atomic_class"
 
 #define HIFS_DEFAULT_BLOCK_SIZE 4096
 #define HIFS_BUFFER_SIZE 4096
-#define HIFS_MAX_CMD_SIZE 50
-#define HIFS_MAX_NAME_SIZE 256
+#define HIFS_MAX_CMD_SIZE 50 // MAX_CMD_SIZE is the maximum size of a command
+#define HIFS_MAX_NAME_SIZE 256 //MAX NAME SIZE is the maximum size of a file name, dir name, or other name in FS.
 
 /******************************
  * Queue Comms Protocol
@@ -43,17 +45,11 @@
 // these values are set in the atomic variable.
 
 #define HIFS_Q_PROTO_VERSION  1          // Version of the protocol
-#define HIFS_Q_PROTO_UNUSED 0            // Queue is not in use
-#define HIFS_Q_PROTO_KERNEL_LOCK 1       // Kernel has locked the queue
-#define HIFS_Q_PROTO_KERNEL_WO_USER 2    // Kernel is waiting on user
-#define HIFS_Q_PROTO_USER_LOCK 3         // User has locked the queue
-#define HIFS_Q_PROTO_USER_WO_KERNEL 4    // User is waiting on kernel
-// Leave some un-assigned variables here for future use....
-#define HIFS_Q_PROTO_ACK_LINK_UP 8       // Acknowledge link up command
-#define HIFS_Q_PROTO_ACK_LINK_KERN 9     // Kernel initiated a link up command
-#define HIFS_Q_PROTO_ACK_LINK_USER 10    // User initiated a link up command
+#define HIFS_Q_PROTO_UNUSED 0            // Queue or file(mem device) is not in use
+#define HIFS_Q_PROTO_KERNEL_UP 1       // Kernel has locked the queue....1,2,3,&4 were deprecated in dev. Not used at the moment.
+#define HIFS_Q_PROTO_USER_UP 1    // Kernel is waiting on user
 
-#define HIFS_Q_PROTO_NUM_CMDS 9
+#define HIFS_Q_PROTO_NUM_CMDS 9     //Max ENUM value of any command (same as max number of commands that exist).
 #define HIFS_Q_PROTO_CMD_FLUSH "cache_flush_all"
 #define HIFS_Q_PROTO_CMD_BLOCK_RECV "block_recv"
 #define HIFS_Q_PROTO_CMD_BLOCK_SEND "block_send"
@@ -64,6 +60,7 @@
 #define HIFS_Q_PROTO_CMD_ENGINE_VERS "engine_version"
 #define HIFS_Q_PROTO_CMD_TEST "test_cmd"
 
+enum hifs_module{HIFS_COM_PROGRAM_KERN_MOD, HIFS_COMM_PROGRAM_USER_HICOMM};
 struct hifs_blocks {
 	char *block;
 	int block_size;
@@ -77,7 +74,7 @@ struct hifs_cmds {
 	struct list_head hifs_cmd_list;
 };
 
-extern int major;  
+extern int k_major, u_major, i_major, b_major, c_major;  
 extern char *filename;     // The filename we're currently sending/recieving to/from.
 extern char buffer[4096];
 extern bool new_device_data;

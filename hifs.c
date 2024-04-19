@@ -27,7 +27,7 @@ MODULE_AUTHOR("Kevin Trotman");
 MODULE_DESCRIPTION("HiveFS - A Hive Mind Filesystem");
 MODULE_VERSION("0:0.01-001");
 
-extern atomic_t my_atomic_variable;
+extern atomic_t kern_atomic_variable;
 extern int major;
 extern struct hifs_inode *shared_inode_outgoing;    // These six Doubly-Linked Lists are our
 extern struct hifs_blocks *shared_block_outgoing;   // processing queues. They are sent & 

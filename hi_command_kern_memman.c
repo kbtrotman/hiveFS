@@ -11,13 +11,18 @@
 
 
 // Globals
-atomic_t my_atomic_variable = ATOMIC_INIT(0);
-struct class *atomic_class = NULL;
-struct device *atomic_device = NULL;
-int major, i_major, b_major, c_major;
-bool new_device_data = false;
+extern int u_major, k_major, i_major, b_major, c_major;
+extern bool new_device_data;
 wait_queue_head_t waitqueue;
-struct class *inode_dev_class, *block_dev_class, *cmd_dev_class;
+extern struct class *inode_dev_class, *block_dev_class, *cmd_dev_class;
+extern atomic_t kern_atomic_variable;
+extern atomic_t user_atomic_variable;
+extern struct device *kern_atomic_device;
+extern struct device *user_atomic_device;
+extern struct class *kern_atomic_class;
+extern struct class *user_atomic_class;
+extern struct hifs_link hifs_kern_link;
+extern struct hifs_link hifs_user_link;
 
 struct hifs_inode *shared_inode_outgoing;    // These six Doubly-Linked Lists are our
 struct hifs_blocks *shared_block_outgoing;   // processing queues. They are sent & 
@@ -68,49 +73,84 @@ struct file_operations cmd_fops = {
     .poll = hifs_cmd_device_poll,
 };
 
-// This faops is a single shared atomic variable that holds our protocol integer for comms.
-struct file_operations faops = {
+// This 2 faops variable are atomic variable that tell both kernel/user space when the module & hi_command are active to sync comms.
+struct file_operations fakops = {
     .open = v_atomic_open,   //virtual defs
-    .read = v_atomic_read,
-    .write = v_atomic_write,
+    .read = k_atomic_read,
+    .write = k_atomic_write,
+    .release = v_atomic_release,
+};
+
+struct file_operations fauops = {
+    .open = v_atomic_open,   //virtual defs
+    .read = u_atomic_read,
+    .write = u_atomic_write,
     .release = v_atomic_release,
 };
 
 int hifs_atomic_init(void) {
-    major = register_chrdev(0, ATOMIC_DEVICE_NAME, &faops);
-    if (major < 0) {
-        pr_err("hivefs: Failed to register the atmomic character device\n");
-        return major;
+    k_major = register_chrdev(0, ATOMIC_KERN_DEVICE_NAME, &fakops);
+    if (k_major < 0) {
+        pr_err("hivefs: Failed to register the kernel atmomic link device\n");
+        return k_major;
     }
 
-    atomic_class = class_create(THIS_MODULE, ATOMIC_CLASS_NAME);
-    if (IS_ERR(atomic_class)) {
-        unregister_chrdev(major, ATOMIC_DEVICE_NAME);
-        pr_err("hivefs: Failed to create atomic class\n");
-        return PTR_ERR(atomic_class);
+    u_major = register_chrdev(0, ATOMIC_USER_DEVICE_NAME, &fauops);
+    if (u_major < 0) {
+        pr_err("hivefs: Failed to register the user atmomic link device\n");
+        return u_major;
     }
 
-    atomic_device = device_create(atomic_class, NULL, MKDEV(major, 0), NULL, ATOMIC_DEVICE_NAME);
-    if (IS_ERR(atomic_device)) {
-        class_destroy(atomic_class);
-        unregister_chrdev(major, ATOMIC_DEVICE_NAME);
-        pr_err("hivefs: Failed to create the final atomic device\n");
-        return PTR_ERR(atomic_device);
+    kern_atomic_class = class_create(THIS_MODULE, ATOMIC_KERN_CLASS_NAME);
+    if (IS_ERR(kern_atomic_class)) {
+        unregister_chrdev(k_major, ATOMIC_KERN_DEVICE_NAME);
+        pr_err("hivefs: Failed to create kernel atomic class\n");
+        return PTR_ERR(kern_atomic_class);
     }
 
-    pr_info("hivefs: Atomic variable module loaded in kernel\n");
+    user_atomic_class = class_create(THIS_MODULE, ATOMIC_USER_CLASS_NAME);
+    if (IS_ERR(user_atomic_class)) {
+        unregister_chrdev(u_major, ATOMIC_USER_DEVICE_NAME);
+        pr_err("hivefs: Failed to create user atomic class\n");
+        return PTR_ERR(kern_atomic_class);
+    }
+
+    kern_atomic_device = device_create(kern_atomic_class, NULL, MKDEV(k_major, 0), NULL, ATOMIC_KERN_DEVICE_NAME);
+    if (IS_ERR(kern_atomic_device)) {
+        class_destroy(kern_atomic_class);
+        unregister_chrdev(k_major, ATOMIC_KERN_DEVICE_NAME);
+        pr_err("hivefs: Failed to create the final kernel atomic link device\n");
+        return PTR_ERR(kern_atomic_device);
+    }
+
+    user_atomic_device = device_create(user_atomic_class, NULL, MKDEV(u_major, 0), NULL, ATOMIC_USER_DEVICE_NAME);
+    if (IS_ERR(user_atomic_device)) {
+        class_destroy(user_atomic_class);
+        unregister_chrdev(u_major, ATOMIC_USER_DEVICE_NAME);
+        pr_err("hivefs: Failed to create the final user atomic link device\n");
+        return PTR_ERR(user_atomic_device);
+    }
+
+    pr_info("hivefs: Atomic link variable devices loaded in kernel\n");
 
     return 0;
 }
 
 void hifs_atomic_exit(void) {
-    device_destroy(atomic_class, MKDEV(major, 0));
-    class_unregister(atomic_class);
-    class_destroy(atomic_class);
-    unregister_chrdev(major, ATOMIC_DEVICE_NAME);
+    device_destroy(kern_atomic_class, MKDEV(k_major, 0));
+    device_destroy(user_atomic_class, MKDEV(u_major, 0));
+    class_unregister(kern_atomic_class);
+    class_unregister(user_atomic_class);
+    class_destroy(kern_atomic_class);
+    class_destroy(user_atomic_class);
+    unregister_chrdev(k_major, ATOMIC_KERN_DEVICE_NAME);
+    unregister_chrdev(u_major, ATOMIC_USER_DEVICE_NAME);
+    kfree(kern_atomic_class);
+    kfree(user_atomic_class);
+    kfree(kern_atomic_device);
+    kfree(user_atomic_device);
 
-    pr_info("hivefs: Atomic variable(s) unloaded\n");
-    pr_info("hivefs: Atomic variable module unloaded from kernel\n");
+    pr_info("hivefs: Atomic link variables unloaded\n");
 }
 
 // Override functions here: These we don't need to change.
@@ -120,19 +160,19 @@ int v_atomic_open(struct inode *inodep, struct file *filep) {
 }
 
 int v_atomic_release(struct inode *inodep, struct file *filep) {
-    pr_info("hivefs: Atomic Device closed\n");
+    //pr_info("hivefs: Atomic Device closed\n");
     return 0;
 }
 
-ssize_t v_atomic_read(struct file *filep, char __user *buffer, size_t len, loff_t *offset) {
-    int value = atomic_read(&my_atomic_variable);
+ssize_t k_atomic_read(struct file *filep, char __user *buffer, size_t len, loff_t *offset) {
+    int value = atomic_read(&kern_atomic_variable);
     if (copy_to_user(buffer, &value, sizeof(int))) {
         return -EFAULT;
     }
     return sizeof(int);
 }
 
-ssize_t v_atomic_write(struct file *filep, const char __user *buffer, size_t len, loff_t *offset) {
+ssize_t k_atomic_write(struct file *filep, const char __user *buffer, size_t len, loff_t *offset) {
     int value;
     int count;
     count = sizeof(int);
@@ -142,11 +182,36 @@ ssize_t v_atomic_write(struct file *filep, const char __user *buffer, size_t len
     if (copy_from_user(&value, buffer, count)) {
         return -EFAULT;
     }
-    atomic_set(&my_atomic_variable, value);
+    atomic_set(&kern_atomic_variable, value);
     return sizeof(int);
 }
 // Override functions here: These we don't need to change.
 
+
+ssize_t u_atomic_read(struct file *filep, char __user *buffer, size_t len, loff_t *offset) {
+    int value = atomic_read(&user_atomic_variable);
+    if (copy_to_user(buffer, &value, sizeof(int))) {
+        return -EFAULT;
+    }
+    return sizeof(int);
+}
+
+ssize_t u_atomic_write(struct file *filep, const char __user *buffer, size_t len, loff_t *offset) {
+    int value;
+    int count;
+    count = sizeof(int);
+    if (count != sizeof(int)) {
+        return -EINVAL;
+    }
+    if (copy_from_user(&value, buffer, count)) {
+        return -EFAULT;
+    }
+    atomic_set(&user_atomic_variable, value);
+    return sizeof(value);
+}
+// Override functions here: These we don't need to change.
+
+// These are for the 3 devices which controls 6 queues (1 each way) for transferring 3 types of data: inode, block, & cmd.
 int register_all_comm_queues(void)
 {
     i_major = register_chrdev(0, DEVICE_FILE_INODE, &inode_fops);
@@ -195,24 +260,19 @@ void unregister_all_comm_queues(void)
     device_destroy(inode_dev_class, MKDEV(i_major, 0));
     device_destroy(block_dev_class, MKDEV(b_major, 1));
     device_destroy(cmd_dev_class, MKDEV(c_major, 2));
-    device_destroy(atomic_class, MKDEV(major, 02));
     class_unregister(inode_dev_class);
     class_unregister(block_dev_class);
     class_unregister(cmd_dev_class);
-    class_unregister(atomic_class);
     unregister_chrdev(i_major, DEVICE_FILE_INODE);     
     unregister_chrdev(b_major, DEVICE_FILE_BLOCK "_block");
     unregister_chrdev(c_major, DEVICE_FILE_CMDS);
-    unregister_chrdev(major, ATOMIC_DEVICE_NAME);
     free_a_list(&shared_inode_outgoing_lst, struct hifs_inode, hifs_inode_list);
     free_a_list(&shared_block_outgoing_lst, struct hifs_blocks, hifs_block_list);
     free_a_list(&shared_cmd_outgoing_lst, struct hifs_cmds, hifs_cmd_list);
     free_a_list(&shared_inode_incoming_lst, struct hifs_inode, hifs_inode_list);
     free_a_list(&shared_block_incoming_lst, struct hifs_blocks, hifs_block_list);
     free_a_list(&shared_cmd_incoming_lst, struct hifs_cmds, hifs_cmd_list);
-    kfree(atomic_class);
-    kfree(atomic_device);
-    kfree(task);
+    //kfree(task);
 }
 
 int hifs_comm_device_release(struct inode *inode, struct file *filp) {

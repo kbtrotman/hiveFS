@@ -41,9 +41,13 @@
 // COMMON Definitions Here ONLY
 /* Definitions past this point should be specific only to the kernel-space module! */
 
-extern atomic_t my_atomic_variable;
-extern struct class* atomic_class;
-extern struct task_struct *task;
+extern struct class *inode_dev_class, *block_dev_class, *cmd_dev_class;
+extern atomic_t kern_atomic_variable;
+extern atomic_t user_atomic_variable;
+extern struct device *kern_atomic_device;
+extern struct device *user_atomic_device;
+extern struct class *kern_atomic_class;
+extern struct class *user_atomic_class;
 
 // Prototypes Here:
 
@@ -53,12 +57,12 @@ void __exit hifs_exit(void);
 int __init hifs_init(void);
 
 /* hi_command_kern.c */
-void hifs_comm_link_up (void);
-int hifs_comm_link_init_change( void );
 int hifs_thread_fn(void);
 int hifs_create_test_inode(void);
-void hifs_wait_on_link(void);
-int hifs_manage_queue_contents(void);
+int hifs_comm_check_program_up( int program );
+int hifs_comm_set_program_up( int program );
+int hifs_comm_set_program_down( int program );
+
 //int hifs_stop_queue_thread(void);
 //int hifs_start_queue_thread(void);
 
@@ -79,8 +83,10 @@ void unregister_all_comm_queues(void);
 int hifs_atomic_init(void);
 void hifs_atomic_exit(void);
 int v_atomic_open(struct inode *, struct file *);  // Virtual place holders, not currently used....
-ssize_t v_atomic_read(struct file *filep, char __user *buffer, size_t len, loff_t *offset);
-ssize_t v_atomic_write(struct file *filep, const char __user *buffer, size_t len, loff_t *offset);
+ssize_t k_atomic_read(struct file *filep, char __user *buffer, size_t len, loff_t *offset);
+ssize_t k_atomic_write(struct file *filep, const char __user *buffer, size_t len, loff_t *offset);
+ssize_t u_atomic_read(struct file *filep, char __user *buffer, size_t len, loff_t *offset);
+ssize_t u_atomic_write(struct file *filep, const char __user *buffer, size_t len, loff_t *offset);
 int v_atomic_release(struct inode *inodep, struct file *filep);
 
 /* hi_superblock.c */

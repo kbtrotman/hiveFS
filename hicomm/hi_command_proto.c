@@ -129,18 +129,21 @@ int hifs_init_queues(void) {
 
 int hifs_comm_link_init_change( void )
 {
-    int value = HIFS_Q_PROTO_UNUSED;
+
     atomic_value = read_from_atomic();
 
     // We skip value 8 here and 9 & 10 are reversed from kernel space. And write_to_atomic is changed to HIFS_Q_PROTO_ACK_LINK_USER.
-    if (value == HIFS_Q_PROTO_UNUSED && hifs_user_link.state == HIFS_COMM_LINK_DOWN) {
+    if (atomic_value == HIFS_Q_PROTO_UNUSED && hifs_user_link.state == HIFS_COMM_LINK_DOWN) {
         hifs_comm_link_up();
         write_to_atomic(HIFS_Q_PROTO_ACK_LINK_USER);
         hifs_wait_on_link();
-    } else if (value ==HIFS_Q_PROTO_ACK_LINK_KERN) {
+        return 0;
+    } else if (atomic_value ==HIFS_Q_PROTO_ACK_LINK_KERN) {
         hifs_comm_link_up();
-    } else if (value == HIFS_Q_PROTO_ACK_LINK_USER) {
+        return 0;
+    } else if (atomic_value == HIFS_Q_PROTO_ACK_LINK_USER) {
         hifs_wait_on_link();
+        return 0;
     }
 
     return 0;
@@ -148,20 +151,20 @@ int hifs_comm_link_init_change( void )
 
 void hifs_comm_link_up (void) 
 {
-    printf( "hi_command: Received hivefs Link_Up Command.\n");
+    printf( "hi_command: Received hivefs Link_Up Command from kernel module.\n");
     hifs_user_link.last_state = hifs_user_link.state;
     hifs_user_link.state = HIFS_COMM_LINK_UP;
-    printf( "hi_command: link up'd at %ld seconds after hifs start, waiting on hi_command.\n", (GET_TIME() - hifs_user_link.clockstart));
+    printf( "hi_command: link up'd at %ld seconds after hi_command start.\n", (GET_TIME() - hifs_user_link.clockstart));
     hifs_user_link.last_check = 0;
     write_to_atomic(HIFS_Q_PROTO_UNUSED);
 }
 
-void hifs_wait_on_link(void)
+int hifs_wait_on_link(void)
 {
     for (int i = 0; i < 100; i++) {
         if (read_from_atomic() == HIFS_Q_PROTO_ACK_LINK_UP) {
             hifs_comm_link_up();
-            break;
+            return 0;
         }
     }
 }
