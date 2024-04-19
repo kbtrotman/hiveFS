@@ -235,7 +235,7 @@ int write_to_cmd_dev(void)
     // Write out to user space.
     int result = 0;
     struct hifs_cmds_user {
-        char cmd[HIFS_MAX_CMD_SIZE];  // MAX_CMD_SIZE is the maximum size of a command
+        char cmd[HIFS_MAX_CMD_SIZE];
         int count;
     };
     struct hifs_cmds *send_data = NULL;
