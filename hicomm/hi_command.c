@@ -97,17 +97,21 @@ int main(int argc, char *argv[])
     pfd.events = ( POLLIN | POLLOUT );
 
     hifs_comm_set_program_up(HIFS_COMM_PROGRAM_USER_HICOMM);
+    hifs_comm_set_program_up(HIFS_COMM_PROGRAM_KERN_MOD);
 
 queue_management:
 
-    kern_atomic_value = read_from_atomic(HIFS_COMM_PROGRAM_KERN_MOD);
+    kern_atomic_value = hifs_comm_check_program_up(HIFS_COMM_PROGRAM_KERN_MOD);
     if (kern_atomic_value == HIFS_COMM_LINK_DOWN) {
         printf("hi-command: Kernel link is down. Waiting for kernel module to come up...\n");
         goto queue_management;
+    } else if (hifs_kern_link.state == HIFS_COMM_LINK_DOWN) {
+        printf("hi-command: Kernel link was recently up'd. Proceeding...\n");
+        hifs_comm_set_program_up(HIFS_COMM_PROGRAM_KERN_MOD);
     }
 
 
-    printf("hi-command: Looping polls...");
+    printf("hi-command: Looping polls...\n");
     ret = poll(&pfd, (unsigned long)1, 5000);   //wait for 5secs
     
     if( ret < 0 ) 
@@ -131,6 +135,7 @@ queue_management:
 
     printf("hi-command: kernel module status is: %d\n", hifs_kern_link.state);
     printf("hi-command: user-space status is: %d\n", hifs_user_link.state);
+    
     goto queue_management;
     
 }

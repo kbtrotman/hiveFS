@@ -112,27 +112,26 @@ int hifs_thread_fn(void) {
         return value;
     }
     // Before going into the data management, we up our module status here.
-    value = hifs_comm_set_program_up(HIFS_COMM_PROGRAM_USER_HICOMM);
+    value = hifs_comm_set_program_up(HIFS_COMM_PROGRAM_KERN_MOD);
+    value = hifs_comm_set_program_up(HIFS_COMM_PROGRAM_KERN_MOD);
 
 link_and_queue_management:
 
-    if (hifs_user_link.state == HIFS_COMM_LINK_DOWN) {
-        pr_info("hivefs_comm: User link found to be down. Re-trying...\n");
-        // Here we need to flush all the caches and then wait for the link to be up.
-        // We can drop out of here and keep looping till the link is active
-        value = hifs_comm_set_program_up(HIFS_COMM_PROGRAM_USER_HICOMM);   // let's up it on the kernel side...
-    } else if (hifs_kern_link.state == HIFS_COMM_LINK_DOWN) {
-        // Our link is down, but clearly the module is active, so let's set it up. Flush the cache 1st just in case.
-        pr_info("hivefs_comm: Kernel link found to be down. Re-trying...\n");
-        value = hifs_comm_set_program_up(HIFS_COMM_PROGRAM_KERN_MOD);
-    } else {
-        // Queue contents manage themselves, so do nothing here....
+    
+    value = atomic_read(&user_atomic_variable);
+    if (value == HIFS_COMM_LINK_DOWN) {
+        printk(KERN_INFO "hifs: user link is down. Waiting for hi_command to come up...\n");
+        goto link_and_queue_management;
+    } else if (hifs_user_link.state == HIFS_COMM_LINK_DOWN) {
+        printk(KERN_INFO "hifs: Kernel link was recently up'd. Proceeding...\n");
+        hifs_comm_set_program_up(HIFS_COMM_PROGRAM_USER_HICOMM);
     }
     printk(KERN_INFO "hivefs_comm: kernel link status is [%d]\n", hifs_kern_link.state);
     printk(KERN_INFO "hivefs_comm: user link status is [%d]\n", hifs_user_link.state);
     printk(KERN_INFO "hivefs_comm: waiting for FS data queue notifications, cycling again...\n");
 
     goto link_and_queue_management;
+
     return 0;
 }
 
@@ -163,6 +162,12 @@ int hifs_comm_set_program_up( int program ) {
             hifs_user_link.last_state = hifs_user_link.state;
             hifs_user_link.state = HIFS_COMM_LINK_UP;
             hifs_user_link.last_check = 0;
+            value = 1;
+        } else {
+            hifs_user_link.last_state = hifs_user_link.state;
+            hifs_user_link.state = HIFS_COMM_LINK_DOWN;
+            hifs_user_link.last_check = 0;
+            value = 1;           
         }
         pr_info(KERN_INFO "hivefs: user link up'd at %ld seconds after hifs start, waiting on hi_command.\n", (GET_TIME() - hifs_user_link.clockstart));
     } else {
@@ -186,7 +191,7 @@ int hifs_comm_set_program_down( int program ) {
         value = hifs_comm_check_program_up(HIFS_COMM_PROGRAM_USER_HICOMM);
         if (value == HIFS_COMM_LINK_UP) {
             // We don't want to do this! Hi_Command has to flush and shutdown the user side of the link! Do nothing.
-            value = 0;
+            value = 1;
         }
         pr_info(KERN_INFO "hivefs: user link down attempted and rejected at %ld seconds after hifs start, waiting on hi_command.\n", (GET_TIME() - hifs_user_link.clockstart));
     } else {

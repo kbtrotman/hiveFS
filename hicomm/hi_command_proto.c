@@ -152,10 +152,14 @@ int hifs_comm_set_program_up( int program ) {
     if (program == HIFS_COMM_PROGRAM_KERN_MOD) {
         // Hi_Command should never set this mem location. It's owned by the kernel.
         value = hifs_comm_check_program_up(HIFS_COMM_PROGRAM_KERN_MOD);
-        if (value ==HIFS_COMM_LINK_UP) {
+        if (value == HIFS_COMM_LINK_UP) {
             hifs_kern_link.last_state = hifs_kern_link.state;
             hifs_kern_link.state = HIFS_COMM_LINK_UP;
             hifs_kern_link.last_check = 0;
+        } else {
+            hifs_kern_link.last_state = hifs_kern_link.state;
+            hifs_kern_link.state = HIFS_COMM_LINK_DOWN;
+            hifs_kern_link.last_check = 0; 
         }
         printf("hi_command: kern link up'd at %ld seconds after hi_command start, waiting on hi_command.\n", (GET_TIME() - hifs_kern_link.clockstart));
     } else if (program == HIFS_COMM_PROGRAM_USER_HICOMM) {
@@ -180,7 +184,7 @@ int hifs_comm_set_program_down(int program) {
         value = hifs_comm_check_program_up(HIFS_COMM_PROGRAM_KERN_MOD);
         if (value == HIFS_COMM_LINK_UP) {
             // We don't want to do this! The Kernel Module has to flush and shutdown the kernel side of the link! Do nothing.
-            value = 0;
+            value = 1;
         }
         printf("hi_command: kern link down attempted and rejected at %ld seconds after hi_command start, waiting on kernel.\n", (GET_TIME() - hifs_kern_link.clockstart));
     } else if (program == HIFS_COMM_PROGRAM_USER_HICOMM) {
