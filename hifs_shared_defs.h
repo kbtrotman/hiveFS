@@ -60,7 +60,7 @@
 #define HIFS_Q_PROTO_CMD_ENGINE_VERS "engine_version"
 #define HIFS_Q_PROTO_CMD_TEST "test_cmd"
 
-enum hifs_module{HIFS_COM_PROGRAM_KERN_MOD, HIFS_COMM_PROGRAM_USER_HICOMM};
+enum hifs_module{HIFS_COMM_PROGRAM_KERN_MOD, HIFS_COMM_PROGRAM_USER_HICOMM};
 struct hifs_blocks {
 	char *block;
 	int block_size;

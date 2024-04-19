@@ -114,22 +114,25 @@ int hifs_thread_fn(void) {
     // Before going into the data management, we up our module status here.
     value = hifs_comm_set_program_up(HIFS_COMM_PROGRAM_USER_HICOMM);
 
-    while (1) {
-        if (hifs_user_link.state == HIFS_COMM_LINK_DOWN) {
-            pr_info("hivefs_comm: User link found to be down. Re-trying...\n");
-            // Here we need to flush all the caches and then wait for the link to be up.
-            // We can drop out of here and keep looping till the link is active
-            value = hifs_comm_set_program_up(HIFS_COMM_PROGRAM_USER_HICOMM);   // let's up it on the kernel side...
-        } else if (hifs_kern_link.state == HIFS_COMM_LINK_DOWN) {
-            // Our link is down, but clearly the module is active, so let's set it up. Flush the cache 1st just in case.
-            pr_info("hivefs_comm: Kernel link found to be down. Re-trying...\n");
-            value = hifs_comm_set_program_up(HIFS_COM_PROGRAM_KERN_MOD);
-        } else {
-            // Queue contents manage themselves, so do nothing here....
-        }
-        printk(KERN_INFO "hivefs_comm: kernel link status is [%d]\n", hifs_kern_link.state);
-        printk(KERN_INFO "hivefs_comm: user link status is [%d]\n", hifs_user_link.state);
+link_and_queue_management:
+
+    if (hifs_user_link.state == HIFS_COMM_LINK_DOWN) {
+        pr_info("hivefs_comm: User link found to be down. Re-trying...\n");
+        // Here we need to flush all the caches and then wait for the link to be up.
+        // We can drop out of here and keep looping till the link is active
+        value = hifs_comm_set_program_up(HIFS_COMM_PROGRAM_USER_HICOMM);   // let's up it on the kernel side...
+    } else if (hifs_kern_link.state == HIFS_COMM_LINK_DOWN) {
+        // Our link is down, but clearly the module is active, so let's set it up. Flush the cache 1st just in case.
+        pr_info("hivefs_comm: Kernel link found to be down. Re-trying...\n");
+        value = hifs_comm_set_program_up(HIFS_COM_PROGRAM_KERN_MOD);
+    } else {
+        // Queue contents manage themselves, so do nothing here....
     }
+    printk(KERN_INFO "hivefs_comm: kernel link status is [%d]\n", hifs_kern_link.state);
+    printk(KERN_INFO "hivefs_comm: user link status is [%d]\n", hifs_user_link.state);
+    printk(KERN_INFO "hivefs_comm: waiting for FS data queue notifications, cycling again...\n");
+
+    goto link_and_queue_management;
     return 0;
 }
 

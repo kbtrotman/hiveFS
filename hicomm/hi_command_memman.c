@@ -15,20 +15,26 @@
 
 #include "hi_command.h"
 
-int ret, fd_cmd, fd_inode, fd_block, atomic_value;
+// Globals
+const char *kern_atomic_device = ATOMIC_KERN_DEVICE_NAME;
+const char *user_atomic_device = ATOMIC_USER_DEVICE_NAME;
+char kern_atomic_device_name[256];
+char user_atomic_device_name[256];
+char kern_atomic_path[20];
+char user_atomic_path[20];
+int kern_atomic_value;
+int user_atomic_value;
 
+struct hifs_link hifs_user_link;
+struct hifs_link hifs_kern_link;
+
+int ret, fd_cmd, fd_inode, fd_block;
 char buffer[4096];
-
-const char *atomic_device = ATOMIC_DEVICE_NAME;
-char atomic_device_name[256];
-char atomic_path[20];
 char *device_file_inode;
 char *device_file_block;
 char *device_file_cmd;
-
 char buffer[4096];
 char *filename;
-struct hifs_link hifs_user_link;
 
 struct hifs_inode *shared_inode_outgoing;    // These six Doubly-Linked Lists are our
 struct hifs_blocks *shared_block_outgoing;   // processing queues. They are sent & 
@@ -45,40 +51,49 @@ struct list_head shared_block_incoming_lst;
 struct list_head shared_cmd_incoming_lst;  
 
 
-int read_from_atomic(void)
+int read_from_atomic(enum hifs_module program)
 {
-    int fd;
-    int value;
-
-    fd = open(atomic_device_name, O_RDWR);
+    int fd, value;
+    char device_name[256];
+    if (program == HIFS_COMM_PROGRAM_KERN_MOD) {
+        strcpy(device_name, kern_atomic_device_name);
+    } else {
+        strcpy(device_name, user_atomic_device_name);
+    }
+    fd = open(device_name, O_RDWR);
     if (fd == -1) {
         perror("hi_command: Error opening device file");
         return -1;
     }
 
-    // Reading from the atomic variable in the kernel space
-    read(fd, &value, sizeof(int));
-    printf("hi_command: Read value from kernel: %d\n", value);
+    // Reading from the atomic variable
+    read(fd, &value, sizeof(value));
+    printf("hi_command: Read atomic link status from [%s]: %d\n", device_name, value);
     close(fd);
     return value;
 }
 
-int write_to_atomic(int value)
+int write_to_atomic(int value, enum hifs_module program)
 {
-    int fd, ret;
-
-    fd = open(atomic_device_name, O_RDWR);
+    int fd;
+    char device_name[256];
+    if (program == HIFS_COMM_PROGRAM_KERN_MOD) {
+        strcpy(device_name, kern_atomic_device_name);
+    } else {
+        strcpy(device_name, user_atomic_device_name);
+    }
+    fd = open(device_name, O_RDWR);
     if (fd == -1) {
         perror("hi_command: Error opening device file");
         return -1;
     }
 
     // Writing to the atomic variable in the kernel space
-    ret = write(fd, &value, sizeof(int));
-    printf("hi_command: Wrote value to kernel: %d\n", value);
+    ret = write(fd, &value, sizeof(value));
+    printf("hi_command: Wrote link status to [%s]: %d\n", device_name, value);
 
     close(fd);
-    return ret;
+    return value;
 }
 
 void hi_comm_close_queues(void)
