@@ -46,6 +46,7 @@ extern char *filename;     // The filename we're currently sending/recieving to/
 void write_to_queue(void)
 {
     int ret;
+    printf("hi-command: Writing to queue.\n");
     while (!list_empty(&shared_cmd_outgoing_lst)) {
         ret = write_to_cmd_dev();
         if (ret < 0) {
@@ -56,8 +57,6 @@ void write_to_queue(void)
             printf("\n");
         }
     }
-    //Save data to the outgoing queue.
-
     return;
 }
 
@@ -102,18 +101,19 @@ int hifs_init_queues(void) {
     }
 
     *shared_inode_outgoing = (struct hifs_inode) {
-        .i_mode = 0,
-        .i_uid = 0,
-        .i_gid = 0,
-        .i_blocks = 0,
-        .i_bytes = 0,
-        .i_size = 0,
-        .i_ino = 0,
+        .i_mode = 99,
+        .i_uid = 99,
+        .i_gid = 99,
+        .i_blocks = 99,
+        .i_bytes = 99,
+        .i_size = 99,
+        .i_ino = 99,
+        .i_name = "my_test",
     };
 
     *shared_cmd_outgoing = (struct hifs_cmds){
-        .cmd = NULL,
-        .count = 0,
+        .cmd = HIFS_Q_PROTO_CMD_TEST,
+        .count = 1,
     };
 
     INIT_LIST_HEAD(&shared_inode_incoming->hifs_inode_list);
@@ -132,7 +132,6 @@ int hifs_init_queues(void) {
 
     list_add_tail(&shared_cmd_outgoing->hifs_cmd_list, &shared_cmd_outgoing_lst);
     list_add_tail(&shared_inode_outgoing->hifs_inode_list, &shared_inode_outgoing_lst);
-
     return 0;
 }
 
