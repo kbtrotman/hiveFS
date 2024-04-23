@@ -177,6 +177,7 @@ int write_to_inode_dev(void)
     struct hifs_inode *send_data = NULL;
     struct hifs_inode_user send_data_user;
 
+    printf("hi_command: [INODE] popping an item from the queue to send\n");
     if (!list_empty(&shared_inode_outgoing_lst)) { 
         send_data = list_entry(&shared_inode_outgoing_lst, struct hifs_inode, hifs_inode_list);
         if (send_data) {
@@ -220,6 +221,7 @@ int write_to_block_dev(void)
     int result = 0;
     struct hifs_blocks *send_data = NULL;
     struct hifs_block_user *send_data_user = mmap(0, sizeof(struct hifs_block_user), PROT_READ | PROT_WRITE, MAP_SHARED, fd_block, 0);
+    printf("hi_command: [BLOCK] popping an item from the queue to send\n");
     if (!list_empty(&shared_block_outgoing_lst)) { 
         send_data = list_entry(&shared_block_outgoing_lst, struct hifs_blocks, hifs_block_list);
         if (send_data) {
@@ -255,6 +257,7 @@ int write_to_cmd_dev(void)
     };
     struct hifs_cmds *send_data = NULL;
     struct hifs_cmds_user send_data_user;
+    printf("hi_command: [CMD] popping an item from the queue to send\n");
     if (!list_empty(&shared_cmd_outgoing_lst)) { 
         send_data = list_entry(&shared_cmd_outgoing_lst, struct hifs_cmds, hifs_cmd_list);
         if (send_data) {
