@@ -14,6 +14,7 @@
 struct hifs_link hifs_kern_link = {HIFS_COMM_LINK_DOWN, 0, 0, 0};
 int u_major, k_major, i_major, b_major, c_major;
 bool new_device_data = false;
+bool stop_thread = false;
 struct class *inode_dev_class, *block_dev_class, *cmd_dev_class;
 atomic_t kern_atomic_variable = ATOMIC_INIT(0);
 atomic_t user_atomic_variable = ATOMIC_INIT(0);
@@ -23,6 +24,7 @@ struct class *kern_atomic_class;
 struct class *user_atomic_class;
 struct hifs_link hifs_kern_link;
 struct hifs_link hifs_user_link;
+struct task_struct *task;
 
 extern struct hifs_inode *shared_inode_outgoing;    // These six Doubly-Linked Lists are our
 extern struct hifs_blocks *shared_block_outgoing;   // processing queues. They are sent & 
@@ -41,7 +43,8 @@ extern struct list_head shared_cmd_incoming_lst;
 //static bool stop_thread = false;
 extern char *filename;     // The filename we're currently sending/recieving to/from.
 char buffer[HIFS_DEFAULT_BLOCK_SIZE];
-
+extern wait_queue_head_t waitqueue;
+extern wait_queue_head_t thread_wq;
 
 int hifs_create_test_inode(void) {
 
@@ -102,9 +105,11 @@ int hifs_create_test_inode(void) {
     return 0;
 }
 
-int hifs_thread_fn(void) {
-    //while (!kthread_should_stop() && !stop_thread) {
+int hifs_thread_fn(void *data) {
+
     int value;
+    DECLARE_WAIT_QUEUE_HEAD(thread_wq);
+
     value = hifs_create_test_inode();
 
     if (value < 0) {
@@ -115,23 +120,19 @@ int hifs_thread_fn(void) {
     value = hifs_comm_set_program_up(HIFS_COMM_PROGRAM_KERN_MOD);
     value = hifs_comm_set_program_up(HIFS_COMM_PROGRAM_KERN_MOD);
 
-link_and_queue_management:
-
-    
-    value = atomic_read(&user_atomic_variable);
-    if (value == HIFS_COMM_LINK_DOWN) {
-        printk(KERN_INFO "hifs: user link is down. Waiting for hi_command to come up...\n");
-        msleep(500);
-        goto link_and_queue_management;
-    } else if (hifs_user_link.state == HIFS_COMM_LINK_DOWN) {
-        printk(KERN_INFO "hifs: Kernel link was recently up'd. Proceeding...\n");
-        hifs_comm_set_program_up(HIFS_COMM_PROGRAM_USER_HICOMM);
+    while (!kthread_should_stop() && !stop_thread) {
+        value = atomic_read(&user_atomic_variable);
+        wait_event_interruptible_timeout(thread_wq, 1, msecs_to_jiffies(500));
+        if (value == HIFS_COMM_LINK_DOWN) {
+            printk(KERN_INFO "hifs: user link is down. Waiting for hi_command to come up...\n");
+        } else if (hifs_user_link.state == HIFS_COMM_LINK_DOWN) {
+            printk(KERN_INFO "hifs: Kernel link was recently up'd. Proceeding...\n");
+            hifs_comm_set_program_up(HIFS_COMM_PROGRAM_USER_HICOMM);
+        }
+        printk(KERN_INFO "hivefs_comm: kernel link status is [%d]\n", hifs_kern_link.state);
+        printk(KERN_INFO "hivefs_comm: user link status is [%d]\n", hifs_user_link.state);
+        printk(KERN_INFO "hivefs_comm: waiting for FS data queue notifications, cycling again...\n");
     }
-    printk(KERN_INFO "hivefs_comm: kernel link status is [%d]\n", hifs_kern_link.state);
-    printk(KERN_INFO "hivefs_comm: user link status is [%d]\n", hifs_user_link.state);
-    printk(KERN_INFO "hivefs_comm: waiting for FS data queue notifications, cycling again...\n");
-
-    goto link_and_queue_management;
 
     return 0;
 }
@@ -202,11 +203,10 @@ int hifs_comm_set_program_down( int program ) {
     return value;
 }
 
-/*
 int hifs_start_queue_thread(void)
 {
     // Start the new monitoring kernel thread
-    task = kthread_run(hifs_thread_fn, NULL, "hifs_thread");
+    task = kthread_run(hifs_thread_fn, NULL, "hifs_q_thread");
     if (IS_ERR(task)) {
         pr_err("hivefs: Failed to create the atomic variable monitoring kernel thread\n");
         return PTR_ERR(task);
@@ -223,5 +223,3 @@ int hifs_stop_queue_thread(void)
     pr_info("hivefs: Shutting down hivefs queue management thread\n");
     return 0;
 }
-
-*/

@@ -13,6 +13,7 @@
 // Globals
 extern int u_major, k_major, i_major, b_major, c_major;
 extern bool new_device_data;
+wait_queue_head_t thread_wq;
 wait_queue_head_t waitqueue;
 extern struct class *inode_dev_class, *block_dev_class, *cmd_dev_class;
 extern atomic_t kern_atomic_variable;
@@ -145,10 +146,6 @@ void hifs_atomic_exit(void) {
     class_destroy(user_atomic_class);
     unregister_chrdev(k_major, ATOMIC_KERN_DEVICE_NAME);
     unregister_chrdev(u_major, ATOMIC_USER_DEVICE_NAME);
-    kfree(kern_atomic_class);
-    kfree(user_atomic_class);
-    kfree(kern_atomic_device);
-    kfree(user_atomic_device);
 
     pr_info("hivefs: Atomic link variables unloaded\n");
 }
@@ -282,67 +279,61 @@ int hifs_comm_device_release(struct inode *inode, struct file *filp) {
 }
 
 ssize_t hi_comm_inode_device_read(struct file *filep, char *buf, size_t count, loff_t *offset) {
-    // Write out to user space.
     int lock;
     ssize_t result = 0;
-
     struct hifs_inode *send_data = NULL;
     struct hifs_inode_user send_data_user;
+
+    for (lock = 0; lock < 100; lock++){
+        if (mutex_trylock(&inode_mutex)) {
+            break;
+        } else {
+            printk(KERN_INFO "hifs_comm: [INODE] Another process is accessing the device. Waiting...\n");
+            msleep(10);
+        }
+    }
+    if (lock > 99) { 
+        return -EBUSY; 
+    }
+
     if (!list_empty(&shared_inode_outgoing_lst)) { 
         send_data = list_first_entry(&shared_inode_outgoing_lst, struct hifs_inode, hifs_inode_list);
         if (send_data) {
             list_del(&send_data->hifs_inode_list);
         } else {
             printk(KERN_INFO "hifs_comm: [INODE] send_data is empty, dropping out to process next queue message\n");
+            mutex_unlock(&inode_mutex);
             return -EFAULT;
         }
 
         printk(KERN_INFO "hifs_comm: [INODE] Transferring inode [%s]\n", send_data->i_name);
-        for (lock = 0; lock < 100; lock++){
-            if (!mutex_trylock(&inode_mutex)) {
-                break;
-            } else {
-                printk(KERN_INFO "hifs_comm: [INODE] Another process is accessing the device. Waiting...\n");
-                msleep(10);
-            }
-        }
-        if (lock > 99) { 
-            mutex_unlock(&inode_mutex);
-            kfree(send_data);
-            return -EBUSY; 
-        }
 
-            strncpy(send_data_user.i_name, send_data->i_name, HIFS_MAX_NAME_SIZE);
-            memcpy(send_data_user.i_addre, send_data->i_addre, sizeof(send_data_user.i_addre));
-            memcpy(send_data_user.i_addrb, send_data->i_addrb, sizeof(send_data_user.i_addrb));
-            send_data_user.i_size = send_data->i_size;
-            send_data_user.i_mode = send_data->i_mode;
-            send_data_user.i_uid = send_data->i_uid;
-            send_data_user.i_gid = send_data->i_gid;
-            send_data_user.i_blocks = send_data->i_blocks;
-            send_data_user.i_bytes = send_data->i_bytes;
-            send_data_user.i_size = send_data->i_size;
-            send_data_user.i_ino = send_data->i_ino;
-            if (copy_to_user(buf, &send_data_user, sizeof(send_data_user)) != 0) {
-                result = (ssize_t)-EFAULT;
-            } else {
-                result = (ssize_t) sizeof(send_data_user);
-            }
-
-            can_write = true;
-            //wake up the waitqueue
-            wake_up(&waitqueue);
-
-            mutex_unlock(&block_mutex);
-        } else {
+        strncpy(send_data_user.i_name, send_data->i_name, HIFS_MAX_NAME_SIZE);
+        memcpy(send_data_user.i_addre, send_data->i_addre, sizeof(send_data_user.i_addre));
+        memcpy(send_data_user.i_addrb, send_data->i_addrb, sizeof(send_data_user.i_addrb));
+        send_data_user.i_size = send_data->i_size;
+        send_data_user.i_mode = send_data->i_mode;
+        send_data_user.i_uid = send_data->i_uid;
+        send_data_user.i_gid = send_data->i_gid;
+        send_data_user.i_blocks = send_data->i_blocks;
+        send_data_user.i_bytes = send_data->i_bytes;
+        send_data_user.i_size = send_data->i_size;
+        send_data_user.i_ino = send_data->i_ino;
+        if (copy_to_user(buf, &send_data_user, sizeof(send_data_user)) != 0) {
             result = -EFAULT;
+        } else {
+            result = sizeof(send_data_user);
         }
-    kfree(send_data);
+        can_write = true;
+        wake_up(&waitqueue);
+    } else {
+        result = -EFAULT;
+    }
+    mutex_unlock(&inode_mutex);
     return result;
 }
 
 ssize_t hi_comm_block_device_read(struct file *filep, char *buf, size_t count, loff_t *offset) {
-    // Write out to user space.
     int lock;
     ssize_t result = 0;
 
@@ -353,118 +344,98 @@ ssize_t hi_comm_block_device_read(struct file *filep, char *buf, size_t count, l
     };
     struct hifs_blocks *send_data = NULL;
     struct hifs_blocks_user *send_data_user = kmalloc(sizeof(struct hifs_blocks_user), GFP_KERNEL);
+
+    for (lock = 0; lock < 100; lock++){
+        if (mutex_trylock(&block_mutex)) {
+            break;
+        } else {
+            printk(KERN_INFO "hifs_comm: [BLOCK] Another process is accessing the device. Waiting...\n");
+            msleep(10);
+        }
+    }
+
+    if (lock > 99) { 
+        kfree(send_data_user);
+        return -EBUSY; 
+    }
+
     if (!list_empty(&shared_block_outgoing_lst)) { 
         send_data = list_first_entry(&shared_block_outgoing_lst, struct hifs_blocks, hifs_block_list);
         if (send_data) {
             list_del(&send_data->hifs_block_list);
         } else {
             printk(KERN_INFO "hifs_comm: [BLOCK] send_data is empty, dropping out to process next queue message\n");
+            kfree(send_data_user);
+            mutex_unlock(&block_mutex);
             return -EFAULT;
         }
 
         printk(KERN_INFO "hifs_comm: [BLOCK] Transferring block [%s] with [%d] characters\n", send_data->block, send_data->block_size);
-        for (lock = 0; lock < 100; lock++){
-            if (!mutex_trylock(&block_mutex)) {
-                break;
-            } else {
-                printk(KERN_INFO "hifs_comm: [BLOCK] Another process is accessing the device. Waiting...\n");
-                msleep(10);
-            }
-        }
-        if (lock > 99) { 
-            mutex_unlock(&block_mutex);
-            kfree(send_data);
-            return -EBUSY; 
-        }
 
         strncpy(send_data_user->block, send_data->block, HIFS_DEFAULT_BLOCK_SIZE);
         send_data_user->block_size = send_data->block_size;
-        if (copy_to_user(buf, &send_data_user, sizeof(send_data_user)) != 0) {
+        if (copy_to_user(buf, send_data_user, sizeof(*send_data_user)) != 0) {
             result = -EFAULT;
         } else {
-            result = send_data_user->block_size;
+            result = sizeof(*send_data_user);
         }
         can_write = true;
-        //wake up the waitqueue
         wake_up(&waitqueue);
-
-        mutex_unlock(&block_mutex);
     } else {
         result = -EFAULT;
     }
-    kfree(send_data);
+    kfree(send_data_user);
+    mutex_unlock(&cmd_mutex);
     return result;
 }
 
 ssize_t hi_comm_cmd_device_read(struct file *filep, char *buf, size_t count, loff_t *offset) {
-    // Write out to user space.
     int lock;
     ssize_t result = 0;
     struct hifs_cmds_user {
-        char cmd[HIFS_MAX_CMD_SIZE];  // MAX_CMD_SIZE is the maximum size of a command
+        char cmd[HIFS_MAX_CMD_SIZE];
         int count;
     };
     struct hifs_cmds *send_data = NULL;
     struct hifs_cmds_user send_data_user;
+
+    for (lock = 0; lock < 100; lock++){
+        if (mutex_trylock(&cmd_mutex)) {
+            break;
+        } else {
+            printk(KERN_INFO "hifs_comm: [CMD] Another process is accessing the device. Waiting...\n");
+            msleep(10);
+        }
+    }
+    if (lock > 99) { 
+        return -EBUSY; 
+    }
+
     if (!list_empty(&shared_cmd_outgoing_lst)) { 
         send_data = list_first_entry(&shared_cmd_outgoing_lst, struct hifs_cmds, hifs_cmd_list);
         if (send_data) {
             list_del(&send_data->hifs_cmd_list);
         } else {
             printk(KERN_INFO "hifs_comm: [CMD] send_data is empty, dropping out to process next queue message\n");
+            mutex_unlock(&cmd_mutex);
             return -EFAULT;
         }
 
         printk(KERN_INFO "hifs_comm: [CMD] Transferring command [%s] with [%d] characters\n", send_data->cmd, send_data->count);
-        for (lock = 0; lock < 100; lock++){
-            if (!mutex_trylock(&cmd_mutex)) {
-                break;
-            } else {
-                printk(KERN_INFO "hifs_comm: [CMD] Another process is accessing the device. Waiting...\n");
-                msleep(10);
-            }
-        }
-        if (lock > 99) { 
-            mutex_unlock(&cmd_mutex);
-            kfree(send_data);
-            return -EBUSY; 
-        }
 
         strncpy(send_data_user.cmd, send_data->cmd, HIFS_MAX_CMD_SIZE);
         send_data_user.count = send_data->count;
         if (copy_to_user(buf, &send_data_user, sizeof(send_data_user)) != 0) {
             result = -EFAULT;
         } else {
-            result = count;
+            result = sizeof(send_data_user);
         }
         can_write = true;
-        //wake up the waitqueue
         wake_up(&waitqueue);
-
-        mutex_unlock(&cmd_mutex);
     } else {
         result = -EFAULT;
     }
-    kfree(send_data);
-    return result;
-}
-
-ssize_t hi_comm_inode_device_write(struct file *filep, const char *buffer, size_t count, loff_t *offset) {
-    // Read from user space
-    ssize_t result = 0;
-
-    if (copy_from_user(shared_inode_incoming, buffer, min(sizeof(*shared_inode_incoming), count))) {
-        // handle error
-        return -EFAULT;
-    }
-
-    result = min(sizeof(*shared_inode_incoming), count);
-    list_add(&shared_inode_incoming->hifs_inode_list, &shared_inode_incoming_lst);
-
-    can_read = true;
-    //wake up the waitqueue
-    wake_up(&waitqueue);
-
+    mutex_unlock(&cmd_mutex);
     return result;
 }
 
@@ -553,7 +524,7 @@ __poll_t hifs_cmd_device_poll (struct file *filp, poll_table *wait) {
     if( can_read )
     {
         can_read = false;
-        mask |= ( POLLIN | POLLRDNORM );
+        mask |= ( POLLIN );
     }
 
     if( can_write )
