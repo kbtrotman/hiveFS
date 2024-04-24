@@ -121,6 +121,7 @@ link_and_queue_management:
     value = atomic_read(&user_atomic_variable);
     if (value == HIFS_COMM_LINK_DOWN) {
         printk(KERN_INFO "hifs: user link is down. Waiting for hi_command to come up...\n");
+        msleep(500);
         goto link_and_queue_management;
     } else if (hifs_user_link.state == HIFS_COMM_LINK_DOWN) {
         printk(KERN_INFO "hifs: Kernel link was recently up'd. Proceeding...\n");
