@@ -48,7 +48,8 @@ extern struct device *kern_atomic_device;
 extern struct device *user_atomic_device;
 extern struct class *kern_atomic_class;
 extern struct class *user_atomic_class;
-
+extern wait_queue_head_t waitqueue;
+extern wait_queue_head_t thread_wq;
 // Prototypes Here:
 
 /* hifs.c */
@@ -57,7 +58,9 @@ void __exit hifs_exit(void);
 int __init hifs_init(void);
 
 /* hi_command_kern.c */
-int hifs_thread_fn(void);
+int hifs_start_queue_thread(void);
+int hifs_stop_queue_thread(void);
+int hifs_thread_fn(void *data);
 int hifs_create_test_inode(void);
 int hifs_comm_check_program_up( int program );
 int hifs_comm_set_program_up( int program );

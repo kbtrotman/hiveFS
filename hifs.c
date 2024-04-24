@@ -148,7 +148,7 @@ int __init hifs_init(void)
         printk(KERN_INFO "hivefs: Memory Mapped Communication queues registered to kernel\n");
     }
 
-    ret = hifs_thread_fn();
+    ret = hifs_start_queue_thread();
     if (ret != 0) {
         printk(KERN_ERR "hivefs: Failed to start hivefs management routine\n");
     } else {
