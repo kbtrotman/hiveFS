@@ -425,7 +425,7 @@ ssize_t hi_comm_cmd_device_read(struct file *filep, char *buf, size_t count, lof
 
         strncpy(send_data_user.cmd, send_data->cmd, HIFS_MAX_CMD_SIZE);
         send_data_user.count = send_data->count;
-        if (copy_to_user(buf, &send_data_user, sizeof(send_data_user)) != 0) {
+        if (copy_to_user(buf, &send_data_user, sizeof(struct hifs_cmds_user)) != 0) {
             result = -EFAULT;
         } else {
             result = sizeof(send_data_user);
@@ -436,6 +436,25 @@ ssize_t hi_comm_cmd_device_read(struct file *filep, char *buf, size_t count, lof
         result = -EFAULT;
     }
     mutex_unlock(&cmd_mutex);
+    return result;
+}
+
+ssize_t hi_comm_inode_device_write(struct file *filep, const char *buffer, size_t count, loff_t *offset) {
+    // Read from user space
+    ssize_t result = 0;
+
+    if (copy_from_user(shared_inode_incoming, buffer, min(sizeof(*shared_inode_incoming), count))) {
+        // handle error
+        return -EFAULT;
+    }
+
+    result = min(sizeof(*shared_inode_incoming), count);
+    list_add(&shared_inode_incoming->hifs_inode_list, &shared_inode_incoming_lst);
+
+    can_read = true;
+    //wake up the waitqueue
+    wake_up(&waitqueue);
+
     return result;
 }
 

@@ -1,5 +1,7 @@
 {
     "files.associations": {
         "debugfs.h": "c"
+        "vscode_custom_css.imports": ["file:///home/trotmkeb/c/hiveFS/.vscode/editor.css"]
     }
+    
 }
