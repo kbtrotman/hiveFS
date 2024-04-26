@@ -120,7 +120,7 @@ int hifs_thread_fn(void *data) {
     value = hifs_comm_set_program_up(HIFS_COMM_PROGRAM_KERN_MOD);
     value = hifs_comm_set_program_up(HIFS_COMM_PROGRAM_KERN_MOD);
 
-    while (!kthread_should_stop() && !stop_thread) {
+    while (!kthread_should_stop()) {
         value = atomic_read(&user_atomic_variable);
         wait_event_interruptible_timeout(thread_wq, 1, msecs_to_jiffies(500));
         if (value == HIFS_COMM_LINK_DOWN) {
@@ -219,6 +219,7 @@ int hifs_stop_queue_thread(void)
 {
     // Stop the new monitoring kernel thread
     stop_thread = true;
+    wake_up_process(task); // Wake up the thread if it's sleeping
     kthread_stop(task);
     pr_info("hivefs: Shutting down hivefs queue management thread\n");
     return 0;

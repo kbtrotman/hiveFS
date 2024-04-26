@@ -115,9 +115,23 @@ void hi_comm_close_queues(void)
 int read_from_inode_dev(char *dev_file)
 {
     int result = 0;
+    struct hifs_inode_user send_data_user;
 
-    result = read(fd_cmd, &shared_inode_incoming, sizeof(shared_inode_incoming));
+    result = read(fd_cmd, &send_data_user, sizeof(struct hifs_inode_user));
     if (result >= 0) {
+
+        strncpy(shared_inode_incoming->i_name, send_data_user.i_name, sizeof(HIFS_MAX_NAME_SIZE));
+        memcpy(shared_inode_incoming->i_addre, send_data_user.i_addre, sizeof(shared_inode_incoming->i_addre));
+        memcpy(shared_inode_incoming->i_addrb, send_data_user.i_addrb, sizeof(shared_inode_incoming->i_addrb));
+        shared_inode_incoming->i_size = send_data_user.i_size;
+        shared_inode_incoming->i_mode = send_data_user.i_mode;
+        shared_inode_incoming->i_uid = send_data_user.i_uid;
+        shared_inode_incoming->i_gid = send_data_user.i_gid;
+        shared_inode_incoming->i_blocks = send_data_user.i_blocks;
+        shared_inode_incoming->i_bytes = send_data_user.i_bytes;
+        shared_inode_incoming->i_size = send_data_user.i_size;
+        shared_inode_incoming->i_ino = send_data_user.i_ino;
+
         printf("hi_command: Read %d bytes from device file: %s\n", result, dev_file);
         printf("hi_command: Received inode [%s] with [%d] file size\n", shared_inode_incoming->i_name, shared_inode_incoming->i_bytes);
     } else {
@@ -136,8 +150,17 @@ int read_from_block_dev(char *dev_file)
 {
     int result = 0;
 
-    result = read(fd_cmd, &shared_block_incoming, sizeof(shared_block_incoming));
+    struct hifs_blocks_user {
+        char block[HIFS_DEFAULT_BLOCK_SIZE];
+        int block_size;
+        int count;
+    };
+    struct hifs_blocks_user *send_data_user = mmap(0, sizeof(struct hifs_blocks_user), PROT_READ | PROT_WRITE, MAP_SHARED, fd_block, 0);
+    result = read(fd_cmd, &send_data_user, sizeof(struct hifs_blocks_user));
     if (result >= 0) {
+        strncpy(shared_block_incoming->block, send_data_user->block, HIFS_DEFAULT_BLOCK_SIZE);
+        shared_block_incoming->block_size = send_data_user->block_size;
+
         printf("hi_command: Read %d bytes from device file: %s\n", result, dev_file);
         printf("hi_command: Received block [%s] with [%d] block size\n", shared_block_incoming->block, shared_block_incoming->block_size);
     } else {
@@ -154,8 +177,16 @@ int read_from_block_dev(char *dev_file)
 int read_from_cmd_dev(char *dev_file)
 {
     int result = 0;
-    result = read(fd_cmd, &shared_cmd_incoming, sizeof(shared_cmd_incoming));
+    struct hifs_cmds_user {
+        char cmd[HIFS_MAX_CMD_SIZE];
+        int count;
+    };
+     struct hifs_cmds_user send_data_user;
+    result = read(fd_cmd, &send_data_user, sizeof(struct hifs_cmds_user));
     if (result >= 0) {
+        send_data_user.cmd[sizeof(struct hifs_cmds_user) - 1] = '\0';
+        strncpy(shared_cmd_incoming->cmd, send_data_user.cmd, sizeof(HIFS_MAX_CMD_SIZE));
+        shared_cmd_incoming->count = send_data_user.count;
         printf("hi_command: Read %d bytes from device file: %s\n", result, dev_file);
         printf("hi_command: Received command [%s] with [%d] count\n", shared_cmd_incoming->cmd, shared_cmd_incoming->count);
     } else {
