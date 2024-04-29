@@ -41,8 +41,6 @@ extern struct list_head shared_inode_incoming_lst;
 extern struct list_head shared_block_incoming_lst;   
 extern struct list_head shared_cmd_incoming_lst;  
 
-extern char *filename;     // The filename we're currently sending/recieving to/from.
-
 void write_to_queue(void)
 {
     int ret;

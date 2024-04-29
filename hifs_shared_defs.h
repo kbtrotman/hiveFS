@@ -75,8 +75,6 @@ struct hifs_cmds {
 };
 
 extern int k_major, u_major, i_major, b_major, c_major;  
-extern char *filename;     // The filename we're currently sending/recieving to/from.
-extern char buffer[4096];
 extern bool new_device_data;
 
 #ifdef __KERNEL__
@@ -103,7 +101,7 @@ do { \
     type *node, *tmp; \
     list_for_each_entry_safe(node, tmp, lia, member) { \
         list_del(&node->member); \
-        kfree(node); \
+        if (node) { kfree(node); } \
     } \
 } while (0)
 /******************************

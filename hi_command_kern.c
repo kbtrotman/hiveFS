@@ -14,7 +14,6 @@
 struct hifs_link hifs_kern_link = {HIFS_COMM_LINK_DOWN, 0, 0, 0};
 int u_major, k_major, i_major, b_major, c_major;
 bool new_device_data = false;
-bool stop_thread = false;
 struct class *inode_dev_class, *block_dev_class, *cmd_dev_class;
 atomic_t kern_atomic_variable = ATOMIC_INIT(0);
 atomic_t user_atomic_variable = ATOMIC_INIT(0);
@@ -27,11 +26,11 @@ struct hifs_link hifs_user_link;
 struct task_struct *task;
 
 extern struct hifs_inode *shared_inode_outgoing;    // These six Doubly-Linked Lists are our
-extern struct hifs_blocks *shared_block_outgoing;   // processing queues. They are sent & 
-extern struct hifs_cmds *shared_cmd_outgoing;       // received thru the 3 device files known
-extern struct hifs_inode *shared_inode_incoming;    // as the "queues" (to hi_command). We want
-extern struct hifs_blocks *shared_block_incoming;   // to proces them fast, so they're split into
-extern struct hifs_cmds *shared_cmd_incoming;       // incoming & outgoing queues here.
+extern struct hifs_blocks *shared_block_outgoing;   // processing queues.
+extern struct hifs_cmds *shared_cmd_outgoing;       
+extern struct hifs_inode *shared_inode_incoming;    
+extern struct hifs_blocks *shared_block_incoming;   
+extern struct hifs_cmds *shared_cmd_incoming;       
 
 extern struct list_head shared_inode_outgoing_lst;    
 extern struct list_head shared_block_outgoing_lst;    
@@ -40,9 +39,6 @@ extern struct list_head shared_inode_incoming_lst;
 extern struct list_head shared_block_incoming_lst;   
 extern struct list_head shared_cmd_incoming_lst;  
 
-//static bool stop_thread = false;
-extern char *filename;     // The filename we're currently sending/recieving to/from.
-char buffer[HIFS_DEFAULT_BLOCK_SIZE];
 extern wait_queue_head_t waitqueue;
 extern wait_queue_head_t thread_wq;
 
@@ -102,14 +98,20 @@ int hifs_create_test_inode(void) {
     list_add_tail(&shared_cmd_outgoing->hifs_cmd_list, &shared_cmd_outgoing_lst);
     list_add_tail(&shared_inode_outgoing->hifs_inode_list, &shared_inode_outgoing_lst);
 
+    // The list memory was added to the lists, so here we NULL their references.
+    shared_inode_outgoing = NULL;
+    shared_cmd_outgoing = NULL;
+    shared_block_outgoing = NULL;
+    shared_inode_incoming = NULL;
+    shared_cmd_incoming = NULL;
+    shared_block_incoming = NULL;
+
     return 0;
 }
 
 int hifs_thread_fn(void *data) {
 
     int value;
-    DECLARE_WAIT_QUEUE_HEAD(thread_wq);
-
     value = hifs_create_test_inode();
 
     if (value < 0) {
@@ -206,7 +208,7 @@ int hifs_comm_set_program_down( int program ) {
 int hifs_start_queue_thread(void)
 {
     // Start the new monitoring kernel thread
-    task = kthread_run(hifs_thread_fn, NULL, "hifs_q_thread");
+    task = kthread_run(hifs_thread_fn, NULL, "hive_queue_manager");
     if (IS_ERR(task)) {
         pr_err("hivefs: Failed to create the atomic variable monitoring kernel thread\n");
         return PTR_ERR(task);
@@ -218,9 +220,8 @@ int hifs_start_queue_thread(void)
 int hifs_stop_queue_thread(void)
 {
     // Stop the new monitoring kernel thread
-    stop_thread = true;
     wake_up_process(task); // Wake up the thread if it's sleeping
-    kthread_stop(task);
+    if (task) { kthread_stop(task); }
     pr_info("hivefs: Shutting down hivefs queue management thread\n");
     return 0;
 }

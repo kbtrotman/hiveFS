@@ -33,8 +33,6 @@ char buffer[4096];
 char *device_file_inode;
 char *device_file_block;
 char *device_file_cmd;
-char buffer[4096];
-char *filename;
 
 struct hifs_inode *shared_inode_outgoing;    // These six Doubly-Linked Lists are our
 struct hifs_blocks *shared_block_outgoing;   // processing queues. They are sent & 
