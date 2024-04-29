@@ -27,14 +27,15 @@ MODULE_AUTHOR("Kevin Trotman");
 MODULE_DESCRIPTION("HiveFS - A Hive Mind Filesystem");
 MODULE_VERSION("0:0.01-001");
 
+extern struct task_struct *task;
 extern atomic_t kern_atomic_variable;
 extern int major;
 extern struct hifs_inode *shared_inode_outgoing;    // These six Doubly-Linked Lists are our
-extern struct hifs_blocks *shared_block_outgoing;   // processing queues. They are sent & 
-extern struct hifs_cmds *shared_cmd_outgoing;       // received thru the 3 device files known
-extern struct hifs_inode *shared_inode_incoming;    // as the "queues" (to hi_command). We want
-extern struct hifs_blocks *shared_block_incoming;   // to proces them fast, so they're split into
-extern struct hifs_cmds *shared_cmd_incoming;       // incoming & outgoing queues here.
+extern struct hifs_blocks *shared_block_outgoing;   // processing queues.
+extern struct hifs_cmds *shared_cmd_outgoing;       
+extern struct hifs_inode *shared_inode_incoming;    
+extern struct hifs_blocks *shared_block_incoming;   
+extern struct hifs_cmds *shared_cmd_incoming;       
 
 extern struct list_head shared_inode_outgoing_lst;    
 extern struct list_head shared_block_outgoing_lst;    
@@ -43,7 +44,6 @@ extern struct list_head shared_inode_incoming_lst;
 extern struct list_head shared_block_incoming_lst;   
 extern struct list_head shared_cmd_incoming_lst; 
 
-extern char *filename;     // The filename we're currently sending/recieving to/from.
 extern wait_queue_head_t waitqueue;
 
 struct file_system_type hifs_type = 
@@ -152,7 +152,7 @@ int __init hifs_init(void)
     if (ret != 0) {
         printk(KERN_ERR "hivefs: Failed to start hivefs management routine\n");
     } else {
-        printk(KERN_INFO "hivefs: hivefs manager started\n");
+        printk(KERN_INFO "hivefs: hivefs queue manager thread started\n");
     }
     return ret;
 

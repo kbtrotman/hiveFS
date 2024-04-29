@@ -39,12 +39,11 @@ struct list_head shared_inode_incoming_lst;
 struct list_head shared_block_incoming_lst;   
 struct list_head shared_cmd_incoming_lst;   
 
-char *filename;     // The filename we're currently sending/recieving to/from.
-
 bool can_write = false;
 bool can_read  = false;
 
 DECLARE_WAIT_QUEUE_HEAD(waitqueue);
+DECLARE_WAIT_QUEUE_HEAD(thread_wq);
 DEFINE_MUTEX(inode_mutex);
 DEFINE_MUTEX(block_mutex);
 DEFINE_MUTEX(cmd_mutex);
@@ -269,12 +268,10 @@ void unregister_all_comm_queues(void)
     free_a_list(&shared_inode_incoming_lst, struct hifs_inode, hifs_inode_list);
     free_a_list(&shared_block_incoming_lst, struct hifs_blocks, hifs_block_list);
     free_a_list(&shared_cmd_incoming_lst, struct hifs_cmds, hifs_cmd_list);
-    //kfree(task);
 }
 
 int hifs_comm_device_release(struct inode *inode, struct file *filp) {
     /* free buffer */
-    if (filename) kfree(filename);
     return 0;
 }
 
@@ -355,7 +352,7 @@ ssize_t hi_comm_block_device_read(struct file *filep, char *buf, size_t count, l
     }
 
     if (lock > 99) { 
-        kfree(send_data_user);
+        if (send_data_user) { kfree(send_data_user) };
         return -EBUSY; 
     }
 
@@ -365,7 +362,7 @@ ssize_t hi_comm_block_device_read(struct file *filep, char *buf, size_t count, l
             list_del(&send_data->hifs_block_list);
         } else {
             printk(KERN_INFO "hifs_comm: [BLOCK] send_data is empty, dropping out to process next queue message\n");
-            kfree(send_data_user);
+            if (send_data_user) { kfree(send_data_user) };
             mutex_unlock(&block_mutex);
             return -EFAULT;
         }
@@ -384,14 +381,14 @@ ssize_t hi_comm_block_device_read(struct file *filep, char *buf, size_t count, l
     } else {
         result = -EFAULT;
     }
-    kfree(send_data_user);
+    if (send_data_user) { kfree(send_data_user) };
     mutex_unlock(&cmd_mutex);
     return result;
 }
 
 ssize_t hi_comm_cmd_device_read(struct file *filep, char *buf, size_t count, loff_t *offset) {
     int lock;
-    ssize_t result = 0;
+    ssize_t result = 0, cmd_size;
     struct hifs_cmds_user {
         char cmd[HIFS_MAX_CMD_SIZE];
         int count;
@@ -423,8 +420,15 @@ ssize_t hi_comm_cmd_device_read(struct file *filep, char *buf, size_t count, lof
 
         printk(KERN_INFO "hifs_comm: [CMD] Transferring command [%s] with [%d] characters\n", send_data->cmd, send_data->count);
 
-        strncpy(send_data_user.cmd, send_data->cmd, HIFS_MAX_CMD_SIZE);
+        if (cmd_size >= HIFS_MAX_CMD_SIZE) { cmd_size = HIFS_MAX_CMD_SIZE - 1; }
+        strncpy(send_data_user.cmd, send_data->cmd, strlen(send_data->cmd));
+        send_data_user.cmd[cmd_size] = '\0';  // Ensure null-termination
         send_data_user.count = send_data->count;
+
+        if (count < sizeof(struct hifs_cmds_user))  {
+            mutex_unlock(&cmd_mutex);
+            return -EINVAL;
+        }
         if (copy_to_user(buf, &send_data_user, sizeof(struct hifs_cmds_user)) != 0) {
             result = -EFAULT;
         } else {
@@ -432,6 +436,7 @@ ssize_t hi_comm_cmd_device_read(struct file *filep, char *buf, size_t count, lof
         }
         can_write = true;
         wake_up(&waitqueue);
+        kfree(send_data);
     } else {
         result = -EFAULT;
     }
@@ -442,6 +447,9 @@ ssize_t hi_comm_cmd_device_read(struct file *filep, char *buf, size_t count, lof
 ssize_t hi_comm_inode_device_write(struct file *filep, const char *buffer, size_t count, loff_t *offset) {
     // Read from user space
     ssize_t result = 0;
+
+    //New node incoming, so allocate it, copy data to it, and then put it on the queue and NULL the node.
+    shared_inode_incoming = kmalloc(sizeof(*shared_inode_incoming), GFP_KERNEL);
 
     if (copy_from_user(shared_inode_incoming, buffer, min(sizeof(*shared_inode_incoming), count))) {
         // handle error
@@ -454,6 +462,7 @@ ssize_t hi_comm_inode_device_write(struct file *filep, const char *buffer, size_
     can_read = true;
     //wake up the waitqueue
     wake_up(&waitqueue);
+    shared_inode_incoming = NULL;
 
     return result;
 }
@@ -461,6 +470,9 @@ ssize_t hi_comm_inode_device_write(struct file *filep, const char *buffer, size_
 ssize_t hi_comm_block_device_write(struct file *filep, const char *buffer, size_t count, loff_t *offset) {
     // Read from user space
     ssize_t result = 0;
+
+    //New node incoming, so allocate it, copy data to it, and then put it on the queue and NULL the node.
+    shared_block_incoming = kmalloc(sizeof(*shared_block_incoming), GFP_KERNEL);
 
     if (copy_from_user(shared_block_incoming, buffer, min(sizeof(*shared_block_incoming), count))) {
         return -EFAULT;
@@ -472,6 +484,7 @@ ssize_t hi_comm_block_device_write(struct file *filep, const char *buffer, size_
     can_read = true;
     //wake up the waitqueue
     wake_up(&waitqueue);
+    shared_block_incoming = NULL;
 
     return result;
 }
@@ -479,6 +492,9 @@ ssize_t hi_comm_block_device_write(struct file *filep, const char *buffer, size_
 ssize_t hi_comm_cmd_device_write(struct file *filep, const char *buffer, size_t count, loff_t *offset) {
     // Read from user space
     ssize_t result = 0;
+
+    //New node incoming, so allocate it, copy data to it, and then put it on the queue and NULL the node.
+    shared_cmd_incoming = kmalloc(sizeof(*shared_cmd_incoming), GFP_KERNEL);
 
     if (copy_from_user(shared_cmd_incoming, buffer, min(sizeof(*shared_cmd_incoming), count))) {
         return -EFAULT;
@@ -490,6 +506,7 @@ ssize_t hi_comm_cmd_device_write(struct file *filep, const char *buffer, size_t 
     can_read = true;
     //wake up the waitqueue
     wake_up(&waitqueue);
+    shared_cmd_incoming = NULL;
 
     return result;
 }
