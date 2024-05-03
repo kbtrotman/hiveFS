@@ -16,29 +16,29 @@
 #include <linux/types.h>
 #include <linux/namei.h>
 #include <linux/slab.h>
-#include <linux/ktime.h>
-#include <linux/version.h>
+#include <linux/delay.h>
+#include <linux/uio.h>
+#include <linux/aio.h>
+#include <linux/poll.h>
 #include <linux/fs.h>
+#include <linux/buffer_head.h>
+#include <linux/time.h>
+#include <linux/ktime.h>
+#include <linux/sched.h>
+#include <linux/wait.h>
+#include <linux/kthread.h>
+#include <linux/version.h>
 #include <linux/vfs.h>
 #include <linux/blkdev.h>
-#include <linux/buffer_head.h>
 #include <linux/magic.h>
 #include <linux/debugfs.h>
 #include <asm/uaccess.h>
 #include <linux/fs_struct.h>
-#include <linux/kthread.h>
-#include <linux/delay.h>
 #include <linux/list.h>
 #include <linux/mutex.h>
-#include <linux/poll.h>
-#include <linux/wait.h>
 
-
-// The definitions file is included in both kernel-space and
-// in user-space.
-// COMMON Definitions Here ONLY!
 #include "hifs_shared_defs.h"
-// COMMON Definitions Here ONLY
+
 /* Definitions past this point should be specific only to the kernel-space module! */
 
 extern struct class *inode_dev_class, *block_dev_class, *cmd_dev_class;
@@ -50,47 +50,37 @@ extern struct class *kern_atomic_class;
 extern struct class *user_atomic_class;
 extern wait_queue_head_t waitqueue;
 extern wait_queue_head_t thread_wq;
-// Prototypes Here:
 
-/* hifs.c */
-//static int hifs_mkfs(struct file_system_type *fs_type, int flags, const char *dev_name, void *data);
-void __exit hifs_exit(void);
-int __init hifs_init(void);
-
-/* hi_command_kern.c */
-int hifs_start_queue_thread(void);
-int hifs_stop_queue_thread(void);
-int hifs_thread_fn(void *data);
+/*hi_command_kern.c*/
 int hifs_create_test_inode(void);
+int hifs_thread_fn(void *data);
 int hifs_comm_check_program_up( int program );
 int hifs_comm_set_program_up( int program );
-int hifs_comm_set_program_down( int program );
+int hifs_comm_check_program_down( int program );
+int hifs_start_queue_thread(void);
+int hifs_stop_queue_thread(void);
 
-//int hifs_stop_queue_thread(void);
-//int hifs_start_queue_thread(void);
-
-/* hi_command_kern_comm_memman.c */
-int hifs_comm_device_open(struct inode *inode, struct file *filp);
-int hifs_comm_device_release(struct inode *inode, struct file *filp);
-ssize_t hi_comm_inode_device_write(struct file *filp, const char __user *buf, size_t count, loff_t *f_pos);
-ssize_t hi_comm_block_device_write(struct file *filp, const char __user *buf, size_t count, loff_t *f_pos);
-ssize_t hi_comm_cmd_device_write(struct file *filp, const char __user *buf, size_t count, loff_t *f_pos);
-ssize_t hi_comm_inode_device_read(struct file *filp, char __user *buf, size_t count, loff_t *f_pos);
-ssize_t hi_comm_block_device_read(struct file *filp, char __user *buf, size_t count, loff_t *f_pos);
-ssize_t hi_comm_cmd_device_read(struct file *filp, char __user *buf, size_t count, loff_t *f_pos);
-__poll_t hifs_inode_device_poll (struct file *filp, poll_table *wait);
-__poll_t hifs_block_device_poll (struct file *filp, poll_table *wait);
-__poll_t hifs_cmd_device_poll (struct file *filp, poll_table *wait);
-int register_all_comm_queues(void);
-void unregister_all_comm_queues(void);
+/*hi_command_kern_memman.c*/
 int hifs_atomic_init(void);
 void hifs_atomic_exit(void);
-int v_atomic_open(struct inode *, struct file *);  // Virtual place holders, not currently used....
+int v_atomic_open(struct inode *inodep, struct file *filep);
+int v_atomic_release(struct inode *inodep, struct file *filep);
 ssize_t k_atomic_read(struct file *filep, char __user *buffer, size_t len, loff_t *offset);
 ssize_t k_atomic_write(struct file *filep, const char __user *buffer, size_t len, loff_t *offset);
 ssize_t u_atomic_read(struct file *filep, char __user *buffer, size_t len, loff_t *offset);
 ssize_t u_atomic_write(struct file *filep, const char __user *buffer, size_t len, loff_t *offset);
-int v_atomic_release(struct inode *inodep, struct file *filep);
+int register_all_comm_queues(void);
+void unregister_all_comm_queues(void);
+int hifs_comm_device_release(struct inode *inode, struct file *filp);
+ssize_t hi_comm_inode_device_read(struct file *filep, char *buf, size_t count, loff_t *offset);
+ssize_t hi_comm_block_device_read(struct file *filep, char *buf, size_t count, loff_t *offset);
+ssize_t hi_comm_cmd_device_read(struct file *filep, char *buf, size_t count, loff_t *offset);
+ssize_t hi_comm_inode_device_write(struct file *filep, const char *buf, size_t count, loff_t *offset);
+ssize_t hi_comm_block_device_write(struct file *filep, const char *buf, size_t count, loff_t *offset);
+ssize_t hi_comm_cmd_device_write(struct file *filep, const char *buf, size_t count, loff_t *offset);
+__poll_t hifs_inode_device_poll (struct file *filp, poll_table *wait);
+__poll_t hifs_block_device_poll (struct file *filp, poll_table *wait);
+__poll_t hifs_cmd_device_poll (struct file *filp, poll_table *wait);
 
 /* hi_superblock.c */
 void hifs_save_sb(struct super_block *sb);

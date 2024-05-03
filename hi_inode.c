@@ -7,8 +7,6 @@
  *
  */
 
-#include <linux/delay.h>
-#include <linux/uio.h>
 
 #include "hifs.h"
 u32 _ix = 0, b = 0, e = 0;
