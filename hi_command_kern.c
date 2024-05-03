@@ -6,9 +6,9 @@
  * License: GNU GPL as of 2023
  *
  */
-
+#include "hifs_shared_defs.h"
 #include "hifs.h"
-#include <linux/list.h>
+
 
 // Globals
 struct hifs_link hifs_kern_link = {HIFS_COMM_LINK_DOWN, 0, 0, 0};
@@ -115,7 +115,7 @@ int hifs_thread_fn(void *data) {
     value = hifs_create_test_inode();
 
     if (value < 0) {
-        pr_err("hivefs_comm: Failed to create test data\n");
+        hifs_warning("Failed to create test data\n");
         return value;
     }
     // Before going into the data management, we up our module status here.
@@ -124,16 +124,14 @@ int hifs_thread_fn(void *data) {
 
     while (!kthread_should_stop()) {
         value = atomic_read(&user_atomic_variable);
-        wait_event_interruptible_timeout(thread_wq, 1, msecs_to_jiffies(500));
+        wait_event_interruptible_timeout(thread_wq, 1, msecs_to_jiffies(5000));
         if (value == HIFS_COMM_LINK_DOWN) {
-            printk(KERN_INFO "hifs: user link is down. Waiting for hi_command to come up...\n");
+            hifs_info("user link is down. Waiting for hi_command to come up...\n");
         } else if (hifs_user_link.state == HIFS_COMM_LINK_DOWN) {
-            printk(KERN_INFO "hifs: Kernel link was recently up'd. Proceeding...\n");
+            hifs_info("Kernel link was recently up'd. Proceeding...\n");
             hifs_comm_set_program_up(HIFS_COMM_PROGRAM_USER_HICOMM);
         }
-        printk(KERN_INFO "hivefs_comm: kernel link status is [%d]\n", hifs_kern_link.state);
-        printk(KERN_INFO "hivefs_comm: user link status is [%d]\n", hifs_user_link.state);
-        printk(KERN_INFO "hivefs_comm: waiting for FS data queue notifications, cycling again...\n");
+        hifs_notice("kernel link is [%d], user link is [%d], cycling...\n", hifs_kern_link.state, hifs_user_link.state);
     }
 
     return 0;
@@ -158,7 +156,7 @@ int hifs_comm_set_program_up( int program ) {
         hifs_kern_link.last_check = 0;
         hifs_kern_link.state = HIFS_COMM_LINK_UP;
         value = 1;
-        pr_info(KERN_INFO "hivefs: kern link up'd at %ld seconds after hifs start, waiting on hi_command.\n", (GET_TIME() - hifs_kern_link.clockstart));
+        hifs_notice("kern link up'd at %ld seconds after hifs start, waiting on hi_command.\n", (GET_TIME() - hifs_kern_link.clockstart));
     } else if (program == HIFS_COMM_PROGRAM_USER_HICOMM) {
         //...The kernel should never set this mem location. It's owned by user space.
         value = hifs_comm_check_program_up(HIFS_COMM_PROGRAM_USER_HICOMM);
@@ -173,7 +171,7 @@ int hifs_comm_set_program_up( int program ) {
             hifs_user_link.last_check = 0;
             value = 1;           
         }
-        pr_info(KERN_INFO "hivefs: user link up'd at %ld seconds after hifs start, waiting on hi_command.\n", (GET_TIME() - hifs_user_link.clockstart));
+        hifs_notice("user link up'd at %ld seconds after hifs start, waiting on hi_command.\n", (GET_TIME() - hifs_user_link.clockstart));
     } else {
         value = 0;
     }
@@ -189,7 +187,7 @@ int hifs_comm_set_program_down( int program ) {
         hifs_kern_link.last_check = 0;
         hifs_kern_link.state = HIFS_COMM_LINK_DOWN;
         value = 0;
-        pr_info(KERN_INFO "hivefs: kern link down'd at %ld seconds after hifs start, waiting on hi_command.\n", (GET_TIME() - hifs_kern_link.clockstart));
+        hifs_info("kern link down'd at %ld seconds after hifs start, waiting on hi_command.\n", (GET_TIME() - hifs_kern_link.clockstart));
     } else if (program == HIFS_COMM_PROGRAM_USER_HICOMM) {
         //...The kernel should never set this mem location. It's owned by user space.
         value = hifs_comm_check_program_up(HIFS_COMM_PROGRAM_USER_HICOMM);
@@ -197,7 +195,7 @@ int hifs_comm_set_program_down( int program ) {
             // We don't want to do this! Hi_Command has to flush and shutdown the user side of the link! Do nothing.
             value = 1;
         }
-        pr_info(KERN_INFO "hivefs: user link down attempted and rejected at %ld seconds after hifs start, waiting on hi_command.\n", (GET_TIME() - hifs_user_link.clockstart));
+        hifs_info("user link down attempted and rejected at %ld seconds after hifs start, waiting on hi_command.\n", (GET_TIME() - hifs_user_link.clockstart));
     } else {
         value = 0;
     }
@@ -210,10 +208,10 @@ int hifs_start_queue_thread(void)
     // Start the new monitoring kernel thread
     task = kthread_run(hifs_thread_fn, NULL, "hive_queue_manager");
     if (IS_ERR(task)) {
-        pr_err("hivefs: Failed to create the atomic variable monitoring kernel thread\n");
+        hifs_err("Failed to create the atomic variable monitoring kernel thread\n");
         return PTR_ERR(task);
     }
-    pr_info("hivefs: A new kernel thread was forked to monitor/manage communications\n");
+    hifs_info("A new kernel thread was forked to monitor/manage communications\n");
     return 0;
 }
 
@@ -222,6 +220,6 @@ int hifs_stop_queue_thread(void)
     // Stop the new monitoring kernel thread
     wake_up_process(task); // Wake up the thread if it's sleeping
     if (task) { kthread_stop(task); }
-    pr_info("hivefs: Shutting down hivefs queue management thread\n");
+    hifs_info("Shutting down hivefs queue management thread\n");
     return 0;
 }

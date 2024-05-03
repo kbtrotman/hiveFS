@@ -16,12 +16,12 @@
 //* superblock/inode/dir/file structures.
 //*****************************************************************************************
 
-// *********           HiveFS Entry          *********
-// This is the entry point for the entire FS in this file.
-
-
+#include "hifs_shared_defs.h"
 #include "hifs.h"
 
+// *******************      HiveFS Entry     *******************
+// This is the entry point for the entire FS in this file.
+// *******************      HiveFS Entry     *******************
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Kevin Trotman");
 MODULE_DESCRIPTION("HiveFS - A Hive Mind Filesystem");
@@ -79,6 +79,7 @@ const struct super_operations hifs_sb_operations =
 	.destroy_inode = hifs_destroy_inode,
 	.put_super = hifs_put_super,
 };
+// *******************      HiveFS Entry     *******************
 
 
 static int hifs_mkfs(struct file_system_type *fs_type, int flags, const char *dev_name, void *data)
@@ -126,38 +127,38 @@ int __init hifs_init(void)
 
     ret = register_filesystem(&hifs_type);
     if (ret != 0) {
-        printk(KERN_ERR "hivefs: Failed to register filesystem\n");
+        hifs_err("Failed to register filesystem\n");
         goto failure;
     } else {
-        printk(KERN_INFO "hivefs: Filesystem registered to kernel\n");
+        hifs_info("Filesystem registered to kernel\n");
     }
 
     ret = hifs_atomic_init();
     if (ret != 0) {
-        printk(KERN_ERR "hivefs: Failed to register atomic sync variable(s)\n");
+        hifs_err("Failed to register atomic sync variable(s)\n");
         goto failure;
     } else {
-        printk(KERN_INFO "hivefs: HiFS atomic sync variable(s) registered in kernel\n");
+        hifs_info("HiFS atomic sync variable(s) registered in kernel\n");
     }
 
     ret = register_all_comm_queues();
     if (ret != 0) {
-        printk(KERN_ERR "hivefs: Failed to register communication queues\n");
+        hifs_err("Failed to register communication queues\n");
         goto failure;
     } else {
-        printk(KERN_INFO "hivefs: Memory Mapped Communication queues registered to kernel\n");
+        hifs_info("Memory Mapped Communication queues registered to kernel\n");
     }
 
     ret = hifs_start_queue_thread();
     if (ret != 0) {
-        printk(KERN_ERR "hivefs: Failed to start hivefs management routine\n");
+        hifs_err("Failed to start hivefs management routine\n");
     } else {
-        printk(KERN_INFO "hivefs: hivefs queue manager thread started\n");
+        hifs_info("hivefs queue manager thread started\n");
     }
     return ret;
 
 failure:
-    printk(KERN_ERR "hivefs: There were errors when attempting to register the filesystem\n");
+    hifs_err("There were errors when attempting to register the filesystem\n");
     return ret;
 }
 
@@ -170,13 +171,13 @@ void __exit hifs_exit(void)
     hifs_atomic_exit();
     ret = unregister_filesystem(&hifs_type);
     if (ret != 0) {
-        printk(KERN_ERR "hivefs: Failed to unregister filesystem\n");
+        hifs_err("Failed to unregister filesystem\n");
         goto failure;
     }
-    printk(KERN_INFO "hivefs: hiveFS unregistered\n");
+    hifs_info("hiveFS unregistered\n");
 
 failure:
-    printk(KERN_ERR "hivefs: There were errors when attempting to unregister the filesystem\n");
+    hifs_err("There were errors when attempting to unregister the filesystem\n");
 }
 
 module_init(hifs_init);

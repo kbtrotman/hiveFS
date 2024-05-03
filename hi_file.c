@@ -6,8 +6,6 @@
  * License: GNU GPL as of 2023
  *
  */
-#include <linux/uio.h>
-#include <linux/aio.h>
 
 #include "hifs.h"
 

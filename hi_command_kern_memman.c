@@ -6,7 +6,7 @@
  * License: GNU GPL as of 2023
  *
  */
-
+#include "hifs_shared_defs.h"
 #include "hifs.h"
 
 
@@ -91,27 +91,27 @@ struct file_operations fauops = {
 int hifs_atomic_init(void) {
     k_major = register_chrdev(0, ATOMIC_KERN_DEVICE_NAME, &fakops);
     if (k_major < 0) {
-        pr_err("hivefs: Failed to register the kernel atmomic link device\n");
+        hifs_err("Failed to register the kernel atmomic link device\n");
         return k_major;
     }
 
     u_major = register_chrdev(0, ATOMIC_USER_DEVICE_NAME, &fauops);
     if (u_major < 0) {
-        pr_err("hivefs: Failed to register the user atmomic link device\n");
+        hifs_err("Failed to register the user atmomic link device\n");
         return u_major;
     }
 
     kern_atomic_class = class_create(THIS_MODULE, ATOMIC_KERN_CLASS_NAME);
     if (IS_ERR(kern_atomic_class)) {
         unregister_chrdev(k_major, ATOMIC_KERN_DEVICE_NAME);
-        pr_err("hivefs: Failed to create kernel atomic class\n");
+        hifs_err("Failed to create kernel atomic class\n");
         return PTR_ERR(kern_atomic_class);
     }
 
     user_atomic_class = class_create(THIS_MODULE, ATOMIC_USER_CLASS_NAME);
     if (IS_ERR(user_atomic_class)) {
         unregister_chrdev(u_major, ATOMIC_USER_DEVICE_NAME);
-        pr_err("hivefs: Failed to create user atomic class\n");
+        hifs_err("Failed to create user atomic class\n");
         return PTR_ERR(kern_atomic_class);
     }
 
@@ -119,7 +119,7 @@ int hifs_atomic_init(void) {
     if (IS_ERR(kern_atomic_device)) {
         class_destroy(kern_atomic_class);
         unregister_chrdev(k_major, ATOMIC_KERN_DEVICE_NAME);
-        pr_err("hivefs: Failed to create the final kernel atomic link device\n");
+        hifs_err("Failed to create the final kernel atomic link device\n");
         return PTR_ERR(kern_atomic_device);
     }
 
@@ -127,11 +127,11 @@ int hifs_atomic_init(void) {
     if (IS_ERR(user_atomic_device)) {
         class_destroy(user_atomic_class);
         unregister_chrdev(u_major, ATOMIC_USER_DEVICE_NAME);
-        pr_err("hivefs: Failed to create the final user atomic link device\n");
+        hifs_err("Failed to create the final user atomic link device\n");
         return PTR_ERR(user_atomic_device);
     }
 
-    pr_info("hivefs: Atomic link variable devices loaded in kernel\n");
+    hifs_info("Atomic link variable devices loaded in kernel\n");
 
     return 0;
 }
@@ -146,12 +146,12 @@ void hifs_atomic_exit(void) {
     unregister_chrdev(k_major, ATOMIC_KERN_DEVICE_NAME);
     unregister_chrdev(u_major, ATOMIC_USER_DEVICE_NAME);
 
-    pr_info("hivefs: Atomic link variables unloaded\n");
+    hifs_info("Atomic link variables unloaded\n");
 }
 
 // Override functions here: These we don't need to change.
 int v_atomic_open(struct inode *inodep, struct file *filep) {
-    pr_info("hivefs: Atomic Device opened\n");
+    hifs_info("Atomic Device opened\n");
     return 0;
 }
 
@@ -212,19 +212,19 @@ int register_all_comm_queues(void)
 {
     i_major = register_chrdev(0, DEVICE_FILE_INODE, &inode_fops);
     if (i_major < 0) {
-        pr_err("hivefs: Failed to register inode & block comm queue device\n");
+        hifs_err("Failed to register inode & block comm queue device\n");
         return i_major;
     }
 
     b_major = register_chrdev(0, DEVICE_FILE_BLOCK "_block", &block_fops);
     if (b_major < 0) {
-        pr_err("hivefs: Failed to register block (file) comm queue device\n");
+        hifs_err("Failed to register block (file) comm queue device\n");
         return b_major;
     }
 
     c_major = register_chrdev(0, DEVICE_FILE_CMDS, &cmd_fops);
     if (c_major < 0) {
-        pr_err("hivefs: Failed to register command comm queue device\n");
+        hifs_err("Failed to register command comm queue device\n");
         return c_major;
     }
 
@@ -285,7 +285,7 @@ ssize_t hi_comm_inode_device_read(struct file *filep, char *buf, size_t count, l
         if (mutex_trylock(&inode_mutex)) {
             break;
         } else {
-            printk(KERN_INFO "hifs_comm: [INODE] Another process is accessing the device. Waiting...\n");
+            hifs_info("[INODE] Another process is accessing the device. Waiting...\n");
             msleep(10);
         }
     }
@@ -298,12 +298,12 @@ ssize_t hi_comm_inode_device_read(struct file *filep, char *buf, size_t count, l
         if (send_data) {
             list_del(&send_data->hifs_inode_list);
         } else {
-            printk(KERN_INFO "hifs_comm: [INODE] send_data is empty, dropping out to process next queue message\n");
+            hifs_info("[INODE] send_data is empty, dropping out to process next queue message\n");
             mutex_unlock(&inode_mutex);
             return -EFAULT;
         }
 
-        printk(KERN_INFO "hifs_comm: [INODE] Transferring inode [%s]\n", send_data->i_name);
+        hifs_info("[INODE] Transferring inode [%s]\n", send_data->i_name);
 
         strncpy(send_data_user.i_name, send_data->i_name, HIFS_MAX_NAME_SIZE);
         memcpy(send_data_user.i_addre, send_data->i_addre, sizeof(send_data_user.i_addre));
@@ -346,13 +346,13 @@ ssize_t hi_comm_block_device_read(struct file *filep, char *buf, size_t count, l
         if (mutex_trylock(&block_mutex)) {
             break;
         } else {
-            printk(KERN_INFO "hifs_comm: [BLOCK] Another process is accessing the device. Waiting...\n");
+            hifs_info("[BLOCK] Another process is accessing the device. Waiting...\n");
             msleep(10);
         }
     }
 
     if (lock > 99) { 
-        if (send_data_user) { kfree(send_data_user) };
+        if (send_data_user) { kfree(send_data_user); };
         return -EBUSY; 
     }
 
@@ -361,13 +361,13 @@ ssize_t hi_comm_block_device_read(struct file *filep, char *buf, size_t count, l
         if (send_data) {
             list_del(&send_data->hifs_block_list);
         } else {
-            printk(KERN_INFO "hifs_comm: [BLOCK] send_data is empty, dropping out to process next queue message\n");
-            if (send_data_user) { kfree(send_data_user) };
+            hifs_info("[BLOCK] send_data is empty, dropping out to process next queue message\n");
+            if (send_data_user) { kfree(send_data_user); };
             mutex_unlock(&block_mutex);
             return -EFAULT;
         }
 
-        printk(KERN_INFO "hifs_comm: [BLOCK] Transferring block [%s] with [%d] characters\n", send_data->block, send_data->block_size);
+        hifs_info("[BLOCK] Transferring block [%s] with [%d] characters\n", send_data->block, send_data->block_size);
 
         strncpy(send_data_user->block, send_data->block, HIFS_DEFAULT_BLOCK_SIZE);
         send_data_user->block_size = send_data->block_size;
@@ -381,31 +381,25 @@ ssize_t hi_comm_block_device_read(struct file *filep, char *buf, size_t count, l
     } else {
         result = -EFAULT;
     }
-    if (send_data_user) { kfree(send_data_user) };
+    if (send_data_user) { kfree(send_data_user); };
     mutex_unlock(&cmd_mutex);
     return result;
 }
 
 ssize_t hi_comm_cmd_device_read(struct file *filep, char *buf, size_t count, loff_t *offset) {
-    int lock;
-    ssize_t result = 0, cmd_size;
+    ssize_t result, cmd_size;
     struct hifs_cmds_user {
         char cmd[HIFS_MAX_CMD_SIZE];
         int count;
     };
     struct hifs_cmds *send_data = NULL;
     struct hifs_cmds_user send_data_user;
-
-    for (lock = 0; lock < 100; lock++){
-        if (mutex_trylock(&cmd_mutex)) {
-            break;
-        } else {
-            printk(KERN_INFO "hifs_comm: [CMD] Another process is accessing the device. Waiting...\n");
-            msleep(10);
-        }
-    }
-    if (lock > 99) { 
-        return -EBUSY; 
+    result = 0;
+    hifs_info("In send data queue for CMD\n");
+    // Obtain mutex lock
+    if (mutex_lock_interruptible(&cmd_mutex)) {
+        hifs_info("Failed to lock mutex, interrupted by signal.\n");
+        return -ERESTARTSYS; // Error indicating the system call was interrupted by a signal
     }
 
     if (!list_empty(&shared_cmd_outgoing_lst)) { 
@@ -413,16 +407,15 @@ ssize_t hi_comm_cmd_device_read(struct file *filep, char *buf, size_t count, lof
         if (send_data) {
             list_del(&send_data->hifs_cmd_list);
         } else {
-            printk(KERN_INFO "hifs_comm: [CMD] send_data is empty, dropping out to process next queue message\n");
+            hifs_info("[CMD] send_data is empty, dropping out to process next queue message\n");
             mutex_unlock(&cmd_mutex);
             return -EFAULT;
         }
 
-        printk(KERN_INFO "hifs_comm: [CMD] Transferring command [%s] with [%d] characters\n", send_data->cmd, send_data->count);
-
+        hifs_info("[CMD] Transferring command [%s] with [%d] characters\n", send_data->cmd, send_data->count);
+        cmd_size = strlen(send_data->cmd);
         if (cmd_size >= HIFS_MAX_CMD_SIZE) { cmd_size = HIFS_MAX_CMD_SIZE - 1; }
-        strncpy(send_data_user.cmd, send_data->cmd, strlen(send_data->cmd));
-        send_data_user.cmd[cmd_size] = '\0';  // Ensure null-termination
+        strlcpy(send_data_user.cmd, send_data->cmd, HIFS_MAX_CMD_SIZE);
         send_data_user.count = send_data->count;
 
         if (count < sizeof(struct hifs_cmds_user))  {
@@ -437,10 +430,11 @@ ssize_t hi_comm_cmd_device_read(struct file *filep, char *buf, size_t count, lof
         can_write = true;
         wake_up(&waitqueue);
         kfree(send_data);
+        send_data = NULL;
     } else {
         result = -EFAULT;
     }
-    mutex_unlock(&cmd_mutex);
+    mutex_unlock(&cmd_mutex);    // Unlock mutex on char device
     return result;
 }
 

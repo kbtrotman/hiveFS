@@ -10,7 +10,8 @@
 			"type_traits": "c",
 			"genetlink.h": "c",
 			"blkdev.h": "c",
-			"hi_command.h": "c"
+			"hi_command.h": "c",
+			"list.h": "c"
 		}
 	}
 }
