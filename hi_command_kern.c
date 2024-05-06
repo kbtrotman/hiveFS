@@ -126,7 +126,7 @@ int hifs_thread_fn(void *data) {
         value = atomic_read(&user_atomic_variable);
         wait_event_interruptible_timeout(thread_wq, 1, msecs_to_jiffies(5000));
         if (value == HIFS_COMM_LINK_DOWN) {
-            hifs_info("user link is down. Waiting for hi_command to come up...\n");
+            //hifs_info("user link is down. Waiting for hi_command to come up...\n");
         } else if (hifs_user_link.state == HIFS_COMM_LINK_DOWN) {
             hifs_info("Kernel link was recently up'd. Proceeding...\n");
             hifs_comm_set_program_up(HIFS_COMM_PROGRAM_USER_HICOMM);

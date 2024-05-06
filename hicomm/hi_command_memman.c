@@ -112,6 +112,7 @@ void hi_comm_close_queues(void)
 
 int read_from_inode_dev(char *dev_file)
 {
+    // A read initiated from user space...
     int result = 0;
     struct hifs_inode_user send_data_user;
 
@@ -146,6 +147,7 @@ int read_from_inode_dev(char *dev_file)
 
 int read_from_block_dev(char *dev_file)
 {
+    // A read initiated from user space...
     int result = 0;
 
     struct hifs_blocks_user {
@@ -174,16 +176,16 @@ int read_from_block_dev(char *dev_file)
 
 int read_from_cmd_dev(char *dev_file)
 {
+    // A read initiated from user space...
     int result = 0;
     struct hifs_cmds_user {
         char cmd[HIFS_MAX_CMD_SIZE];
         int count;
     };
-     struct hifs_cmds_user send_data_user;
+    struct hifs_cmds_user send_data_user;
     result = read(fd_cmd, &send_data_user, sizeof(struct hifs_cmds_user));
     if (result >= 0) {
-        send_data_user.cmd[sizeof(struct hifs_cmds_user) - 1] = '\0';
-        strncpy(shared_cmd_incoming->cmd, send_data_user.cmd, sizeof(HIFS_MAX_CMD_SIZE));
+        strlcpy(shared_cmd_incoming->cmd, send_data_user.cmd, sizeof(HIFS_MAX_CMD_SIZE));
         shared_cmd_incoming->count = send_data_user.count;
         printf("hi_command: Read %d bytes from device file: %s\n", result, dev_file);
         printf("hi_command: Received command [%s] with [%d] count\n", shared_cmd_incoming->cmd, shared_cmd_incoming->count);
@@ -243,6 +245,7 @@ int write_to_inode_dev(void)
 
 int write_to_block_dev(void)
 {
+    // Write out to user space.
     struct hifs_block_user {
         char block[HIFS_DEFAULT_BLOCK_SIZE];  // MAX_CMD_SIZE is the maximum size of a command
         int block_size;
@@ -296,7 +299,7 @@ int write_to_cmd_dev(void)
             return -EFAULT;
         }
         printf("hi_command: [CMD] Transferring command [%s] with [%d] characters\n", send_data->cmd, send_data->count);
-        strncpy(send_data_user.cmd, send_data->cmd, HIFS_MAX_CMD_SIZE);
+        strlcpy(send_data_user.cmd, send_data->cmd, HIFS_MAX_CMD_SIZE);
         send_data_user.count = send_data->count;
         ret = write(fd_cmd, &send_data_user, sizeof(send_data_user));
         if (ret == -1) {
