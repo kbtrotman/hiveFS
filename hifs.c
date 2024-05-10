@@ -22,10 +22,7 @@
 // *******************      HiveFS Entry     *******************
 // This is the entry point for the entire FS in this file.
 // *******************      HiveFS Entry     *******************
-MODULE_LICENSE("GPL");
-MODULE_AUTHOR("Kevin Trotman");
-MODULE_DESCRIPTION("HiveFS - A Hive Mind Filesystem");
-MODULE_VERSION("0:0.01-001");
+
 
 extern struct task_struct *task;
 extern atomic_t kern_atomic_variable;
@@ -121,7 +118,7 @@ static int hifs_mkfs(struct file_system_type *fs_type, int flags, const char *de
     return 0;
 }
 
-int __init hifs_init(void)
+static int __init hifs_init(void)
 {
     int ret;
 
@@ -162,7 +159,7 @@ failure:
     return ret;
 }
 
-void __exit hifs_exit(void)
+static void __exit hifs_exit(void)
 {
     int ret;
 
@@ -182,3 +179,8 @@ failure:
 
 module_init(hifs_init);
 module_exit(hifs_exit);
+
+MODULE_LICENSE("GPL");
+MODULE_AUTHOR("Kevin Trotman");
+MODULE_DESCRIPTION("HiveFS - A Hive Mind Filesystem");
+MODULE_VERSION("0:0.01-001");

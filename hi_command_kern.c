@@ -13,7 +13,6 @@
 // Globals
 struct hifs_link hifs_kern_link = {HIFS_COMM_LINK_DOWN, 0, 0, 0};
 int u_major, k_major, i_major, b_major, c_major;
-bool new_device_data = false;
 struct class *inode_dev_class, *block_dev_class, *cmd_dev_class;
 atomic_t kern_atomic_variable = ATOMIC_INIT(0);
 atomic_t user_atomic_variable = ATOMIC_INIT(0);
@@ -78,7 +77,7 @@ int hifs_create_test_inode(void) {
 
     *shared_cmd_outgoing = (struct hifs_cmds){
         .cmd = HIFS_Q_PROTO_CMD_TEST,
-        .count = 1,
+        .count = sizeof(HIFS_Q_PROTO_CMD_TEST),
     };
 
     INIT_LIST_HEAD(&shared_inode_incoming->hifs_inode_list);
@@ -120,7 +119,7 @@ int hifs_thread_fn(void *data) {
     }
     // Before going into the data management, we up our module status here.
     value = hifs_comm_set_program_up(HIFS_COMM_PROGRAM_KERN_MOD);
-    value = hifs_comm_set_program_up(HIFS_COMM_PROGRAM_KERN_MOD);
+    value = hifs_comm_set_program_up(HIFS_COMM_PROGRAM_USER_HICOMM);
 
     while (!kthread_should_stop()) {
         value = atomic_read(&user_atomic_variable);
@@ -131,7 +130,7 @@ int hifs_thread_fn(void *data) {
             hifs_info("Kernel link was recently up'd. Proceeding...\n");
             hifs_comm_set_program_up(HIFS_COMM_PROGRAM_USER_HICOMM);
         }
-        hifs_notice("kernel link is [%d], user link is [%d], cycling...\n", hifs_kern_link.state, hifs_user_link.state);
+        //hifs_notice("kernel link is [%d], user link is [%d], cycling...\n", hifs_kern_link.state, hifs_user_link.state);
     }
 
     return 0;
@@ -165,13 +164,13 @@ int hifs_comm_set_program_up( int program ) {
             hifs_user_link.state = HIFS_COMM_LINK_UP;
             hifs_user_link.last_check = 0;
             value = 1;
+            hifs_notice("user link up'd at %ld seconds after hifs start, waiting on hi_command.\n", (GET_TIME() - hifs_user_link.clockstart));
         } else {
             hifs_user_link.last_state = hifs_user_link.state;
             hifs_user_link.state = HIFS_COMM_LINK_DOWN;
             hifs_user_link.last_check = 0;
             value = 1;           
         }
-        hifs_notice("user link up'd at %ld seconds after hifs start, waiting on hi_command.\n", (GET_TIME() - hifs_user_link.clockstart));
     } else {
         value = 0;
     }

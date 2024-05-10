@@ -71,6 +71,7 @@
 #define HIFS_Q_PROTO_CMD_TEST "test_cmd"
 
 enum hifs_module{HIFS_COMM_PROGRAM_KERN_MOD, HIFS_COMM_PROGRAM_USER_HICOMM};
+enum hifs_queue_direction{HIFS_COMM_TO_USER, HIFS_COMM_FROM_USER};
 struct hifs_blocks {
 	char *block;
 	int block_size;
@@ -79,13 +80,17 @@ struct hifs_blocks {
 };
 
 struct hifs_cmds {
-	char *cmd;
 	int count;
+	char *cmd;
 	struct list_head hifs_cmd_list;
 };
 
+struct hifs_cmds_user {
+    int count;
+	char *cmd;
+};
+
 extern int k_major, u_major, i_major, b_major, c_major;  
-extern bool new_device_data;
 
 enum hifs_link_state{HIFS_COMM_LINK_DOWN, HIFS_COMM_LINK_UP};
 struct hifs_link {
@@ -243,81 +248,34 @@ struct hifs_dir_entry
  * Hive FS Log Functions
  ***********************/
 
-#ifdef HIVEFS_DEBUG
+#define hifs_emerg(f, a...)						\
+		printk(KERN_EMERG "<hive-fs>: EMERGENCY (file: %s, line: %d): funct: %s:", __FILE__, __LINE__, __func__); 	\
+		printk(KERN_EMERG f, ## a);
 
-#define hifs_emerg(f, a...)	
-	do 
-	{								\
-		printk(KERN_EMERG "hive-fs: EMERGENCY (%s, %d): %s:",	\
-			__FILE__, __LINE__, __func__);			\
-		printk(KERN_EMERG f, ## a);				\
-	} while (0)
+#define hifs_alert(f, a...)	                    \
+		printk(KERN_ALERT "<hive-fs>: ALERT (file: %s, line: %d): funct: %s:", __FILE__, __LINE__, __func__);		\
+		printk(KERN_ALERT f, ## a);
 
-#define hifs_alert(f, a...)	
-	do 
-	{								\
-		printk(KERN_ALERT "hive-fs: ALERT (%s, %d): %s:",	\
-			__FILE__, __LINE__, __func__);			\
-		printk(KERN_ALERT f, ## a);				\
-	} while (0)
+#define hifs_crit(f, a...)	                    \
+		printk(KERN_CRIT "<hive-fs>: CRITICAL (file: %s, line: %d): funct: %s:",	__FILE__, __LINE__, __func__);		\
+		printk(KERN_CRIT f, ## a);
 
-#define hifs_crit(f, a...)	
-	do 
-	{								\
-		printk(KERN_CRIT "hive-fs: CRITICAL (%s, %d): %s:",	\
-			__FILE__, __LINE__, __func__);			\
-		printk(KERN_CRIT f, ## a);				\
-	} while (0)
+#define hifs_err(f, a...)	                    \
+		printk(KERN_ERR "<hive-fs>: ERROR (file: %s, line: %d): funct: %s:",	__FILE__, __LINE__, __func__);			\
+		printk(KERN_ERR f, ## a);
 
-#define hifs_err(f, a...)						\
-	do 
-	{								\
-		printk(KERN_ERR "hive-fs: ERROR (%s, %d): %s:",	\
-			__FILE__, __LINE__, __func__);			\
-		printk(KERN_ERR f, ## a);				\
-	} while (0)
+#define hifs_warning(f, a...)	                \
+		printk(KERN_WARNING "<hive-fs>: WARNING (file: %s, line: %d): funct: %s:", __FILE__, __LINE__, __func__);	\
+		printk(KERN_WARNING f, ## a);
 
-#define hifs_warning(f, a...)						\
-	do 
-	{								\
-		printk(KERN_WARNING "hive-fs: WARNING (%s, %d): %s:",	\
-			__FILE__, __LINE__, __func__);			\
-		printk(KERN_WARNING f, ## a);				\
-	} while (0)
+#define hifs_notice(f, a...)	                \
+		printk(KERN_NOTICE "<hive-fs>: NOTICE (file: %s, line: %d): funct: %s:",	__FILE__, __LINE__, __func__);		\
+		printk(KERN_NOTICE f, ## a);
 
-#define hifs_notice(f, a...)						\
-	do 
-	{								\
-		printk(KERN_NOTICE "hive-fs: NOTICE (%s, %d): %s:",	\
-			__FILE__, __LINE__, __func__);			\
-		printk(KERN_NOTICE f, ## a);				\
-	} while (0)
+#define hifs_info(f, a...)	                    \
+		printk(KERN_INFO "<hive-fs>: INFO (file: %s, line: %d): funct: %s:",	__FILE__, __LINE__, __func__);			\
+		printk(KERN_INFO f, ## a);
 
-#define hifs_info(f, a...)						\
-	do 
-	{								\
-		printk(KERN_INFO "hive-fs: INFO (%s, %d): %s:",	\
-			__FILE__, __LINE__, __func__);			\
-		printk(KERN_INFO f, ## a);				\
-	} while (0)
-
-#define hifs_debug(f, a...)						\
-	do 
-	{								\
-		printk(KERN_DEBUG "hive-fs: DEBUG (%s, %d): %s:",	\
-			__FILE__, __LINE__, __func__);			\
-		printk(KERN_DEBUG f, ## a);				\
-	} while (0)
-
-
-#else
-#define hifs_emerg(fmt, ...)	no_printk(fmt, ##__VA_ARGS__)
-#define hifs_alert(fmt, ...)	no_printk(fmt, ##__VA_ARGS__)
-#define hifs_crit(fmt, ...)	no_printk(fmt, ##__VA_ARGS__)
-#define hifs_err(fmt, ...)	no_printk(fmt, ##__VA_ARGS__)
-#define hifs_warning(fmt, ...)	no_printk(fmt, ##__VA_ARGS__)
-#define hifs_notice(fmt, ...)	no_printk(fmt, ##__VA_ARGS__)
-#define hifs_info(fmt, ...)	no_printk(fmt, ##__VA_ARGS__)
-#define hifs_debug(fmt, ...)	no_printk(fmt, ##__VA_ARGS__)
-
-#endif /* _HIVEFS_DEBUG */
+#define hifs_debug(f, a...)		                \
+		printk(KERN_DEBUG "<hive-fs>: DEBUG (file: %s, line: %d): funct: %s:", __FILE__, __LINE__, __func__);		\
+		printk(KERN_DEBUG f, ## a);
