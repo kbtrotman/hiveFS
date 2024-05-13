@@ -178,15 +178,19 @@ int read_from_cmd_dev(char *dev_file)
 {
     // A read initiated from user space...
     int result = 0;
-    struct hifs_cmds_user {
-        char cmd[HIFS_MAX_CMD_SIZE];
-        int count;
-    };
-    struct hifs_cmds_user send_data_user;
-    result = read(fd_cmd, &send_data_user, sizeof(struct hifs_cmds_user));
+    char *token;
+    char send_data_user[30];
+    result = read(fd_cmd, &send_data_user, 30);
     if (result >= 0) {
-        strlcpy(shared_cmd_incoming->cmd, send_data_user.cmd, sizeof(HIFS_MAX_CMD_SIZE));
-        shared_cmd_incoming->count = send_data_user.count;
+        token = strtok(send_data_user, "!&");
+        // If the delimiter is found, token now points to the first component
+        if (token != NULL) {
+            shared_cmd_incoming->count = atoi(token);
+        }
+        token = strtok(NULL, "!&");
+        if (token != NULL) {
+            shared_cmd_incoming->cmd = token;
+        }
         printf("hi_command: Read %d bytes from device file: %s\n", result, dev_file);
         printf("hi_command: Received command [%s] with [%d] count\n", shared_cmd_incoming->cmd, shared_cmd_incoming->count);
     } else {
@@ -283,25 +287,22 @@ int write_to_cmd_dev(void)
 {
     // Write out to user space.
     int result = 0;
-    struct hifs_cmds_user {
-        char cmd[HIFS_MAX_CMD_SIZE];
-        int count;
-    };
     struct hifs_cmds *send_data = NULL;
-    struct hifs_cmds_user send_data_user;
+    char *send_data_user;
     printf("hi_command: [CMD] popping an item from the queue to send\n");
     if (!list_empty(&shared_cmd_outgoing_lst)) { 
         send_data = list_entry(&shared_cmd_outgoing_lst, struct hifs_cmds, hifs_cmd_list);
         if (send_data) {
+            snprintf(send_data_user, HIFS_MAX_CMD_SIZE + sizeof(int) + 1, "%d!&%s!&", send_data->count, send_data->cmd);
             list_del(&send_data->hifs_cmd_list);
+            free(send_data);
+            send_data = NULL;
         } else {
             printf("hi_command: [CMD] send_data is empty, dropping out to process next queue message\n");
             return -EFAULT;
         }
-        printf("hi_command: [CMD] Transferring command [%s] with [%d] characters\n", send_data->cmd, send_data->count);
-        strlcpy(send_data_user.cmd, send_data->cmd, HIFS_MAX_CMD_SIZE);
-        send_data_user.count = send_data->count;
-        ret = write(fd_cmd, &send_data_user, sizeof(send_data_user));
+        printf("hi_command: [CMD] Transferring command [%s] with [%ld] characters\n", send_data_user, strlen(send_data_user));
+        ret = write(fd_cmd, &send_data_user, strlen(send_data_user) + 1 );
         if (ret == -1) {
             perror("hi_command: Error writing to device file");
             return -1;
@@ -312,6 +313,5 @@ int write_to_cmd_dev(void)
     } else {
         result = -EFAULT;
     }
-    free(send_data);
     return result;
 }

@@ -36,6 +36,7 @@
 #include <linux/fs_struct.h>
 #include <linux/list.h>
 #include <linux/mutex.h>
+#include <linux/device.h>
 
 #include "hifs_shared_defs.h"
 
@@ -78,8 +79,8 @@ ssize_t hi_comm_cmd_device_read(struct file *filep, char __user *buf, size_t cou
 ssize_t hi_comm_inode_device_write(struct file *filep, const char  __user *buffer, size_t count, loff_t *offset);
 ssize_t hi_comm_block_device_write(struct file *filep, const char __user *buffer, size_t count, loff_t *offset);
 ssize_t hi_comm_cmd_device_write(struct file *filep, const char __user *buffer, size_t count, loff_t *offset);
-struct hifs_cmds_user *hi_comm_get_queue_item_from_list(void);
-ssize_t hifs_copy_queue_data(char __user *buffer, struct hifs_cmds_user *send_data_user, size_t count);
+char *hi_comm_get_queue_item_from_list(void);
+char *hifs_parse_cmd_struct( struct hifs_cmds *send_data);
 __poll_t hifs_inode_device_poll (struct file *filp, poll_table *wait);
 __poll_t hifs_block_device_poll (struct file *filp, poll_table *wait);
 __poll_t hifs_cmd_device_poll (struct file *filp, poll_table *wait);

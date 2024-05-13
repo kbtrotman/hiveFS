@@ -227,27 +227,40 @@ int register_all_comm_queues(void)
         return c_major;
     }
 
- #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 4, 0) 
-    inode_dev_class = class_create(DEVICE_FILE_INODE);
-    device_create(inode_dev_class, NULL, MKDEV(i_major, 0), NULL, DEVICE_FILE_INODE);
-    block_dev_class = class_create(DEVICE_FILE_BLOCK);
-    device_create(block_dev_class, NULL, MKDEV(b_major, 1), NULL, DEVICE_FILE_BLOCK);
-    cmd_dev_class = class_create(DEVICE_FILE_CMDS);
-    device_create(cmd_dev_class, NULL, MKDEV(c_major, 2), NULL, DEVICE_FILE_CMDS);
-#else 
+    cmd_dev_class = class_create(THIS_MODULE, DEVICE_FILE_CMDS);
+    device_create(cmd_dev_class, NULL, MKDEV(c_major, 0), NULL, DEVICE_FILE_CMDS);  
+    if (IS_ERR(cmd_dev_class)) {
+        hifs_err("Failed to create inode device class\n");
+        goto err_class_cmds;
+    }
+
+    block_dev_class = class_create(THIS_MODULE, DEVICE_FILE_BLOCK);
+    device_create(block_dev_class, NULL, MKDEV(b_major, 0), NULL, DEVICE_FILE_BLOCK); 
+    if (IS_ERR(block_dev_class)) {
+        hifs_err("Failed to create inode device class\n");
+        goto err_class_block;
+    }
+
     inode_dev_class = class_create(THIS_MODULE, DEVICE_FILE_INODE);
     device_create(inode_dev_class, NULL, MKDEV(i_major, 0), NULL, DEVICE_FILE_INODE);
-    block_dev_class = class_create(THIS_MODULE, DEVICE_FILE_BLOCK);
-    device_create(block_dev_class, NULL, MKDEV(b_major, 1), NULL, DEVICE_FILE_BLOCK); 
-    cmd_dev_class = class_create(THIS_MODULE, DEVICE_FILE_CMDS);
-    device_create(cmd_dev_class, NULL, MKDEV(c_major, 2), NULL, DEVICE_FILE_CMDS);  
-#endif
+    if (IS_ERR(inode_dev_class)) {
+        hifs_err("Failed to create inode device class\n");
+        goto err_class_inode;
+    }
 
-    pr_info("hivefs: Queue device created on %s\n", DEVICE_FILE_CMDS);
-    pr_info("hivefs: Queue device created on %s\n", DEVICE_FILE_INODE);
-    pr_info("hivefs: Queue device created on %s\n", DEVICE_FILE_BLOCK);
+    hifs_info("Queue device created on %s\n", DEVICE_FILE_CMDS);
+    hifs_info("Queue device created on %s\n", DEVICE_FILE_INODE);
+    hifs_info("Queue device created on %s\n", DEVICE_FILE_BLOCK);
 
     return 0;
+
+err_class_inode:
+    unregister_chrdev(c_major, DEVICE_FILE_CMDS); // Cleanup on error
+err_class_block:
+    unregister_chrdev(b_major, DEVICE_FILE_BLOCK "_block"); // Cleanup on error
+err_class_cmds:
+    unregister_chrdev(i_major, DEVICE_FILE_INODE); // Cleanup on error
+    return -EFAULT;
 }
 
 void unregister_all_comm_queues(void)
@@ -379,84 +392,73 @@ ssize_t hi_comm_block_device_read(struct file *filep, char __user *buf, size_t c
 
 ssize_t hi_comm_cmd_device_read(struct file *filep, char __user *buf, size_t count, loff_t *offset) {
     // A read from user space transfers to a read here....
-    ssize_t result;
-    struct hifs_cmds_user *send_data_user;
+    ssize_t result, send_len;
+    char *send_data_user;
     result = 0;
     hifs_info("In send data queue for CMD\n");
     // Obtain mutex lock
-    if (mutex_lock_interruptible(&cmd_mutex)) {
-        hifs_info("Failed to lock mutex, interrupted by signal.\n");
-        return -ERESTARTSYS; // the system call was interrupted by a signal
-    }
 
     if (count < sizeof(struct hifs_cmds_user))  {
-        mutex_unlock(&cmd_mutex);
         return -EINVAL;
     }
 
     send_data_user = hi_comm_get_queue_item_from_list();
     if (send_data_user == NULL) {
         // Queue is empty, so return and wait for data
-        mutex_unlock(&cmd_mutex);
         return -EFAULT;
     }
 
-    hifs_info("In main queue read for CMD, command=%s, count=%d\n", send_data_user->cmd, send_data_user->count);
-    if (hifs_copy_queue_data(buf, send_data_user, count) > -1 ) {
-        result = count;
-    } else {
-        result = -EFAULT;
-    }
+//    if (mutex_lock_interruptible(&cmd_mutex)) {
+//        hifs_info("Failed to lock mutex, interrupted by signal.\n");
+//        return -ERESTARTSYS; // the system call was interrupted by a signal
+//    }
 
+    send_len = strlen(send_data_user) + 1;
+    hifs_info("[CMD] Copying command data [%s] with [%ld] characters\n", send_data_user, send_len);
+    if (copy_to_user(buf, send_data_user, send_len) != 0) {
+        result = -EFAULT;
+    } else {
+        result = strlen(send_data_user);
+    }
     can_write = true;
     wake_up(&waitqueue);
-    kfree(send_data_user->cmd);
-    kfree(send_data_user);
+    if (send_data_user) { kfree(send_data_user); }
     send_data_user = NULL;
-    mutex_unlock(&cmd_mutex);    // Unlock mutex on char device
+//    mutex_unlock(&cmd_mutex);    // Unlock mutex on char device
     return result;
 }
 
-ssize_t hifs_copy_queue_data(char __user *buffer, struct hifs_cmds_user *send_data_user, size_t count) {
-    ssize_t result;
-    
-    hifs_info("In copy queue routine for CMD, command=%s, count=%ld\n", send_data_user->cmd, count);
-    if (copy_to_user(buffer, send_data_user, sizeof(struct hifs_cmds_user)) != 0) {
-        result = -EFAULT;
-    } else {
-        result = sizeof(send_data_user);
-    }
-    return result;
+char *hifs_parse_cmd_struct( struct hifs_cmds *send_data)
+{
+    char *user_data = kmalloc(HIFS_MAX_CMD_SIZE + sizeof(int) + 1, GFP_KERNEL);
+
+    if (!user_data) { return NULL; }
+    snprintf(user_data, HIFS_MAX_CMD_SIZE + sizeof(int) + 1, "%d!&%s!&", send_data->count, send_data->cmd);
+    return user_data;
 }
 
-struct hifs_cmds_user *hi_comm_get_queue_item_from_list(void) {
+char *hi_comm_get_queue_item_from_list(void) {
     // Pop the first node off one of the queues for sending and return the node
-    ssize_t cmd_size;
-    struct hifs_cmds *send_data = NULL;
-
     hifs_info("In send data queue for CMD\n");
 
-    if (!list_empty(&shared_cmd_outgoing_lst)) { 
+    if (!list_empty(&shared_cmd_outgoing_lst)) {
+        struct hifs_cmds *send_data = NULL; 
         send_data = list_first_entry(&shared_cmd_outgoing_lst, struct hifs_cmds, hifs_cmd_list);
         if (send_data) {
-            struct hifs_cmds_user *send_data_user = kmalloc(sizeof(struct hifs_cmds_user), GFP_KERNEL);
+            char *send_data_user;
+            if (send_data->count >= HIFS_MAX_CMD_SIZE) { send_data->count = HIFS_MAX_CMD_SIZE - 1; }
+            hifs_info("[CMD] Transferring command [%s] with [%d] characters\n", send_data->cmd, send_data->count);
+            send_data_user = hifs_parse_cmd_struct(send_data);
             if (!send_data_user) {
                 hifs_err("Failed to allocate memory for send_data_user\n");
-                mutex_unlock(&cmd_mutex);
-                return NULL;
+                return NULL; 
             }
-            cmd_size = send_data->count;
-            if (cmd_size >= HIFS_MAX_CMD_SIZE) { cmd_size = HIFS_MAX_CMD_SIZE - 1; }
-            send_data_user->cmd = kmalloc(cmd_size + 1, GFP_KERNEL);
-            hifs_info("[CMD] Transferring command [%s] with [%d] characters\n", send_data->cmd, send_data->count);
-            strlcpy(send_data_user->cmd, send_data->cmd, cmd_size);
-            send_data_user->count = send_data->count;
-            hifs_info("[CMD] Sending command [%s] with [%d] characters\n", send_data_user->cmd, send_data_user->count);
+
+            hifs_info("[CMD] Sending command [%s] with [%ld] characters\n", send_data_user, strlen(send_data_user));
 
             list_del(&send_data->hifs_cmd_list);
             kfree(send_data);
             send_data = NULL;
-            mutex_unlock(&cmd_mutex);
             return send_data_user;
         } else {
             hifs_info("[CMD] send_data is empty, dropping out to process next queue message\n");
@@ -468,10 +470,6 @@ struct hifs_cmds_user *hi_comm_get_queue_item_from_list(void) {
         return NULL;
     }
 }
-
-
-
-
 
 ssize_t hi_comm_inode_device_write(struct file *filep, const char  __user *buffer, size_t count, loff_t *offset) {
     // Write in user space to here in kernel
