@@ -61,7 +61,7 @@ void write_to_queue(void)
 void read_from_queue(void)
 {
     int ret;
-
+    printf("hi-command: Reading from queue...\n");
     ret = read_from_cmd_dev(device_file_cmd);
     if (ret < 0) {
         printf("hi-command: Error reading from device file: %s\n", device_file_cmd);
