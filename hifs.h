@@ -79,8 +79,10 @@ ssize_t hi_comm_cmd_device_read(struct file *filep, char __user *buf, size_t cou
 ssize_t hi_comm_inode_device_write(struct file *filep, const char  __user *buffer, size_t count, loff_t *offset);
 ssize_t hi_comm_block_device_write(struct file *filep, const char __user *buffer, size_t count, loff_t *offset);
 ssize_t hi_comm_cmd_device_write(struct file *filep, const char __user *buffer, size_t count, loff_t *offset);
-char *hi_comm_get_queue_item_from_list(void);
+char *hi_comm_get_queue_item_from_list(void *node, enum hifs_queue_active queue);
 char *hifs_parse_cmd_struct( struct hifs_cmds *send_data);
+char *hifs_parse_inode_struct( struct hifs_inode *send_data);
+char *hifs_parse_block_struct( struct hifs_blocks *send_data);
 __poll_t hifs_inode_device_poll (struct file *filp, poll_table *wait);
 __poll_t hifs_block_device_poll (struct file *filp, poll_table *wait);
 __poll_t hifs_cmd_device_poll (struct file *filp, poll_table *wait);
