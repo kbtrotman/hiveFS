@@ -70,7 +70,6 @@
 #define HIFS_Q_PROTO_CMD_ENGINE_VERS "engine_version"
 #define HIFS_Q_PROTO_CMD_TEST "test_cmd"
 
-enum hifs_queue_active{CMD, INODE, BLOCK};
 enum hifs_module{HIFS_COMM_PROGRAM_KERN_MOD, HIFS_COMM_PROGRAM_USER_HICOMM};
 enum hifs_queue_direction{HIFS_COMM_TO_USER, HIFS_COMM_FROM_USER};
 
