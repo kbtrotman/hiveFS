@@ -66,6 +66,7 @@ int hifs_create_test_inode(void) {
     }
 
     *shared_inode_outgoing = (struct hifs_inode) {
+        .i_name = "test_inode",
         .i_mode = S_IFREG | 0644,
         .i_uid = 000001,
         .i_gid = 010101,
@@ -73,6 +74,12 @@ int hifs_create_test_inode(void) {
         .i_bytes = 512,
         .i_size = 512,
         .i_ino = 1,
+    };
+    *shared_block_outgoing = (struct hifs_blocks) {
+        .block_size = 84,
+        .count = 1,
+        .block = "test_block_data:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:test_block_data",
+
     };
 
     *shared_cmd_outgoing = (struct hifs_cmds){
@@ -96,6 +103,7 @@ int hifs_create_test_inode(void) {
 
     list_add_tail(&shared_cmd_outgoing->hifs_cmd_list, &shared_cmd_outgoing_lst);
     list_add_tail(&shared_inode_outgoing->hifs_inode_list, &shared_inode_outgoing_lst);
+    list_add_tail(&shared_block_outgoing->hifs_block_list, &shared_block_outgoing_lst);
 
     // The list memory was added to the lists, so here we NULL their references.
     shared_inode_outgoing = NULL;

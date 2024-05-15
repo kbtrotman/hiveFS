@@ -53,7 +53,7 @@ static const struct file_operations inode_fops = {
     .read = hi_comm_inode_device_read,
     .write = hi_comm_inode_device_write,
     .release = hifs_comm_device_release,
-    .poll = hifs_inode_device_poll,
+//    .poll = hifs_inode_device_poll,
 };
 
 static const struct file_operations block_fops = {
@@ -61,7 +61,7 @@ static const struct file_operations block_fops = {
     .read = hi_comm_block_device_read,
     .write = hi_comm_block_device_write,
     .release = hifs_comm_device_release,
-    .poll = hifs_block_device_poll,
+//    .poll = hifs_block_device_poll,
 };
 
 static const struct file_operations cmd_fops = {
@@ -69,7 +69,7 @@ static const struct file_operations cmd_fops = {
     .read = hi_comm_cmd_device_read,
     .write = hi_comm_cmd_device_write,
     .release = hifs_comm_device_release,
-    .poll = hifs_cmd_device_poll,
+//    .poll = hifs_cmd_device_poll,
 };
 
 // This 2 faops variable are atomic variable that tell both kernel/user space when the module & hi_command are active to sync comms.
@@ -288,143 +288,141 @@ int hifs_comm_device_release(struct inode *inode, struct file *filp) {
 }
 
 ssize_t hi_comm_inode_device_read(struct file *filep, char __user *buf, size_t count, loff_t *offset) {
-    // A read from user space transfers to a read here....
-    ssize_t result = 0;
-    struct hifs_inode *send_data = NULL;
-    struct hifs_inode_user send_data_user;
-
-    hifs_info("In send data queue for CMD\n");
-    // Obtain mutex lock
-    if (mutex_lock_interruptible(&cmd_mutex)) {
-        hifs_info("Failed to lock mutex, interrupted by signal.\n");
-        return -ERESTARTSYS; // Error indicating the system call was interrupted by a signal
-    }
-
-    if (!list_empty(&shared_inode_outgoing_lst)) { 
-        send_data = list_first_entry(&shared_inode_outgoing_lst, struct hifs_inode, hifs_inode_list);
-        if (send_data) {
-            list_del(&send_data->hifs_inode_list);
-        } else {
-            hifs_info("[INODE] send_data is empty, dropping out to process next queue message\n");
-            mutex_unlock(&inode_mutex);
-            return -EFAULT;
-        }
-
-        hifs_info("[INODE] Transferring inode [%s]\n", send_data->i_name);
-
-        strncpy(send_data_user.i_name, send_data->i_name, HIFS_MAX_NAME_SIZE);
-        memcpy(send_data_user.i_addre, send_data->i_addre, sizeof(send_data_user.i_addre));
-        memcpy(send_data_user.i_addrb, send_data->i_addrb, sizeof(send_data_user.i_addrb));
-        send_data_user.i_size = send_data->i_size;
-        send_data_user.i_mode = send_data->i_mode;
-        send_data_user.i_uid = send_data->i_uid;
-        send_data_user.i_gid = send_data->i_gid;
-        send_data_user.i_blocks = send_data->i_blocks;
-        send_data_user.i_bytes = send_data->i_bytes;
-        send_data_user.i_size = send_data->i_size;
-        send_data_user.i_ino = send_data->i_ino;
-        if (copy_to_user(buf, &send_data_user, sizeof(send_data_user)) != 0) {
-            result = -EFAULT;
-        } else {
-            result = sizeof(send_data_user);
-        }
-        can_write = true;
-        wake_up(&waitqueue);
-        kfree(send_data);
-        send_data = NULL;
-    } else {
-        result = -EFAULT;
-    }
-    mutex_unlock(&inode_mutex);
-    return result;
-}
-
-ssize_t hi_comm_block_device_read(struct file *filep, char __user *buf, size_t count, loff_t *offset) {
-    // A read from user space transfers to a read here....
-    ssize_t result = 0;
-    struct hifs_blocks_user {
-        char block[HIFS_DEFAULT_BLOCK_SIZE];
-        int block_size;
-        int count;
-    };
-    struct hifs_blocks *send_data = NULL;
-    struct hifs_blocks_user *send_data_user = kmalloc(sizeof(struct hifs_blocks_user), GFP_KERNEL);
-
-    hifs_info("In send data queue for CMD\n");
-    // Obtain mutex lock
-    if (mutex_lock_interruptible(&cmd_mutex)) {
-        hifs_info("Failed to lock mutex, interrupted by signal.\n");
-        return -ERESTARTSYS; // Error indicating the system call was interrupted by a signal
-    }
-
-
-    if (!list_empty(&shared_block_outgoing_lst)) { 
-        send_data = list_first_entry(&shared_block_outgoing_lst, struct hifs_blocks, hifs_block_list);
-        if (send_data) {
-            list_del(&send_data->hifs_block_list);
-        } else {
-            hifs_info("[BLOCK] send_data is empty, dropping out to process next queue message\n");
-            if (send_data_user) { kfree(send_data_user); };
-            mutex_unlock(&block_mutex);
-            return -EFAULT;
-        }
-
-        hifs_info("[BLOCK] Transferring block [%s] with [%d] characters\n", send_data->block, send_data->block_size);
-
-        strncpy(send_data_user->block, send_data->block, HIFS_DEFAULT_BLOCK_SIZE);
-        send_data_user->block_size = send_data->block_size;
-        if (copy_to_user(buf, send_data_user, sizeof(*send_data_user)) != 0) {
-            result = -EFAULT;
-        } else {
-            result = sizeof(*send_data_user);
-        }
-        can_write = true;
-        wake_up(&waitqueue);
-        kfree(send_data);
-        send_data = NULL;
-    } else {
-        result = -EFAULT;
-    }
-    if (send_data_user) { kfree(send_data_user); };
-    mutex_unlock(&cmd_mutex);
-    return result;
-}
-
-ssize_t hi_comm_cmd_device_read(struct file *filep, char __user *buf, size_t count, loff_t *offset) {
-    // A read from user space transfers to a read here....
+   // A read from user space transfers to a read here....write from kernel perspective.
     ssize_t result, send_len;
     char *send_data_user;
+    struct hifs_inode *send_data = NULL; 
     result = 0;
-    hifs_info("In send data queue for CMD\n");
-    // Obtain mutex lock
+    hifs_info("In send data queue for INODE\n");
 
-    if (count < sizeof(struct hifs_cmds_user))  {
-        return -EINVAL;
+    if (count < sizeof(struct hifs_inode_user))  { return 0; }
+
+    if (!list_empty(&shared_inode_outgoing_lst)) {
+        send_data = list_first_entry(&shared_inode_outgoing_lst, struct hifs_inode, hifs_inode_list);
+        if (send_data) {
+            send_data_user = hifs_parse_inode_struct(send_data);
+            list_del(&send_data->hifs_inode_list);
+            kfree(send_data);
+        }
+        send_data = NULL;
+    } else {
+        hifs_info("[INODE] queue is empty, dropping out to process next queue\n");
+        return 0;
     }
-
-    send_data_user = hi_comm_get_queue_item_from_list();
-    if (send_data_user == NULL) {
-        // Queue is empty, so return and wait for data
-        return -EFAULT;
-    }
-
-//    if (mutex_lock_interruptible(&cmd_mutex)) {
-//        hifs_info("Failed to lock mutex, interrupted by signal.\n");
-//        return -ERESTARTSYS; // the system call was interrupted by a signal
-//    }
-
+    if (send_data_user == NULL) { return 0; }  // Queue is empty, so let's drop out.
     send_len = strlen(send_data_user) + 1;
-    hifs_info("[CMD] Copying command data [%s] with [%ld] characters\n", send_data_user, send_len);
+
+    // Obtain mutex lock
+    if (mutex_lock_interruptible(&inode_mutex)) {
+        hifs_info("Failed to lock mutex, interrupted by signal.\n");
+        return 0; // the system call was interrupted by a signal
+    }
+
+    hifs_info("[INODE] Copying command data [%s] with [%ld] characters to buffer size [%ld]\n", send_data_user, send_len, count);
     if (copy_to_user(buf, send_data_user, send_len) != 0) {
         result = -EFAULT;
     } else {
         result = strlen(send_data_user);
     }
+
+    mutex_unlock(&inode_mutex);    // Unlock mutex on char device right after send.
     can_write = true;
     wake_up(&waitqueue);
     if (send_data_user) { kfree(send_data_user); }
     send_data_user = NULL;
-//    mutex_unlock(&cmd_mutex);    // Unlock mutex on char device
+    return result;
+}
+
+ssize_t hi_comm_block_device_read(struct file *filep, char __user *buf, size_t count, loff_t *offset) {
+   // A read from user space transfers to a read here....write from kernel perspective.
+    ssize_t result, send_len;
+    char *send_data_user;
+    struct hifs_blocks *send_data = NULL; 
+    result = 0;
+    hifs_info("In send data queue for BLOCK\n");
+
+    if (count < sizeof(struct hifs_blocks_user))  { return 0; }
+
+    if (!list_empty(&shared_block_outgoing_lst)) {
+        send_data = list_first_entry(&shared_block_outgoing_lst, struct hifs_blocks, hifs_block_list);
+        if (send_data) {
+            send_data_user = hifs_parse_block_struct(send_data);
+            list_del(&send_data->hifs_block_list);
+            kfree(send_data);
+        }
+        send_data = NULL;
+    } else {
+        hifs_info("[CMD] queue is empty, dropping out to process next queue\n");
+        return 0;
+    }
+    if (send_data_user == NULL) { return 0; }  // Queue is empty, so let's drop out.
+    send_len = strlen(send_data_user) + 1;
+
+    // Obtain mutex lock
+    if (mutex_lock_interruptible(&block_mutex)) {
+        hifs_info("Failed to lock mutex, interrupted by signal.\n");
+        return 0; // the system call was interrupted by a signal
+    }
+
+    hifs_info("[CMD] Copying command data [%s] with [%ld] characters to buffer size [%ld]\n", send_data_user, send_len, count);
+    if (copy_to_user(buf, send_data_user, send_len) != 0) {
+        result = -EFAULT;
+    } else {
+        result = strlen(send_data_user);
+    }
+
+    mutex_unlock(&block_mutex);    // Unlock mutex on char device right after send.
+    can_write = true;
+    wake_up(&waitqueue);
+    if (send_data_user) { kfree(send_data_user); }
+    send_data_user = NULL;
+    return result;
+}
+
+ssize_t hi_comm_cmd_device_read(struct file *filep, char __user *buf, size_t count, loff_t *offset) {
+    // A read from user space transfers to a read here....write from kernel perspective.
+    ssize_t result, send_len;
+    char *send_data_user;
+    struct hifs_cmds *send_data = NULL; 
+    result = 0;
+    hifs_info("In send data queue for CMD\n");
+
+    if (count < sizeof(struct hifs_cmds_user))  { return 0; }
+
+    if (!list_empty(&shared_cmd_outgoing_lst)) {
+        send_data = list_first_entry(&shared_cmd_outgoing_lst, struct hifs_cmds, hifs_cmd_list);
+        if (send_data) { 
+            if (send_data->count >= HIFS_MAX_CMD_SIZE) { send_data->count = HIFS_MAX_CMD_SIZE - 1; }
+            send_data_user = hifs_parse_cmd_struct(send_data);
+            list_del(&send_data->hifs_cmd_list);
+            kfree(send_data);
+        }
+        send_data = NULL;
+    } else {
+        hifs_info("[CMD] queue is empty, dropping out to process next queue\n");
+        return 0;
+    }
+    if (send_data_user == NULL) { return 0; }  // Queue is empty, so let's drop out.
+    send_len = strlen(send_data_user) + 1;
+
+    // Obtain mutex lock
+    if (mutex_lock_interruptible(&cmd_mutex)) {
+        hifs_info("Failed to lock mutex, interrupted by signal.\n");
+        return 0; // the system call was interrupted by a signal
+    }
+
+    hifs_info("[CMD] Copying command data [%s] with [%ld] characters to buffer size [%ld]\n", send_data_user, send_len, count);
+    if (copy_to_user(buf, send_data_user, send_len) != 0) {
+        result = -EFAULT;
+    } else {
+        result = strlen(send_data_user);
+    }
+
+    mutex_unlock(&cmd_mutex);    // Unlock mutex on char device right after send.
+    can_write = true;
+    wake_up(&waitqueue);
+    if (send_data_user) { kfree(send_data_user); }
+    send_data_user = NULL;
     return result;
 }
 
@@ -437,38 +435,22 @@ char *hifs_parse_cmd_struct( struct hifs_cmds *send_data)
     return user_data;
 }
 
-char *hi_comm_get_queue_item_from_list(void) {
-    // Pop the first node off one of the queues for sending and return the node
-    hifs_info("In send data queue for CMD\n");
+char *hifs_parse_inode_struct( struct hifs_inode *send_data)
+{
+    char *user_data = kmalloc(sizeof(struct hifs_inode) + 1, GFP_KERNEL);
 
-    if (!list_empty(&shared_cmd_outgoing_lst)) {
-        struct hifs_cmds *send_data = NULL; 
-        send_data = list_first_entry(&shared_cmd_outgoing_lst, struct hifs_cmds, hifs_cmd_list);
-        if (send_data) {
-            char *send_data_user;
-            if (send_data->count >= HIFS_MAX_CMD_SIZE) { send_data->count = HIFS_MAX_CMD_SIZE - 1; }
-            hifs_info("[CMD] Transferring command [%s] with [%d] characters\n", send_data->cmd, send_data->count);
-            send_data_user = hifs_parse_cmd_struct(send_data);
-            if (!send_data_user) {
-                hifs_err("Failed to allocate memory for send_data_user\n");
-                return NULL; 
-            }
+    if (!user_data) { return NULL; }
+        snprintf(user_data, sizeof(struct hifs_inode) + 1, "%lld!&%d!&%d!&%d!&%s!&", send_data->i_ino, send_data->i_size, send_data->i_bytes, send_data->i_blocks, send_data->i_name);
+    return user_data;
+}
 
-            hifs_info("[CMD] Sending command [%s] with [%ld] characters\n", send_data_user, strlen(send_data_user));
+char *hifs_parse_block_struct( struct hifs_blocks *send_data)
+{
+    char *user_data = kmalloc(HIFS_DEFAULT_BLOCK_SIZE + sizeof(int) + 1, GFP_KERNEL);
 
-            list_del(&send_data->hifs_cmd_list);
-            kfree(send_data);
-            send_data = NULL;
-            return send_data_user;
-        } else {
-            hifs_info("[CMD] send_data is empty, dropping out to process next queue message\n");
-            return NULL;
-        }
-
-    } else {
-        hifs_info("[CMD] queue is empty, dropping out to process next queue\n");
-        return NULL;
-    }
+    if (!user_data) { return NULL; }
+        snprintf(user_data, HIFS_DEFAULT_BLOCK_SIZE + sizeof(int) + 1, "%d!&%d!&%s!&", send_data->block_size, send_data->count, send_data->block);
+    return user_data;
 }
 
 ssize_t hi_comm_inode_device_write(struct file *filep, const char  __user *buffer, size_t count, loff_t *offset) {
@@ -485,7 +467,7 @@ ssize_t hi_comm_inode_device_write(struct file *filep, const char  __user *buffe
 
     result = min(sizeof(*shared_inode_incoming), count);
     list_add(&shared_inode_incoming->hifs_inode_list, &shared_inode_incoming_lst);
-
+    hifs_info("Added new Inode to the kernel incoming queue")
     can_read = true;
     //wake up the waitqueue
     wake_up(&waitqueue);
@@ -507,7 +489,7 @@ ssize_t hi_comm_block_device_write(struct file *filep, const char __user *buffer
 
     result = min(sizeof(*shared_block_incoming), count);
     list_add(&shared_block_incoming->hifs_block_list, &shared_block_incoming_lst);
-
+    hifs_info("Added new Block to the kernel incoming queue")
     can_read = true;
     //wake up the waitqueue
     wake_up(&waitqueue);
@@ -529,7 +511,7 @@ ssize_t hi_comm_cmd_device_write(struct file *filep, const char __user *buffer, 
 
     result = min(sizeof(*shared_cmd_incoming), count);
     list_add(&shared_cmd_incoming->hifs_cmd_list, &shared_cmd_incoming_lst);
-
+    hifs_info("Added new Command to the kernel incoming queue")
     can_read = true;
     //wake up the waitqueue
     wake_up(&waitqueue);

@@ -70,13 +70,21 @@
 #define HIFS_Q_PROTO_CMD_ENGINE_VERS "engine_version"
 #define HIFS_Q_PROTO_CMD_TEST "test_cmd"
 
+enum hifs_queue_active{CMD, INODE, BLOCK};
 enum hifs_module{HIFS_COMM_PROGRAM_KERN_MOD, HIFS_COMM_PROGRAM_USER_HICOMM};
 enum hifs_queue_direction{HIFS_COMM_TO_USER, HIFS_COMM_FROM_USER};
+
 struct hifs_blocks {
-	char *block;
 	int block_size;
 	int count;
+	char *block;
 	struct list_head hifs_block_list;
+};
+
+struct hifs_blocks_user {
+	int block_size;
+	int count;
+	char *block;
 };
 
 struct hifs_cmds {
@@ -250,32 +258,32 @@ struct hifs_dir_entry
 
 #define hifs_emerg(f, a...)						\
 		printk(KERN_EMERG "hive-fs: EMERGENCY (file: %s, line: %d): funct: %s:", __FILE__, __LINE__, __func__); 	\
-		printk(KERN_EMERG f, ## a);
+		printk(KERN_EMERG "hive-fs: EMERGENCY " f, ## a);
 
 #define hifs_alert(f, a...)	                    \
 		printk(KERN_ALERT "hive-fs: ALERT (file: %s, line: %d): funct: %s:", __FILE__, __LINE__, __func__);		\
-		printk(KERN_ALERT f, ## a);
+		printk(KERN_ALERT "hive-fs: ALERT " f, ## a);
 
 #define hifs_crit(f, a...)	                    \
 		printk(KERN_CRIT "hive-fs: CRITICAL (file: %s, line: %d): funct: %s:",	__FILE__, __LINE__, __func__);		\
-		printk(KERN_CRIT f, ## a);
+		printk(KERN_CRIT "hive-fs: CRITICAL " f, ## a);
 
 #define hifs_err(f, a...)	                    \
 		printk(KERN_ERR "hive-fs: ERROR (file: %s, line: %d): funct: %s:",	__FILE__, __LINE__, __func__);			\
-		printk(KERN_ERR f, ## a);
+		printk(KERN_ERR "hive-fs: ERROR " f, ## a);
 
 #define hifs_warning(f, a...)	                \
 		printk(KERN_WARNING "hive-fs: WARNING (file: %s, line: %d): funct: %s:", __FILE__, __LINE__, __func__);	\
-		printk(KERN_WARNING f, ## a);
+		printk(KERN_WARNING "hive-fs: WARNING " f, ## a);
 
 #define hifs_notice(f, a...)	                \
 		printk(KERN_NOTICE "hive-fs: NOTICE (file: %s, line: %d): funct: %s:",	__FILE__, __LINE__, __func__);		\
-		printk(KERN_NOTICE f, ## a);
+		printk(KERN_NOTICE "hive-fs: NOTICE " f, ## a);
 
 #define hifs_info(f, a...)	                    \
 		printk(KERN_INFO "hive-fs: INFO (file: %s, line: %d): funct: %s:",	__FILE__, __LINE__, __func__);			\
-		printk(KERN_INFO f, ## a);
+		printk(KERN_INFO "hive-fs: INFO " f, ## a);
 
 #define hifs_debug(f, a...)		                \
 		printk(KERN_DEBUG "hive-fs: DEBUG (file: %s, line: %d): funct: %s:", __FILE__, __LINE__, __func__);		\
-		printk(KERN_DEBUG f, ## a);
+		printk(KERN_DEBUG "hive-fs: DEBUG " f, ## a);
