@@ -150,7 +150,7 @@ static int __init hifs_init(void)
     if (ret != 0) {
         hifs_err("Failed to start hivefs management routine\n");
     } else {
-        hifs_info("hivefs queue manager thread started\n");
+        hifs_info("hive-fs communications queue manager thread start successful\n");
     }
     return ret;
 

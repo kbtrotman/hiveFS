@@ -72,6 +72,7 @@ int read_from_inode_dev(char *dev_file);
 int read_from_block_dev(char *dev_file);
 int read_from_cmd_dev(char *dev_file);
 void hi_comm_close_queues(void);
+char *hifs_strlcpy( char *dest_string, char *src_string, int max_size );
 
 /* hi_command_sql.c */
 void execute_sql(char* sql_string);

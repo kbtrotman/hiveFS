@@ -75,6 +75,7 @@ int hifs_create_test_inode(void) {
         .i_size = 512,
         .i_ino = 1,
     };
+    
     *shared_block_outgoing = (struct hifs_blocks) {
         .block_size = 84,
         .count = 1,
