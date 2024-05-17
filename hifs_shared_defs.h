@@ -55,20 +55,20 @@
 // these values are set in the atomic variable.
 
 #define HIFS_Q_PROTO_VERSION  1          // Version of the protocol
-#define HIFS_Q_PROTO_UNUSED 0            // Queue or file(mem device) is not in use
-#define HIFS_Q_PROTO_KERNEL_UP 1       // Kernel has locked the queue....1,2,3,&4 were deprecated in dev. Not used at the moment.
-#define HIFS_Q_PROTO_USER_UP 1    // Kernel is waiting on user
+#define HIFS_Q_PROTO_UNUSED 0            // Queue or file(mem device) is not in use at all
+#define HIFS_Q_PROTO_KERNEL_UP 1         // Kernel connection is UP.
+#define HIFS_Q_PROTO_USER_UP 1           // User connection is UP.
 
-#define HIFS_Q_PROTO_NUM_CMDS 9     //Max ENUM value of any command (same as max number of commands that exist).
-#define HIFS_Q_PROTO_CMD_FLUSH "cache_flush_all"
-#define HIFS_Q_PROTO_CMD_BLOCK_RECV "block_recv"
-#define HIFS_Q_PROTO_CMD_BLOCK_SEND "block_send"
-#define HIFS_Q_PROTO_CMD_INODE_RECV "inode_recv"
-#define HIFS_Q_PROTO_CMD_INODE_SEND "inode_send"
-#define HIFS_Q_PROTO_CMD_FILE_RECV "file_recv"
-#define HIFS_Q_PROTO_CMD_FILE_SEND "file_send"
+#define HIFS_Q_PROTO_NUM_CMDS        9 //Max ENUM value of any command (same as max number of commands that exist).
+#define HIFS_Q_PROTO_CMD_FLUSH       "cache_flush_all"
+#define HIFS_Q_PROTO_CMD_BLOCK_RECV  "block_recv"
+#define HIFS_Q_PROTO_CMD_BLOCK_SEND  "block_send"
+#define HIFS_Q_PROTO_CMD_INODE_RECV  "inode_recv"
+#define HIFS_Q_PROTO_CMD_INODE_SEND  "inode_send"
+#define HIFS_Q_PROTO_CMD_FILE_RECV   "file_recv"
+#define HIFS_Q_PROTO_CMD_FILE_SEND   "file_send"
 #define HIFS_Q_PROTO_CMD_ENGINE_VERS "engine_version"
-#define HIFS_Q_PROTO_CMD_TEST "test_cmd"
+#define HIFS_Q_PROTO_CMD_TEST        "test_cmd"
 
 enum hifs_module{HIFS_COMM_PROGRAM_KERN_MOD, HIFS_COMM_PROGRAM_USER_HICOMM};
 enum hifs_queue_direction{HIFS_COMM_TO_USER, HIFS_COMM_FROM_USER};
@@ -83,7 +83,7 @@ struct hifs_blocks {
 struct hifs_blocks_user {
 	int block_size;
 	int count;
-	char *block;
+	char block[HIFS_DEFAULT_BLOCK_SIZE];
 };
 
 struct hifs_cmds {
@@ -94,7 +94,7 @@ struct hifs_cmds {
 
 struct hifs_cmds_user {
     int count;
-	char *cmd;
+	char cmd[HIFS_MAX_CMD_SIZE];
 };
 
 extern int k_major, u_major, i_major, b_major, c_major;  
@@ -257,27 +257,27 @@ struct hifs_dir_entry
 
 #define hifs_emerg(f, a...)						\
 		printk(KERN_EMERG "hive-fs: EMERGENCY (file: %s, line: %d): funct: %s:", __FILE__, __LINE__, __func__); 	\
-		printk(KERN_EMERG "hive-fs: EMERGENCY " f, ## a);
+		printk("hive-fs: EMERGENCY " f, ## a);
 
 #define hifs_alert(f, a...)	                    \
 		printk(KERN_ALERT "hive-fs: ALERT (file: %s, line: %d): funct: %s:", __FILE__, __LINE__, __func__);		\
-		printk(KERN_ALERT "hive-fs: ALERT " f, ## a);
+		printk("hive-fs: ALERT " f, ## a);
 
 #define hifs_crit(f, a...)	                    \
 		printk(KERN_CRIT "hive-fs: CRITICAL (file: %s, line: %d): funct: %s:",	__FILE__, __LINE__, __func__);		\
-		printk(KERN_CRIT "hive-fs: CRITICAL " f, ## a);
+		printk("hive-fs: CRITICAL " f, ## a);
 
 #define hifs_err(f, a...)	                    \
 		printk(KERN_ERR "hive-fs: ERROR (file: %s, line: %d): funct: %s:",	__FILE__, __LINE__, __func__);			\
-		printk(KERN_ERR "hive-fs: ERROR " f, ## a);
+		printk("hive-fs: ERROR " f, ## a);
 
 #define hifs_warning(f, a...)	                \
 		printk(KERN_WARNING "hive-fs: WARNING (file: %s, line: %d): funct: %s:", __FILE__, __LINE__, __func__);	\
-		printk(KERN_WARNING "hive-fs: WARNING " f, ## a);
+		printk("hive-fs: WARNING " f, ## a);
 
 #define hifs_notice(f, a...)	                \
 		printk(KERN_NOTICE "hive-fs: NOTICE (file: %s, line: %d): funct: %s:",	__FILE__, __LINE__, __func__);		\
-		printk(KERN_NOTICE "hive-fs: NOTICE " f, ## a);
+		printk("hive-fs: NOTICE " f, ## a);
 
 #define hifs_info(f, a...)	                    \
 		printk(KERN_INFO "hive-fs: INFO (file: %s, line: %d): funct: %s:",	__FILE__, __LINE__, __func__);			\

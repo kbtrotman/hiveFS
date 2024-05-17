@@ -114,25 +114,18 @@ int read_from_inode_dev(char *dev_file)
 {
     // A read initiated from user space...
     int result = 0;
-    struct hifs_inode_user send_data_user;
+    struct hifs_inode_user *send_data_user = mmap(0, sizeof(struct hifs_inode_user), PROT_READ | PROT_WRITE, MAP_SHARED, fd_inode, 0);
 
-    result = read(fd_cmd, &send_data_user, sizeof(struct hifs_inode_user));
+    result = read(fd_inode, send_data_user, sizeof(struct hifs_inode_user));
     if (result >= 0) {
-
-        strncpy(shared_inode_incoming->i_name, send_data_user.i_name, sizeof(HIFS_MAX_NAME_SIZE));
-        memcpy(shared_inode_incoming->i_addre, send_data_user.i_addre, sizeof(shared_inode_incoming->i_addre));
-        memcpy(shared_inode_incoming->i_addrb, send_data_user.i_addrb, sizeof(shared_inode_incoming->i_addrb));
-        shared_inode_incoming->i_size = send_data_user.i_size;
-        shared_inode_incoming->i_mode = send_data_user.i_mode;
-        shared_inode_incoming->i_uid = send_data_user.i_uid;
-        shared_inode_incoming->i_gid = send_data_user.i_gid;
-        shared_inode_incoming->i_blocks = send_data_user.i_blocks;
-        shared_inode_incoming->i_bytes = send_data_user.i_bytes;
-        shared_inode_incoming->i_size = send_data_user.i_size;
-        shared_inode_incoming->i_ino = send_data_user.i_ino;
+        hifs_strlcpy(shared_inode_incoming->i_name, send_data_user->i_name, HIFS_MAX_NAME_SIZE);
+        shared_inode_incoming->i_blocks = send_data_user->i_blocks;
+        shared_inode_incoming->i_bytes = send_data_user->i_bytes;
+        shared_inode_incoming->i_size = send_data_user->i_size;
+        shared_inode_incoming->i_ino = send_data_user->i_ino;
 
         printf("hi_command: Read %d bytes from device file: %s\n", result, dev_file);
-        printf("hi_command: Received inode [%s] with [%d] file size\n", shared_inode_incoming->i_name, shared_inode_incoming->i_bytes);
+        printf("hi_command: Received inode [%s] with [%d] file size [%d] blocks [%d] bytes [%ld] inode\n", shared_inode_incoming->i_name, shared_inode_incoming->i_size, shared_inode_incoming->i_blocks, shared_inode_incoming->i_bytes, shared_inode_incoming->i_ino);
     } else {
         // Handle error
         perror("hi_command: Error reading from command device file");
@@ -149,18 +142,13 @@ int read_from_block_dev(char *dev_file)
 {
     // A read initiated from user space...
     int result = 0;
-
-    struct hifs_blocks_user {
-        char block[HIFS_DEFAULT_BLOCK_SIZE];
-        int block_size;
-        int count;
-    };
     struct hifs_blocks_user *send_data_user = mmap(0, sizeof(struct hifs_blocks_user), PROT_READ | PROT_WRITE, MAP_SHARED, fd_block, 0);
-    result = read(fd_cmd, &send_data_user, sizeof(struct hifs_blocks_user));
-    if (result >= 0) {
-        strncpy(shared_block_incoming->block, send_data_user->block, HIFS_DEFAULT_BLOCK_SIZE);
-        shared_block_incoming->block_size = send_data_user->block_size;
 
+    result = read(fd_block, send_data_user, sizeof(struct hifs_blocks_user));
+    if (result >= 0) {
+        hifs_strlcpy(shared_block_incoming->block, send_data_user->block, HIFS_DEFAULT_BLOCK_SIZE);
+        shared_block_incoming->block_size = send_data_user->block_size;
+        shared_block_incoming->count = send_data_user->count;
         printf("hi_command: Read %d bytes from device file: %s\n", result, dev_file);
         printf("hi_command: Received block [%s] with [%d] block size\n", shared_block_incoming->block, shared_block_incoming->block_size);
     } else {
@@ -178,19 +166,12 @@ int read_from_cmd_dev(char *dev_file)
 {
     // A read initiated from user space...
     int result = 0;
-    char *token;
-    char send_data_user[30];
-    result = read(fd_cmd, &send_data_user, 30);
+    struct hifs_cmds_user *send_data_user = mmap(0, sizeof(struct hifs_blocks_user), PROT_READ | PROT_WRITE, MAP_SHARED, fd_cmd, 0);
+    
+    result = read(fd_cmd, send_data_user, sizeof(send_data_user));
     if (result >= 0) {
-        token = strtok(send_data_user, "!&");
-        // If the delimiter is found, token now points to the first component
-        if (token != NULL) {
-            shared_cmd_incoming->count = atoi(token);
-        }
-        token = strtok(NULL, "!&");
-        if (token != NULL) {
-            shared_cmd_incoming->cmd = token;
-        }
+        shared_cmd_incoming->count = send_data_user->count;
+        hifs_strlcpy(shared_cmd_incoming->cmd, send_data_user->cmd, HIFS_MAX_CMD_SIZE);
         printf("hi_command: Read %d bytes from device file: %s\n", result, dev_file);
         printf("hi_command: Received command [%s] with [%d] count\n", shared_cmd_incoming->cmd, shared_cmd_incoming->count);
     } else {
@@ -222,18 +203,12 @@ int write_to_inode_dev(void)
             return -EFAULT;
         }
         printf("hi_command: [INODE] Transferring inode [%s]\n", send_data->i_name);
-        strncpy(send_data_user.i_name, send_data->i_name, HIFS_MAX_NAME_SIZE);
-        memcpy(send_data_user.i_addre, send_data->i_addre, sizeof(send_data_user.i_addre));
-        memcpy(send_data_user.i_addrb, send_data->i_addrb, sizeof(send_data_user.i_addrb));
-        send_data_user.i_size = send_data->i_size;
-        send_data_user.i_mode = send_data->i_mode;
-        send_data_user.i_uid = send_data->i_uid;
-        send_data_user.i_gid = send_data->i_gid;
+        hifs_strlcpy(send_data_user.i_name, send_data->i_name, HIFS_MAX_NAME_SIZE);
         send_data_user.i_blocks = send_data->i_blocks;
         send_data_user.i_bytes = send_data->i_bytes;
         send_data_user.i_size = send_data->i_size;
         send_data_user.i_ino = send_data->i_ino;
-        ret = write(fd_inode, &send_data_user, sizeof(send_data_user));
+        ret = write(fd_inode, &send_data_user, sizeof(send_data_user) + 1);
         if (ret == -1) {
             perror("hi_command: Error writing to device file");
             return -1;
@@ -250,13 +225,9 @@ int write_to_inode_dev(void)
 int write_to_block_dev(void)
 {
     // Write out to user space.
-    struct hifs_block_user {
-        char block[HIFS_DEFAULT_BLOCK_SIZE];  // MAX_CMD_SIZE is the maximum size of a command
-        int block_size;
-    };
     int result = 0;
     struct hifs_blocks *send_data = NULL;
-    struct hifs_block_user *send_data_user = mmap(0, sizeof(struct hifs_block_user), PROT_READ | PROT_WRITE, MAP_SHARED, fd_block, 0);
+    struct hifs_blocks_user *send_data_user = mmap(0, sizeof(struct hifs_blocks_user), PROT_READ | PROT_WRITE, MAP_SHARED, fd_block, 0);
     printf("hi_command: [BLOCK] popping an item from the queue to send\n");
     if (!list_empty(&shared_block_outgoing_lst)) { 
         send_data = list_entry(&shared_block_outgoing_lst, struct hifs_blocks, hifs_block_list);
@@ -267,10 +238,11 @@ int write_to_block_dev(void)
             return -EFAULT;
         }
         printf("hi_command: [BLOCK] Transferring block [%s] with [%d] characters\n", send_data->block, send_data->block_size);
-        strncpy(send_data_user->block, send_data->block, HIFS_DEFAULT_BLOCK_SIZE);
+        hifs_strlcpy(send_data_user->block, send_data->block, HIFS_DEFAULT_BLOCK_SIZE);
         send_data_user->block_size = send_data->block_size;
-        ret = write(fd_block, &send_data_user, sizeof(send_data_user));
-        if (ret == -1) {
+        send_data_user->count = send_data->count;
+        result = write(fd_block, &send_data_user, sizeof(send_data_user) + 1);
+        if (result == -1) {
             perror("hi_command: Error writing to device file");
             return -1;
         } else {
@@ -288,12 +260,13 @@ int write_to_cmd_dev(void)
     // Write out to user space.
     int result = 0;
     struct hifs_cmds *send_data = NULL;
-    char *send_data_user;
+    struct hifs_cmds_user *send_data_user;
     printf("hi_command: [CMD] popping an item from the queue to send\n");
     if (!list_empty(&shared_cmd_outgoing_lst)) { 
         send_data = list_entry(&shared_cmd_outgoing_lst, struct hifs_cmds, hifs_cmd_list);
         if (send_data) {
-            snprintf(send_data_user, HIFS_MAX_CMD_SIZE + sizeof(int) + 1, "%d!&%s!&", send_data->count, send_data->cmd);
+            send_data_user->count = send_data->count;
+            hifs_strlcpy(send_data_user->cmd, send_data->cmd, HIFS_MAX_CMD_SIZE);
             list_del(&send_data->hifs_cmd_list);
             free(send_data);
             send_data = NULL;
@@ -301,9 +274,9 @@ int write_to_cmd_dev(void)
             printf("hi_command: [CMD] send_data is empty, dropping out to process next queue message\n");
             return -EFAULT;
         }
-        printf("hi_command: [CMD] Transferring command [%s] with [%ld] characters\n", send_data_user, strlen(send_data_user));
-        ret = write(fd_cmd, &send_data_user, strlen(send_data_user) + 1 );
-        if (ret == -1) {
+        printf("hi_command: [CMD] Transferring command [%s] with [%ld] characters\n", send_data_user->cmd, sizeof(send_data_user) + 1);
+        result = write(fd_cmd, &send_data_user, sizeof(send_data_user) + 1 );
+        if (result == -1) {
             perror("hi_command: Error writing to device file");
             return -1;
         } else {
@@ -314,4 +287,18 @@ int write_to_cmd_dev(void)
         result = -EFAULT;
     }
     return result;
+}
+
+char *hifs_strlcpy( char *dest_string, char *src_string, int max_size )
+{
+
+    strncpy(dest_string, src_string, max_size);
+
+    if (strlen(dest_string) < max_size) {
+        dest_string[strlen(dest_string) + 1] = '\0';
+    } else {
+        dest_string[max_size] = '\0';
+    }
+
+    return dest_string;
 }

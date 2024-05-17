@@ -68,9 +68,13 @@ void read_from_queue(void)
         return;
     } else {
         printf("hi-command: Read %d bytes from device file: %s\n", ret, device_file_cmd);
+        // Which Queues (Inode & Block) are used is dependant on the command just sent in the Command Queue
+        if (strcmp(shared_cmd_incoming->cmd, HIFS_Q_PROTO_CMD_TEST) == 0) {
+            ret = read_from_cmd_dev(device_file_block);
+            ret = read_from_cmd_dev(device_file_inode);
+        }
+        
     }
-    printf("\n");
-
     return;
 }
 
@@ -114,6 +118,13 @@ int hifs_init_queues(void) {
         .count = 1,
     };
 
+    *shared_block_outgoing = (struct hifs_blocks) {
+        .block_size = 84,
+        .count = 1,
+        .block = "test_block_data:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:test_block_data",
+
+    };
+
     INIT_LIST_HEAD(&shared_inode_incoming->hifs_inode_list);
     INIT_LIST_HEAD(&shared_cmd_incoming->hifs_cmd_list);
     INIT_LIST_HEAD(&shared_block_incoming->hifs_block_list);
@@ -130,6 +141,7 @@ int hifs_init_queues(void) {
 
     list_add_tail(&shared_cmd_outgoing->hifs_cmd_list, &shared_cmd_outgoing_lst);
     list_add_tail(&shared_inode_outgoing->hifs_inode_list, &shared_inode_outgoing_lst);
+    list_add_tail(&shared_block_outgoing->hifs_block_list, &shared_block_outgoing_lst);
     return 0;
 }
 
