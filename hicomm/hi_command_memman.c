@@ -114,8 +114,8 @@ int read_from_inode_dev(char *dev_file)
 {
     // A read initiated from user space...
     int result = 0;
-    struct hifs_inode_user *send_data_user = mmap(0, sizeof(struct hifs_inode_user), PROT_READ | PROT_WRITE, MAP_SHARED, fd_inode, 0);
-
+    struct hifs_inode_user *send_data_user = malloc(sizeof(struct hifs_inode_user));
+    printf("hi_command: Reading from command device file\n");
     result = read(fd_inode, send_data_user, sizeof(struct hifs_inode_user));
     if (result >= 0) {
         hifs_strlcpy(shared_inode_incoming->i_name, send_data_user->i_name, HIFS_MAX_NAME_SIZE);
@@ -142,7 +142,7 @@ int read_from_block_dev(char *dev_file)
 {
     // A read initiated from user space...
     int result = 0;
-    struct hifs_blocks_user *send_data_user = mmap(0, sizeof(struct hifs_blocks_user), PROT_READ | PROT_WRITE, MAP_SHARED, fd_block, 0);
+    struct hifs_blocks_user *send_data_user = malloc(sizeof(struct hifs_blocks_user));
 
     result = read(fd_block, send_data_user, sizeof(struct hifs_blocks_user));
     if (result >= 0) {
@@ -166,7 +166,7 @@ int read_from_cmd_dev(char *dev_file)
 {
     // A read initiated from user space...
     int result = 0;
-    struct hifs_cmds_user *send_data_user = mmap(0, sizeof(struct hifs_blocks_user), PROT_READ | PROT_WRITE, MAP_SHARED, fd_cmd, 0);
+    struct hifs_cmds_user *send_data_user = malloc(sizeof(struct hifs_cmds_user));
     
     result = read(fd_cmd, send_data_user, sizeof(send_data_user));
     if (result >= 0) {
@@ -191,11 +191,14 @@ int write_to_inode_dev(void)
     // Write out to user space.
     int result = 0;
     struct hifs_inode *send_data = NULL;
-    struct hifs_inode_user send_data_user;
-
+    struct hifs_inode_user *send_data_user = malloc(sizeof(struct hifs_inode_user));
+    if (!send_data_user) {
+        printf("hi-command: Failed to allocate memory for send_data_user\n");
+        return -ENOMEM;  // Error code for out of memory
+    }
     printf("hi_command: [INODE] popping an item from the queue to send\n");
     if (!list_empty(&shared_inode_outgoing_lst)) { 
-        send_data = list_entry(&shared_inode_outgoing_lst, struct hifs_inode, hifs_inode_list);
+        send_data = list_first_entry(&shared_inode_outgoing_lst, struct hifs_inode, hifs_inode_list);
         if (send_data) {
             list_del(&send_data->hifs_inode_list);
         } else {
@@ -203,11 +206,11 @@ int write_to_inode_dev(void)
             return -EFAULT;
         }
         printf("hi_command: [INODE] Transferring inode [%s]\n", send_data->i_name);
-        hifs_strlcpy(send_data_user.i_name, send_data->i_name, HIFS_MAX_NAME_SIZE);
-        send_data_user.i_blocks = send_data->i_blocks;
-        send_data_user.i_bytes = send_data->i_bytes;
-        send_data_user.i_size = send_data->i_size;
-        send_data_user.i_ino = send_data->i_ino;
+        hifs_strlcpy(send_data_user->i_name, send_data->i_name, HIFS_MAX_NAME_SIZE);
+        send_data_user->i_blocks = send_data->i_blocks;
+        send_data_user->i_bytes = send_data->i_bytes;
+        send_data_user->i_size = send_data->i_size;
+        send_data_user->i_ino = send_data->i_ino;
         ret = write(fd_inode, &send_data_user, sizeof(send_data_user) + 1);
         if (ret == -1) {
             perror("hi_command: Error writing to device file");
@@ -216,7 +219,7 @@ int write_to_inode_dev(void)
             printf("hi_command: Wrote %d bytes to device file: %s\n", ret, device_file_cmd);
         }
     } else {
-        result = -EFAULT;
+        result = 0;
     }
     free(send_data);
     return result;
@@ -227,10 +230,14 @@ int write_to_block_dev(void)
     // Write out to user space.
     int result = 0;
     struct hifs_blocks *send_data = NULL;
-    struct hifs_blocks_user *send_data_user = mmap(0, sizeof(struct hifs_blocks_user), PROT_READ | PROT_WRITE, MAP_SHARED, fd_block, 0);
+    struct hifs_blocks_user *send_data_user = malloc(sizeof(struct hifs_blocks_user));
+    if (!send_data_user) {
+        printf("hi-command: Failed to allocate memory for send_data_user\n");
+        return -ENOMEM;  // Error code for out of memory
+    }
     printf("hi_command: [BLOCK] popping an item from the queue to send\n");
     if (!list_empty(&shared_block_outgoing_lst)) { 
-        send_data = list_entry(&shared_block_outgoing_lst, struct hifs_blocks, hifs_block_list);
+        send_data = list_first_entry(&shared_block_outgoing_lst, struct hifs_blocks, hifs_block_list);
         if (send_data) {
             list_del(&send_data->hifs_block_list);
         } else {
@@ -260,22 +267,28 @@ int write_to_cmd_dev(void)
     // Write out to user space.
     int result = 0;
     struct hifs_cmds *send_data = NULL;
-    struct hifs_cmds_user *send_data_user;
+    struct hifs_cmds_user *send_data_user = malloc(sizeof(struct hifs_cmds_user) + 1);
+    if (!send_data_user) {
+        printf("hi-command: Failed to allocate memory for send_data_user\n");
+        return -ENOMEM;  // Error code for out of memory
+    }
     printf("hi_command: [CMD] popping an item from the queue to send\n");
     if (!list_empty(&shared_cmd_outgoing_lst)) { 
-        send_data = list_entry(&shared_cmd_outgoing_lst, struct hifs_cmds, hifs_cmd_list);
+        send_data = list_first_entry(&shared_cmd_outgoing_lst, struct hifs_cmds, hifs_cmd_list);
         if (send_data) {
+            printf("hi_command: [CMD] Loading command [%s] and count [%d] with size of [%ld] characters\n", send_data->cmd, send_data->count, sizeof(send_data));
+            if (!send_data->cmd) { return 0; } 
             send_data_user->count = send_data->count;
-            hifs_strlcpy(send_data_user->cmd, send_data->cmd, HIFS_MAX_CMD_SIZE);
+            hifs_strlcpy(send_data_user->cmd, send_data->cmd, (int)HIFS_MAX_CMD_SIZE);
             list_del(&send_data->hifs_cmd_list);
             free(send_data);
             send_data = NULL;
         } else {
             printf("hi_command: [CMD] send_data is empty, dropping out to process next queue message\n");
-            return -EFAULT;
+            return 0;
         }
-        printf("hi_command: [CMD] Transferring command [%s] with [%ld] characters\n", send_data_user->cmd, sizeof(send_data_user) + 1);
-        result = write(fd_cmd, &send_data_user, sizeof(send_data_user) + 1 );
+        printf("hi_command: [CMD] Transferring command [%s] with [%ld] characters\n", send_data_user->cmd, sizeof(send_data_user));
+        result = write(fd_cmd, send_data_user, sizeof(send_data_user));
         if (result == -1) {
             perror("hi_command: Error writing to device file");
             return -1;
@@ -284,21 +297,16 @@ int write_to_cmd_dev(void)
         }
 
     } else {
-        result = -EFAULT;
+        result = 0;
     }
     return result;
 }
 
-char *hifs_strlcpy( char *dest_string, char *src_string, int max_size )
+char *hifs_strlcpy(char *dest_string, const char *src_string, int max_size)
 {
+    printf("hi_command: [strlcpy] Transferring string data between items [%s] with [%d] characters\n", src_string, max_size);
+    strncpy(dest_string, src_string, max_size); // Copy at most max_size characters
 
-    strncpy(dest_string, src_string, max_size);
-
-    if (strlen(dest_string) < max_size) {
-        dest_string[strlen(dest_string) + 1] = '\0';
-    } else {
-        dest_string[max_size] = '\0';
-    }
-
+    dest_string[max_size - 1] = '\0'; // Forcibly Null-terminate the destination string
     return dest_string;
 }

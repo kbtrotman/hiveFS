@@ -22,7 +22,7 @@
 
 // A user-space definition for a kernel-style Doubly Linked List
 // Modified by:  kazutomo@mcs.anl.gov
-#include "ext_kernel_style_linked_list_4_user.h"
+#include "hi_user_double_linked_list.h"
 
 // The definitions file is included in both the kernel-space and user-space
 // hi_command file.
@@ -49,7 +49,6 @@ extern char *device_file_block;
 extern char *device_file_cmd;
 extern int fd_cmd, fd_inode, fd_block;
 
-
 // Prototypes Here:
 
 /* hi_command.c */
@@ -72,7 +71,7 @@ int read_from_inode_dev(char *dev_file);
 int read_from_block_dev(char *dev_file);
 int read_from_cmd_dev(char *dev_file);
 void hi_comm_close_queues(void);
-char *hifs_strlcpy( char *dest_string, char *src_string, int max_size );
+char *hifs_strlcpy(char *dest_string, const char *src_string, int max_size);
 
 /* hi_command_sql.c */
 void execute_sql(char* sql_string);
