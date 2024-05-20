@@ -15,7 +15,7 @@
 #else
 #include <time.h>
 #define GET_TIME() (clock() * 1000 / CLOCKS_PER_SEC)
-#include "hicomm/ext_kernel_style_linked_list_4_user.h"
+#include "hicomm/hi_user_double_linked_list.h"
 #endif // __KERNEL__
 
 /******************************
@@ -72,6 +72,10 @@
 
 enum hifs_module{HIFS_COMM_PROGRAM_KERN_MOD, HIFS_COMM_PROGRAM_USER_HICOMM};
 enum hifs_queue_direction{HIFS_COMM_TO_USER, HIFS_COMM_FROM_USER};
+
+extern struct pollfd *cmd_pfd;
+extern struct pollfd *inode_pfd;
+extern struct pollfd *block_pfd;
 
 struct hifs_blocks {
 	int block_size;

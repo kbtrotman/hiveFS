@@ -50,6 +50,10 @@ void write_to_queue(void)
         if (ret < 0) {
             printf("hi-command: Error writing to device file: %s\n", device_file_cmd);
             return;
+        } else if (ret == 0) {
+            // Just keep cycling until we have data to send, ending up here means the queue is empty right now.
+            printf("hi-command: The send queues are empty, waiting and checking...\n");
+            return;
         } else {
             printf("hi-command: Wrote %d bytes to device file: %s\n", ret, device_file_cmd);
             printf("\n");
@@ -91,9 +95,9 @@ int hifs_init_queues(void) {
         return -1;
     }
 
-    shared_inode_outgoing = malloc(sizeof(*shared_inode_incoming));
-    shared_cmd_outgoing = malloc(sizeof(*shared_cmd_incoming));
-    shared_block_outgoing = malloc(sizeof(*shared_block_incoming));   
+    shared_inode_outgoing = malloc(sizeof(*shared_inode_outgoing));
+    shared_cmd_outgoing = malloc(sizeof(*shared_cmd_outgoing));
+    shared_block_outgoing = malloc(sizeof(*shared_block_outgoing));   
 
     if (!shared_inode_outgoing || !shared_cmd_outgoing || !shared_block_outgoing) {
         if (shared_cmd_outgoing) { free(shared_cmd_outgoing); }

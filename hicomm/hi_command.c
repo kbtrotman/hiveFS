@@ -43,11 +43,14 @@ extern struct list_head shared_inode_incoming_lst;
 extern struct list_head shared_block_incoming_lst;   
 extern struct list_head shared_cmd_incoming_lst;  
 
+struct pollfd *cmd_pfd;
+struct pollfd *inode_pfd;
+struct pollfd *block_pfd;
+
 
 int main(int argc, char *argv[])
 {
     int ret;
-    struct pollfd pfd;
     //bool queue_empty = true; // Add a flag to track whether the queue is empty
 
     hifs_user_link.clockstart = GET_TIME();
@@ -82,19 +85,29 @@ int main(int argc, char *argv[])
 
     init_hive_link();
 
+    cmd_pfd = malloc(sizeof(struct pollfd));
+    inode_pfd = malloc(sizeof(struct pollfd));
+    block_pfd = malloc(sizeof(struct pollfd));
+
     fd_cmd = open(device_file_cmd, O_RDWR | O_NONBLOCK);   
-    if( fd_cmd == -1 )  { perror("hi-command: open [CMD queue]"); exit(EXIT_FAILURE); }
+    if( fd_cmd == -1 )  { perror("hi-command: open [CMD queue]\n"); exit(EXIT_FAILURE); }
 
     fd_inode = open(device_file_cmd, O_RDWR | O_NONBLOCK);   
-    if( fd_inode == -1 )  { perror("hi-command: open [INODE queue]"); exit(EXIT_FAILURE); }
+    if( fd_inode == -1 )  { perror("hi-command: open [INODE queue]\n"); exit(EXIT_FAILURE); }
 
     fd_block = open(device_file_cmd, O_RDWR | O_NONBLOCK);   
-    if( fd_block == -1 )  { perror("hi-command: open [BLOCK queue]"); exit(EXIT_FAILURE); }
+    if( fd_block == -1 )  { perror("hi-command: open [BLOCK queue]\n"); exit(EXIT_FAILURE); }
 
     hifs_init_queues();
 
-    pfd.fd = fd_cmd;
-    pfd.events = ( POLLIN | POLLOUT );
+    cmd_pfd->fd = fd_cmd;
+    cmd_pfd->events = ( POLLIN | POLLOUT );
+
+    inode_pfd->fd = fd_inode;
+    inode_pfd->events = POLLIN | POLLOUT;
+
+    block_pfd->fd = fd_block;
+    block_pfd->events = POLLIN | POLLOUT;
 
     hifs_comm_set_program_up(HIFS_COMM_PROGRAM_USER_HICOMM);
     hifs_comm_set_program_up(HIFS_COMM_PROGRAM_KERN_MOD);
@@ -110,27 +123,24 @@ while (1) {
     }
 
     printf("hi-command: Looping polls...\n");
-    ret = poll(&pfd, (unsigned long)1, 5000);   //wait for 5secs
+    ret = poll(cmd_pfd, (unsigned long)1, 3000);   //wait for 5secs
     
     if( ret < 0 ) 
     {
-        perror("hi-command: poll");
+        perror("hi-command: poll\n");
         assert(0);
     }
     
     //User-space has total access to this file, so the order here determines which direction is processed first.
-    if( ( pfd.revents & POLLIN )  == POLLIN )
-    {
+    if( ( cmd_pfd->revents & POLLIN )  == POLLIN )
+    {   
         read_from_queue();
-        printf("hi-command: POLLIN");
-    }
-    
-    if( ( pfd.revents & POLLOUT )  == POLLOUT )
-    {
-        write_to_queue();
         printf("hi-command: POLLOUT\n");
     }
 
+    write_to_queue();
+    printf("hi-command: POLLIN\n");
+    
     printf("hi-command: kernel module status is: %d\n", hifs_kern_link.state);
     printf("hi-command: user-space status is: %d\n", hifs_user_link.state);
 }

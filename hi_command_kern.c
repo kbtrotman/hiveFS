@@ -41,6 +41,10 @@ extern struct list_head shared_cmd_incoming_lst;
 extern wait_queue_head_t waitqueue;
 extern wait_queue_head_t thread_wq;
 
+struct pollfd *cmd_pfd;
+struct pollfd *inode_pfd;
+struct pollfd *block_pfd;
+
 int hifs_create_test_inode(void) {
 
     shared_inode_incoming = kmalloc(sizeof(*shared_inode_incoming), GFP_KERNEL);
