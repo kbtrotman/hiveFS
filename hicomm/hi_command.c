@@ -132,14 +132,14 @@ while (1) {
     }
     
     //User-space has total access to this file, so the order here determines which direction is processed first.
-    if( ( cmd_pfd->revents & POLLIN )  == POLLIN )
+    if( ( cmd_pfd->revents & POLLOUT )  == POLLOUT )
     {   
         read_from_queue();
-        printf("hi-command: POLLOUT\n");
+        printf("hi-command: POLLOUT (Read from user side finished\n");
     }
 
     write_to_queue();
-    printf("hi-command: POLLIN\n");
+    printf("hi-command: POLLIN (Write from user side finished)\n");
     
     printf("hi-command: kernel module status is: %d\n", hifs_kern_link.state);
     printf("hi-command: user-space status is: %d\n", hifs_user_link.state);

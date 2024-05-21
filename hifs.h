@@ -175,3 +175,40 @@ struct hifs_olt
 };
 
 // END: Globals Here:
+
+
+/***********************
+ * Hive FS Log Functions
+ ***********************/
+
+#define hifs_emerg(f, a...)						\
+		printk(KERN_EMERG "hive-fs: EMERGENCY (file: %s, line: %d): funct: %s:\n", __FILE__, __LINE__, __func__); 	    \
+		printk( KERN_EMERG"hive-fs: EMERGENCY " f "\n", ## a);
+
+#define hifs_alert(f, a...)	                    \
+		printk(KERN_ALERT "hive-fs: ALERT (file: %s, line: %d): funct: %s:\n", __FILE__, __LINE__, __func__);		    \
+		printk(KERN_ALERT "hive-fs: ALERT " f "\n", ## a);
+
+#define hifs_crit(f, a...)	                    \
+		printk(KERN_CRIT "hive-fs: CRITICAL (file: %s, line: %d): funct: %s:\n",	__FILE__, __LINE__, __func__);		\
+		printk(KERN_CRIT "hive-fs: CRITICAL " f "\n", ##  a);
+
+#define hifs_err(f, a...)	                    \
+		printk(KERN_ERR "hive-fs: ERROR (file: %s, line: %d): funct: %s:\n",	__FILE__, __LINE__, __func__);			\
+		printk(KERN_ERR "hive-fs: ERROR " f "\n", ## a);
+
+#define hifs_warning(f, a...)	                \
+		printk(KERN_WARNING "hive-fs: WARNING (file: %s, line: %d): funct: %s:\n", __FILE__, __LINE__, __func__);	    \
+		printk(KERN_WARNING "hive-fs: WARNING " f "\n", ## a);
+
+#define hifs_notice(f, a...)	                \
+		printk(KERN_NOTICE "hive-fs: NOTICE (file: %s, line: %d): funct: %s:\n",	__FILE__, __LINE__, __func__);		\
+		printk(KERN_NOTICE "hive-fs: NOTICE " f, ## a);
+
+#define hifs_info(f, a...)	                    \
+		printk(KERN_INFO "hive-fs: INFO (file: %s, line: %d): funct: %s:\n",	__FILE__, __LINE__, __func__);			\
+		printk(KERN_INFO "hive-fs: INFO " f "\n", ## a);
+
+#define hifs_debug(f, a...)		                \
+		printk(KERN_DEBUG "hive-fs: DEBUG (file: %s, line: %d): funct: %s:\n", __FILE__, __LINE__, __func__);		    \
+		printk(KERN_DEBUG "hive-fs: DEBUG " f "\n", ## a)

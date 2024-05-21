@@ -44,19 +44,28 @@ extern struct list_head shared_cmd_incoming_lst;
 void write_to_queue(void)
 {
     int ret;
-    printf("hi-command: Writing to queue.\n");
+    struct hifs_cmds *send_data = NULL;
+    char command[50];
+    hifs_info("Writing to queue.\n");
     while (!list_empty(&shared_cmd_outgoing_lst)) {
-        ret = write_to_cmd_dev();
+        // when writing to device file, we need to grab the command first so we know what to do.
+        send_data = list_first_entry(&shared_cmd_outgoing_lst, struct hifs_cmds, hifs_cmd_list);
+        hifs_strlcpy(command, send_data->cmd, HIFS_MAX_CMD_SIZE);
+        ret = write_to_cmd_dev(send_data);
         if (ret < 0) {
-            printf("hi-command: Error writing to device file: %s\n", device_file_cmd);
+            hifs_info("Error writing to device file: %s\n", device_file_cmd);
             return;
         } else if (ret == 0) {
             // Just keep cycling until we have data to send, ending up here means the queue is empty right now.
-            printf("hi-command: The send queues are empty, waiting and checking...\n");
+            hifs_info("The send queues are empty, waiting and checking...\n");
             return;
         } else {
-            printf("hi-command: Wrote %d bytes to device file: %s\n", ret, device_file_cmd);
-            printf("\n");
+            hifs_debug("Wrote %d bytes to device file: %s\n", ret, device_file_cmd);
+            // Which Queues (Inode & Block) are used is dependant on the command just sent in the Command Queue
+            if (strcmp(command, HIFS_Q_PROTO_CMD_TEST) == 0) {
+                ret = write_to_inode_dev();
+                ret = write_to_block_dev();
+            }
         }
     }
     return;
@@ -65,17 +74,17 @@ void write_to_queue(void)
 void read_from_queue(void)
 {
     int ret;
-    printf("hi-command: Reading from queue...\n");
-    ret = read_from_cmd_dev(device_file_cmd);
+    hifs_info("Reading from queue...\n");
+    ret = read_from_cmd_dev();
     if (ret < 0) {
-        printf("hi-command: Error reading from device file: %s\n", device_file_cmd);
+        hifs_info("Error reading from device file: %s\n", device_file_cmd);
         return;
     } else {
-        printf("hi-command: Read %d bytes from device file: %s\n", ret, device_file_cmd);
+        hifs_info("Read %d bytes from device file: %s\n", ret, device_file_cmd);
         // Which Queues (Inode & Block) are used is dependant on the command just sent in the Command Queue
         if (strcmp(shared_cmd_incoming->cmd, HIFS_Q_PROTO_CMD_TEST) == 0) {
-            ret = read_from_cmd_dev(device_file_block);
-            ret = read_from_cmd_dev(device_file_inode);
+            ret = read_from_inode_dev();
+            ret = read_from_block_dev();
         }
         
     }
@@ -174,7 +183,7 @@ int hifs_comm_set_program_up( int program ) {
             hifs_kern_link.state = HIFS_COMM_LINK_DOWN;
             hifs_kern_link.last_check = 0; 
         }
-        printf("hi_command: kern link up'd at %ld seconds after hi_command start, waiting on hi_command.\n", (GET_TIME() - hifs_kern_link.clockstart));
+        hifs_info("kern link up'd at %ld seconds after hi_command start, waiting on hi_command.\n", (GET_TIME() - hifs_kern_link.clockstart));
     } else if (program == HIFS_COMM_PROGRAM_USER_HICOMM) {
         //...The kernel should never set this mem location. It's owned by user space.
         write_to_atomic(HIFS_COMM_LINK_UP, HIFS_COMM_PROGRAM_USER_HICOMM);
@@ -182,7 +191,7 @@ int hifs_comm_set_program_up( int program ) {
         hifs_user_link.state = HIFS_COMM_LINK_UP;
         hifs_user_link.last_check = 0;
         value = 1;
-        printf("hi_command: user link up'd at %ld seconds after hifs start, waiting on kernel if applicable.\n", (GET_TIME() - hifs_user_link.clockstart));
+        hifs_info("user link up'd at %ld seconds after hifs start, waiting on kernel if applicable.\n", (GET_TIME() - hifs_user_link.clockstart));
     } else {
         value = 0;
     }
@@ -199,14 +208,14 @@ int hifs_comm_set_program_down(int program) {
             // We don't want to do this! The Kernel Module has to flush and shutdown the kernel side of the link! Do nothing.
             value = 1;
         }
-        printf("hi_command: kern link down attempted and rejected at %ld seconds after hi_command start, waiting on kernel.\n", (GET_TIME() - hifs_kern_link.clockstart));
+        hifs_info("kern link down attempted and rejected at %ld seconds after hi_command start, waiting on kernel.\n", (GET_TIME() - hifs_kern_link.clockstart));
     } else if (program == HIFS_COMM_PROGRAM_USER_HICOMM) {
         write_to_atomic(HIFS_COMM_LINK_UP, HIFS_COMM_PROGRAM_USER_HICOMM);
         hifs_user_link.last_state = hifs_user_link.state;
         hifs_user_link.last_check = 0;
         hifs_user_link.state = HIFS_COMM_LINK_UP;
         value = 1;
-        printf("hi_command: user link up'd at %ld seconds after hi_command start, waiting on kernel if applicable.\n", (GET_TIME() - hifs_user_link.clockstart));
+        hifs_info("user link up'd at %ld seconds after hi_command start, waiting on kernel if applicable.\n", (GET_TIME() - hifs_user_link.clockstart));
     } else {
         value = 0;
     }
