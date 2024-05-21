@@ -66,10 +66,10 @@ int read_from_atomic(enum hifs_module program);
 int write_to_atomic(int value, enum hifs_module program);
 int write_to_inode_dev(void);
 int write_to_block_dev(void);
-int write_to_cmd_dev(void);
-int read_from_inode_dev(char *dev_file);
-int read_from_block_dev(char *dev_file);
-int read_from_cmd_dev(char *dev_file);
+int write_to_cmd_dev( struct hifs_cmds *send_data);
+int read_from_inode_dev(void);
+int read_from_block_dev(void);
+int read_from_cmd_dev(void);
 void hi_comm_close_queues(void);
 char *hifs_strlcpy(char *dest_string, const char *src_string, int max_size);
 
@@ -82,3 +82,40 @@ int save_binary_data(char *data_block, char *hash);
 int register_hive_host(void);
 
 // Prototypes Here/
+
+
+/***************************
+ * Hi_Command Log Functions
+ ***************************/
+
+#define hifs_emerg(f, a...)						\
+		printf("hi_commond: EMERGENCY (file: %s, line: %d): funct: %s:\n", __FILE__, __LINE__, __func__);     \
+		printf("hi_commond: EMERGENCY " f "\n", ## a)
+
+#define hifs_alert(f, a...)	                    \
+		printf("hi_commond: ALERT (file: %s, line: %d): funct: %s:\n", __FILE__, __LINE__, __func__);		  \
+		printf("hi_commond: ALERT " f "\n", ## a)
+
+#define hifs_crit(f, a...)	                    \
+		printf("hi_commond: CRITICAL (file: %s, line: %d): funct: %s:\n",	__FILE__, __LINE__, __func__);	  \
+		printf("hi_commond: CRITICAL " f "\n", ## a)
+
+#define hifs_err(f, a...)	                    \
+		printf("hi_commond: ERROR (file: %s, line: %d): funct: %s:\n",	__FILE__, __LINE__, __func__);	      \
+		printf("hi_commond: ERROR " f "\n", ## a)
+
+#define hifs_warning(f, a...)	                \
+		printf("hi_commond: WARNING (file: %s, line: %d): funct: %s:\n", __FILE__, __LINE__, __func__);	      \
+		printf("hi_commond: WARNING " f "\n", ## a)
+
+#define hifs_notice(f, a...)	                \
+		printf("hi_commond: NOTICE (file: %s, line: %d): funct: %s:\n",	__FILE__, __LINE__, __func__);	      \
+		printf("hi_commond: NOTICE " f "\n", ## a)
+
+#define hifs_info(f, a...)	                    \
+		printf("hi_commond: INFO (file: %s, line: %d): funct: %s:\n",	__FILE__, __LINE__, __func__);		  \
+		printf("hi_commond: INFO " f "\n", ## a)
+
+#define hifs_debug(f, a...)		                \
+		printf("hi_commond: DEBUG (file: %s, line: %d): funct: %s:\n", __FILE__, __LINE__, __func__);		  \
+		printf("hi_commond: DEBUG " f "\n", ## a)
