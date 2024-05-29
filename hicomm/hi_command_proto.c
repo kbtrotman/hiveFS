@@ -57,7 +57,7 @@ void write_to_queue(void)
             return;
         } else if (ret == 0) {
             // Just keep cycling until we have data to send, ending up here means the queue is empty right now.
-            hifs_info("The send queues are empty, waiting and checking...\n");
+            hifs_info("The user queues are empty, waiting and checking...\n");
             return;
         } else {
             hifs_debug("Wrote %d bytes to device file: %s\n", ret, device_file_cmd);
@@ -78,6 +78,10 @@ void read_from_queue(void)
     ret = read_from_cmd_dev();
     if (ret < 0) {
         hifs_err("Error reading from device file: %s\n", device_file_cmd);
+        return;
+    } else if (ret == 0) {
+        // Just keep cycling until we have data to send, ending up here means the queue is empty right now.
+        hifs_info("The kernel queues are empty, waiting and checking...\n");
         return;
     } else {
         hifs_info("Read %d bytes from device file: %s\n", ret, device_file_cmd);
