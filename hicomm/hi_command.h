@@ -90,32 +90,32 @@ int register_hive_host(void);
 
 #define hifs_emerg(f, a...)						\
 		printf("hi_commond: EMERGENCY (file: %s, line: %d): funct: %s:\n", __FILE__, __LINE__, __func__);     \
-		printf("hi_commond: EMERGENCY " f "\n", ## a)
+		printf("hi_commond: EMERGENCY " f, ## a)
 
 #define hifs_alert(f, a...)	                    \
 		printf("hi_commond: ALERT (file: %s, line: %d): funct: %s:\n", __FILE__, __LINE__, __func__);		  \
-		printf("hi_commond: ALERT " f "\n", ## a)
+		printf("hi_commond: ALERT " f, ## a)
 
 #define hifs_crit(f, a...)	                    \
 		printf("hi_commond: CRITICAL (file: %s, line: %d): funct: %s:\n",	__FILE__, __LINE__, __func__);	  \
-		printf("hi_commond: CRITICAL " f "\n", ## a)
+		printf("hi_commond: CRITICAL " f, ## a)
 
 #define hifs_err(f, a...)	                    \
 		printf("hi_commond: ERROR (file: %s, line: %d): funct: %s:\n",	__FILE__, __LINE__, __func__);	      \
-		printf("hi_commond: ERROR " f "\n", ## a)
+		printf("hi_commond: ERROR " f, ## a)
 
 #define hifs_warning(f, a...)	                \
 		printf("hi_commond: WARNING (file: %s, line: %d): funct: %s:\n", __FILE__, __LINE__, __func__);	      \
-		printf("hi_commond: WARNING " f "\n", ## a)
+		printf("hi_commond: WARNING " f, ## a)
 
 #define hifs_notice(f, a...)	                \
 		printf("hi_commond: NOTICE (file: %s, line: %d): funct: %s:\n",	__FILE__, __LINE__, __func__);	      \
-		printf("hi_commond: NOTICE " f "\n", ## a)
+		printf("hi_commond: NOTICE " f, ## a)
 
 #define hifs_info(f, a...)	                    \
 		printf("hi_commond: INFO (file: %s, line: %d): funct: %s:\n",	__FILE__, __LINE__, __func__);		  \
-		printf("hi_commond: INFO " f "\n", ## a)
+		printf("hi_commond: INFO " f, ## a)
 
 #define hifs_debug(f, a...)		                \
 		printf("hi_commond: DEBUG (file: %s, line: %d): funct: %s:\n", __FILE__, __LINE__, __func__);		  \
-		printf("hi_commond: DEBUG " f "\n", ## a)
+		printf("hi_commond: DEBUG " f, ## a)

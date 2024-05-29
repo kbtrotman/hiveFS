@@ -38,8 +38,8 @@ struct list_head shared_inode_incoming_lst;
 struct list_head shared_block_incoming_lst;   
 struct list_head shared_cmd_incoming_lst;   
 
-bool can_write = false;
-bool can_read  = false;
+bool hifs_poll_write;
+bool hifs_poll_read;
 
 DECLARE_WAIT_QUEUE_HEAD(waitqueue);
 DECLARE_WAIT_QUEUE_HEAD(thread_wq);
@@ -318,7 +318,7 @@ ssize_t hi_comm_inode_device_read(struct file *filep, char __user *buf, size_t c
         return 0; // the system call was interrupted by a signal
     }
 
-    hifs_info("[INODE] Copying command data [%s] with [%ld] characters to buffer size [%ld]\n", send_data_user->i_name, send_len, count);
+    hifs_debug("[INODE] Copying command data [%s] with [%ld] characters to buffer size [%ld]\n", send_data_user->i_name, send_len, count);
     if (copy_to_user(buf, send_data_user, send_len) != 0) {
         result = -EFAULT;
     } else {
@@ -326,7 +326,7 @@ ssize_t hi_comm_inode_device_read(struct file *filep, char __user *buf, size_t c
     }
 
     mutex_unlock(&inode_mutex);    // Unlock mutex on char device right after send.
-    can_write = true;
+    hifs_poll_write = true;
     wake_up(&waitqueue);
     if (send_data_user) { kfree(send_data_user); }
     send_data_user = NULL;
@@ -364,7 +364,7 @@ ssize_t hi_comm_block_device_read(struct file *filep, char __user *buf, size_t c
         return 0; // the system call was interrupted by a signal
     }
 
-    hifs_info("[BLOCK] Copying command data [%s] with [%ld] characters to buffer size [%ld]\n", send_data_user->block, send_len, count);
+    hifs_debug("[BLOCK] Copying command data [%s] with [%ld] characters to buffer size [%ld]\n", send_data_user->block, send_len, count);
     if (copy_to_user(buf, send_data_user, send_len) != 0) {
         result = -EFAULT;
     } else {
@@ -372,7 +372,7 @@ ssize_t hi_comm_block_device_read(struct file *filep, char __user *buf, size_t c
     }
 
     mutex_unlock(&block_mutex);    // Unlock mutex on char device right after send.
-    can_write = true;
+    hifs_poll_write = true;
     wake_up(&waitqueue);
     if (send_data_user) { kfree(send_data_user); }
     send_data_user = NULL;
@@ -411,7 +411,7 @@ ssize_t hi_comm_cmd_device_read(struct file *filep, char __user *buf, size_t cou
         return 0; // the system call was interrupted by a signal
     }
 
-    hifs_info("[CMD] Copying command data [%s] with [%ld] characters to buffer size [%ld]\n", send_data_user->cmd, send_len, count);
+    hifs_debug("[CMD] Copying command data [%s] with [%ld] characters to buffer size [%ld]\n", send_data_user->cmd, send_len, count);
     if (copy_to_user(buf, send_data_user, send_len) != 0) {
         result = -EFAULT;
     } else {
@@ -419,7 +419,7 @@ ssize_t hi_comm_cmd_device_read(struct file *filep, char __user *buf, size_t cou
     }
 
     mutex_unlock(&cmd_mutex);    // Unlock mutex on char device right after send.
-    can_write = true;
+    hifs_poll_write = true;
     wake_up(&waitqueue);
     if (send_data_user) { kfree(send_data_user); }
     send_data_user = NULL;
@@ -478,11 +478,10 @@ ssize_t hi_comm_inode_device_write(struct file *filep, const char  __user *buffe
     result = min(sizeof(*shared_inode_incoming), count);
     list_add(&shared_inode_incoming->hifs_inode_list, &shared_inode_incoming_lst);
     hifs_info("Added new Inode to the kernel incoming queue")
-    can_read = true;
     //wake up the waitqueue
     wake_up(&waitqueue);
     shared_inode_incoming = NULL;
-
+    hifs_poll_read = true;
     return result;
 }
 
@@ -500,11 +499,10 @@ ssize_t hi_comm_block_device_write(struct file *filep, const char __user *buffer
     result = min(sizeof(*shared_block_incoming), count);
     list_add(&shared_block_incoming->hifs_block_list, &shared_block_incoming_lst);
     hifs_info("Added new Block to the kernel incoming queue")
-    can_read = true;
     //wake up the waitqueue
     wake_up(&waitqueue);
     shared_block_incoming = NULL;
-
+    hifs_poll_read = true;
     return result;
 }
 
@@ -520,13 +518,13 @@ ssize_t hi_comm_cmd_device_write(struct file *filep, const char __user *buffer, 
     }
 
     result = min(sizeof(*shared_cmd_incoming), count);
+    hifs_debug("Read command [%s] and count [%d] with size [%ld]", shared_cmd_incoming->cmd, shared_cmd_incoming->count, result);
     list_add(&shared_cmd_incoming->hifs_cmd_list, &shared_cmd_incoming_lst);
     hifs_info("Added new Command to the kernel incoming queue")
-    can_read = true;
     //wake up the waitqueue
     wake_up(&waitqueue);
     shared_cmd_incoming = NULL;
-
+    hifs_poll_read = true;
     return result;
 }
 
@@ -534,19 +532,17 @@ __poll_t hifs_inode_device_poll (struct file *filp, poll_table *wait) {
     __poll_t mask = 0;
     poll_wait(filp, &waitqueue, wait);
     hifs_info("Polling for INODE\n");
-    if( can_read )
+    if( hifs_poll_read )
     {
-        can_read = false;
+        hifs_poll_read = false;
         mask |= ( POLLIN | POLLRDNORM );
     }
 
-    if( can_write )
+    if( hifs_poll_write )
     {
-        can_write = false;
+        hifs_poll_write = false;
         mask |= ( POLLOUT | POLLWRNORM );
     }
-
-    // Go through Queues
 
     return mask;
 }
@@ -555,19 +551,17 @@ __poll_t hifs_block_device_poll (struct file *filp, poll_table *wait) {
     __poll_t mask = 0;
     poll_wait(filp, &waitqueue, wait);
     hifs_info("Polling for BLOCK\n");
-    if( can_read )
+    if( hifs_poll_read )
     {
-        can_read = false;
+        hifs_poll_read = false;
         mask |= ( POLLIN | POLLRDNORM );
     }
 
-    if( can_write )
+    if( hifs_poll_write )
     {
-        can_write = false;
+        hifs_poll_write = false;
         mask |= ( POLLOUT | POLLWRNORM );
     }
-
-    // Go through Queues
 
     return mask;
 }
@@ -577,19 +571,17 @@ __poll_t hifs_cmd_device_poll (struct file *filp, poll_table *wait) {
     poll_wait(filp, &waitqueue, wait);
     hifs_info("Polling for CMD\n");
 
-    if( can_read )
+    if( hifs_poll_read )
     {
-        can_read = false;
+        hifs_poll_read = false;
         mask |= ( POLLIN );
     }
 
-    if( can_write )
+    if( hifs_poll_write )
     {
-        can_write = false;
+        hifs_poll_write = false;
         mask |= ( POLLOUT | POLLWRNORM );
     }
-
-    // Go through Queues
 
     return mask;
 }

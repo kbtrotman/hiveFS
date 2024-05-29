@@ -53,7 +53,7 @@ void write_to_queue(void)
         hifs_strlcpy(command, send_data->cmd, HIFS_MAX_CMD_SIZE);
         ret = write_to_cmd_dev(send_data);
         if (ret < 0) {
-            hifs_info("Error writing to device file: %s\n", device_file_cmd);
+            hifs_err("Error writing to device file: %s\n", device_file_cmd);
             return;
         } else if (ret == 0) {
             // Just keep cycling until we have data to send, ending up here means the queue is empty right now.
@@ -77,7 +77,7 @@ void read_from_queue(void)
     hifs_info("Reading from queue...\n");
     ret = read_from_cmd_dev();
     if (ret < 0) {
-        hifs_info("Error reading from device file: %s\n", device_file_cmd);
+        hifs_err("Error reading from device file: %s\n", device_file_cmd);
         return;
     } else {
         hifs_info("Read %d bytes from device file: %s\n", ret, device_file_cmd);
