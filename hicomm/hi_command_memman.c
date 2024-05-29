@@ -178,6 +178,7 @@ int read_from_cmd_dev( void )
         hifs_strlcpy(shared_cmd_incoming->cmd, send_data_user->cmd, HIFS_MAX_CMD_SIZE);
         hifs_debug("hi_command: Received command [%s] with [%d] count\n", shared_cmd_incoming->cmd, shared_cmd_incoming->count);
     } else if (result == 0) {
+        hifs_info("hi_command: Read zero bytes. Read queue is empty, returning to process again\n");
         return 0;
     } else {
         // Handle error

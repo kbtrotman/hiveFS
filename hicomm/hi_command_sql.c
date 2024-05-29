@@ -91,6 +91,22 @@ int save_binary_data(char *data_block, char *hash)
 
 int register_hive_host(void) 
 {
+    char *hive_mach_id;
+    long hive_host_id;
+    hive_mach_id = hifs_get_machine_id();
+    hive_host_id = hifs_get_host_id();
+
+    hifs_info("Hive machine ID is [%s] and host ID is [%ld]\n", hive_mach_id, hive_host_id);
+
+    printf("\n\n");
+    
+    char c;
+    do{
+        printf("Do you want to register this host to the hive? (y/n)");
+        scanf(" %c",&c); c = tolower(c);
+    }while(c != 'n' && c != 'y');
+    if (c == 'n') return 0;
+    hifs_info("Registering machine to Hive.\n");
     //char *ins_sql = "INSERT INTO machines (host_name, host_ip, host_port, host_vers) VALUES ('%s', '%s', '%s', '%s');";
     //char *quoted_sql = (char *) malloc(strlen(ins_sql) + quoted_host.length() + quoted_ip.length() + quoted_port.length() + quoted_vers.length() + 1);
     //sprintf(quoted_sql, ins_sql, quoted_host.c_str(), quoted_ip.c_str(), quoted_port.c_str(), quoted_vers.c_str());
