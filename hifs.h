@@ -52,6 +52,9 @@ extern struct class *user_atomic_class;
 extern wait_queue_head_t waitqueue;
 extern wait_queue_head_t thread_wq;
 
+extern bool hifs_poll_write;
+extern bool hifs_poll_read;
+
 /*hi_command_kern.c*/
 int hifs_create_test_inode(void);
 int hifs_thread_fn(void *data);
@@ -203,7 +206,7 @@ struct hifs_olt
 
 #define hifs_notice(f, a...)	                \
 		printk(KERN_NOTICE "hive-fs: NOTICE (file: %s, line: %d): funct: %s:\n",	__FILE__, __LINE__, __func__);		\
-		printk(KERN_NOTICE "hive-fs: NOTICE " f, ## a);
+		printk(KERN_NOTICE "hive-fs: NOTICE " f "\n", ## a);
 
 #define hifs_info(f, a...)	                    \
 		printk(KERN_INFO "hive-fs: INFO (file: %s, line: %d): funct: %s:\n",	__FILE__, __LINE__, __func__);			\

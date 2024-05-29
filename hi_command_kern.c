@@ -144,6 +144,9 @@ int hifs_thread_fn(void *data) {
             hifs_comm_set_program_up(HIFS_COMM_PROGRAM_USER_HICOMM);
         }
         //hifs_notice("kernel link is [%d], user link is [%d], cycling...\n", hifs_kern_link.state, hifs_user_link.state);
+
+        // Check for things to send...
+        
     }
 
     return 0;

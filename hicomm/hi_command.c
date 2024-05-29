@@ -90,13 +90,13 @@ int main(int argc, char *argv[])
     block_pfd = malloc(sizeof(struct pollfd));
 
     fd_cmd = open(device_file_cmd, O_RDWR | O_NONBLOCK);   
-    if( fd_cmd == -1 )  { perror("hi-command: open [CMD queue]\n"); exit(EXIT_FAILURE); }
+    if( fd_cmd == -1 )  { hifs_err("hi-command: error in open [CMD queue]\n"); exit(EXIT_FAILURE); }
 
     fd_inode = open(device_file_cmd, O_RDWR | O_NONBLOCK);   
-    if( fd_inode == -1 )  { perror("hi-command: open [INODE queue]\n"); exit(EXIT_FAILURE); }
+    if( fd_inode == -1 )  { hifs_err("hi-command: error in open [INODE queue]\n"); exit(EXIT_FAILURE); }
 
     fd_block = open(device_file_cmd, O_RDWR | O_NONBLOCK);   
-    if( fd_block == -1 )  { perror("hi-command: open [BLOCK queue]\n"); exit(EXIT_FAILURE); }
+    if( fd_block == -1 )  { hifs_err("hi-command: error in open [BLOCK queue]\n"); exit(EXIT_FAILURE); }
 
     hifs_init_queues();
 
@@ -115,34 +115,34 @@ int main(int argc, char *argv[])
 while (1) {
     kern_atomic_value = hifs_comm_check_program_up(HIFS_COMM_PROGRAM_KERN_MOD);
     if (kern_atomic_value == HIFS_COMM_LINK_DOWN) {
-        printf("hi-command: Kernel link is down. Waiting for kernel module to come up...\n");
+        hifs_info("hi-command: Kernel link is down. Waiting for kernel module to come up...\n");
         continue;
     } else if (hifs_kern_link.state == HIFS_COMM_LINK_DOWN) {
-        printf("hi-command: Kernel link was recently up'd. Proceeding...\n");
+        hifs_info("hi-command: Kernel link was recently up'd. Proceeding...\n");
         hifs_comm_set_program_up(HIFS_COMM_PROGRAM_KERN_MOD);
     }
 
-    printf("hi-command: Looping polls...\n");
+    hifs_info("hi-command: Looping polls...\n");
     ret = poll(cmd_pfd, (unsigned long)1, 3000);   //wait for 5secs
     
     if( ret < 0 ) 
     {
-        perror("hi-command: poll\n");
+        hifs_info("hi-command: poll\n");
         assert(0);
     }
     
     //User-space has total access to this file, so the order here determines which direction is processed first.
-    if( ( cmd_pfd->revents & POLLOUT )  == POLLOUT )
+    if( ( cmd_pfd->revents & POLLIN )  == POLLIN )
     {   
         read_from_queue();
         printf("hi-command: POLLOUT (Read from user side finished\n");
     }
 
     write_to_queue();
-    printf("hi-command: POLLIN (Write from user side finished)\n");
+    hifs_info("hi-command: POLLIN (Write from user side finished)\n");
     
-    printf("hi-command: kernel module status is: %d\n", hifs_kern_link.state);
-    printf("hi-command: user-space status is: %d\n", hifs_user_link.state);
+    hifs_debug("hi-command: kernel module status is: %d\n", hifs_kern_link.state);
+    hifs_debug("hi-command: user-space status is: %d\n", hifs_user_link.state);
 }
     
 }
