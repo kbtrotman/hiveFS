@@ -39,10 +39,13 @@
 
 
 #define TAB_COUNT 4
-#define TAB_NAME_LENGTH 15
-#define TAB_WIDTH 25
 #define TAB_HEIGHT 3
+#define TAB_WIDTH 80
+#define TAB_NAME_LENGTH 15
+#define TAB_HEADER_HEIGHT 3
+#define TAB_CONTENT_HEIGHT 20
 
+extern WINDOW *tab_headers;
 extern PANEL *tab_panels[TAB_COUNT];
 extern const char Tab_Names[TAB_COUNT][TAB_NAME_LENGTH];
 extern WINDOW *tabs[TAB_COUNT];
@@ -88,7 +91,7 @@ void hi_comm_close_queues(void);
 char *hifs_strlcpy(char *dest_string, const char *src_string, int max_size);
 
 /* hi_command_sql.c */
-void execute_sql(char* sql_string);
+int execute_sql(char* sql_string);
 void init_hive_link(void);
 void close_hive_link (void);
 int get_hive_vers(void);
@@ -96,11 +99,12 @@ int save_binary_data(char *data_block, char *hash);
 int register_hive_host(void);
 
 /* hi_command_io.c */
+void draw_tab_headers( void );
+void switch_tab(int tab_index);
 long hifs_get_host_id( void );
 char *hifs_get_machine_id( void );
 char *hifs_read_file_to_string( char filename[50] );
-void draw_tabs(WINDOW *tabs[], int current_tab);
-void draw_tab_content(WINDOW *tab_content, int tab_index);
+void hicomm_draw_tab_contents( void );
 void log_to_window(WINDOW *win, const char *format, ...);
 // Prototypes Here/
 

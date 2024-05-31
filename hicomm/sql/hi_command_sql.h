@@ -20,14 +20,19 @@
 #define NO_RECORDS 0x099
 #define DBSTRING "user=" USER " dbname=" DATABASE " password=" PASSWORD " hostaddr=" HOST " port=" PORT
 
+#define MACHINE_INSERT(buffer, a,b,c,d,e,f) sprintf("INSERT INTO machines (name, machine_id, host_id, ip_address, os_name, os_version) VALUES ('%s', '%s', '%s', '%s', '%s', '%s');",a,b,c,d,e,f);
+
+#define MACHINE_GETINFO(a, buffer) sprintf(buffer, "SELECT FROM machines name, host_id, ip_address, os_name, os_version WHERE machine_id = '%s';", a)
+
+
 /* SQL Connect */
 struct PSQL {
 	PGconn *hive_conn;	/* Connection to hive */
 	PGresult   *last_qury; /* Last query result */
 	PGresult   *last_ins; /* Last insert result */
 	int  rec_count;     /* Number of records in last query */
-	int  row;
-	int  col;
+	int  rows;
+	int  cols;
 	bool sql_init;
 };
 extern struct PSQL sqldb;

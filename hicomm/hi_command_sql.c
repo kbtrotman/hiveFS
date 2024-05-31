@@ -46,18 +46,18 @@ int get_hive_vers()
         return hi_psql_vers;
 }
 
-void execute_sql(char* sql_string) 
+int execute_sql(char* sql_string) 
 {
     PGresult *res = PQexec(sqldb.hive_conn, sql_string);
     if (PQresultStatus(res) != PGRES_COMMAND_OK) {
         hifs_err("SQL execution failed: %s\n", PQerrorMessage(sqldb.hive_conn));
         PQclear(res);
         //PQfinish(sql.hive_conn);
-        return;
+        return -1;
     }
-
-    PQclear(res);
-    //PQfinish(sql.hive_conn);
+    sqldb.last_qury = res;
+    sqldb.rows = atoi(PQcmdTuples(res));
+    return 0;
 }
 
 int save_binary_data(char *data_block, char *hash)
@@ -89,36 +89,52 @@ int save_binary_data(char *data_block, char *hash)
     return 0;
 }
 
+
+int get_hive_host_data(char *machine_id) 
+{
+    char sql_query[512];
+    int res = 0;
+    MACHINE_GETINFO(machine_id, sql_query);
+    res = execute_sql(sql_query); 
+    return res;
+}
+
 int register_hive_host(void) 
 {
     char *hive_mach_id;
     long hive_host_id;
+    int nFields;
     hive_mach_id = hifs_get_machine_id();
     hive_host_id = hifs_get_host_id();
 
     hifs_info("Hive machine ID is [%s] and host ID is [%ld]\n", hive_mach_id, hive_host_id);
 
+    get_hive_host_data(hive_mach_id);
+    if ( sqldb.rows > 0 ) {
+        // Populate Host Data
+        /* first, print out the attribute names */
+        nFields = PQnfields(sqldb.last_qury);
+        for (int i = 0; i < nFields; i++)
+            printf("%-15s", PQfname(sqldb.last_qury, i));
+        printf("\n\n");
+
+        /* next, print out the rows */
+        for (int i = 0; i < PQntuples(sqldb.last_qury); i++)
+        {
+            for (int j = 0; j < nFields; j++)
+                printf("%-15s", PQgetvalue(sqldb.last_qury, i, j));
+            printf("\n");
+        }
+    } else {
+        char c;
+        do{
+            printf("This host does not exist in the hive. Filesystems cannot be mounted without a hive connection.\nDo you want to register this host to the hive now to obtain filesystems? (y/n)");
+            scanf(" %c",&c); c = tolower(c);
+        }while(c != 'n' && c != 'y');
+        if (c == 'n') return 0;
+        hifs_info("Registering machine to Hive.\n");
+    }
     printf("\n\n");
     
-    char c;
-    do{
-        printf("Do you want to register this host to the hive? (y/n)");
-        scanf(" %c",&c); c = tolower(c);
-    }while(c != 'n' && c != 'y');
-    if (c == 'n') return 0;
-    hifs_info("Registering machine to Hive.\n");
-    //char *ins_sql = "INSERT INTO machines (host_name, host_ip, host_port, host_vers) VALUES ('%s', '%s', '%s', '%s');";
-    //char *quoted_sql = (char *) malloc(strlen(ins_sql) + quoted_host.length() + quoted_ip.length() + quoted_port.length() + quoted_vers.length() + 1);
-    //sprintf(quoted_sql, ins_sql, quoted_host.c_str(), quoted_ip.c_str(), quoted_port.c_str(), quoted_vers.c_str());
-    //PGresult *res = PQexec(sql.hive_conn, quoted_sql);
-    //if (PQresultStatus(res) != PGRES_COMMAND_OK) {
-    //    sql.rows = 0;
-        /* PROBLEM */
-    //} else {
-    //    sql.rows = atoi(PQcmdTuples(res));
-    //    sql.last_res = res;
-    //}
-
-    //PQclear(res);
     return 0;
 }

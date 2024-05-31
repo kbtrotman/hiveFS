@@ -55,19 +55,21 @@ const char Tab_Names[TAB_COUNT][TAB_NAME_LENGTH] = {
 };
 
 PANEL *tab_panels[TAB_COUNT];
-WINDOW *tabs[TAB_COUNT];
 WINDOW *tab_content[TAB_COUNT];
+WINDOW *tab_headers;
 
 int main(int argc, char *argv[])
 {
     int ret;
+    int ch;
+    int current_tab = 0;
 
     hifs_user_link.clockstart = GET_TIME();
     sqldb.hive_conn = NULL;
     sqldb.last_qury = NULL;
     sqldb.last_ins = NULL;
-    sqldb.col = 0;
-    sqldb.row = 0;
+    sqldb.cols = 0;
+    sqldb.rows = 0;
     sqldb.rec_count = 0;
     sqldb.sql_init = false;
 
@@ -119,82 +121,78 @@ int main(int argc, char *argv[])
     hifs_comm_set_program_up(HIFS_COMM_PROGRAM_USER_HICOMM);
     hifs_comm_set_program_up(HIFS_COMM_PROGRAM_KERN_MOD);
 
-    initscr();
-    cbreak();
-    noecho();
-    clear();
-    keypad(stdscr, TRUE);
+    //hicomm_draw_tab_contents();
 
-    int ch;
-    int current_tab = 0;
-
-    // Create tab windows
-    for (int i = 0; i < TAB_COUNT; i++) {
-        tabs[i] = newwin(TAB_HEIGHT, TAB_WIDTH, 0, i * TAB_WIDTH);
-        tab_content[i] = newwin(TAB_HEIGHT, TAB_WIDTH, i * (TAB_HEIGHT + 1) + 1, 0); // Tab content
-        tab_panels[i] = new_panel(tab_content[i]);
-        wrefresh(tabs[i]);
-    }
-    show_panel(tab_panels[1]);
-    update_panels();
-    doupdate();
     init_hive_link();
 
 
-while (1) {
-    kern_atomic_value = hifs_comm_check_program_up(HIFS_COMM_PROGRAM_KERN_MOD);
-    if (kern_atomic_value == HIFS_COMM_LINK_DOWN) {
-        hifs_info("hi-command: Kernel link is down. Waiting for kernel module to come up...\n");
-        continue;
-    } else if (hifs_kern_link.state == HIFS_COMM_LINK_DOWN) {
-        hifs_info("hi-command: Kernel link was recently up'd. Proceeding...\n");
-        hifs_comm_set_program_up(HIFS_COMM_PROGRAM_KERN_MOD);
+    while ((ch = getch()) != 'q') {
+        kern_atomic_value = hifs_comm_check_program_up(HIFS_COMM_PROGRAM_KERN_MOD);
+        if (kern_atomic_value == HIFS_COMM_LINK_DOWN) {
+            hifs_info("hi-command: Kernel link is down. Waiting for kernel module to come up...\n");
+            continue;
+        } else if (hifs_kern_link.state == HIFS_COMM_LINK_DOWN) {
+            hifs_info("hi-command: Kernel link was recently up'd. Proceeding...\n");
+            hifs_comm_set_program_up(HIFS_COMM_PROGRAM_KERN_MOD);
+        }
+
+        hifs_info("hi-command: Looping polls...\n");
+        ret = poll(cmd_pfd, (unsigned long)1, 300);   //wait for 3 secs
+        
+        if( ret < 0 ) 
+        {
+            hifs_info("hi-command: poll\n");
+            assert(0);
+        }
+        
+        //User-space has total access to this file, so the order here determines which direction is processed first.
+        if( ( cmd_pfd->revents & POLLIN )  == POLLIN )
+        {   
+            read_from_queue();
+            printf("hi-command: POLLOUT (Read from user side finished\n");
+        }
+
+        write_to_queue();
+        hifs_info("hi-command: POLLIN (Write from user side finished)\n");
+        
+        hifs_debug("hi-command: kernel module status is: %d\n", hifs_kern_link.state);
+        hifs_debug("hi-command: user-space status is: %d\n", hifs_user_link.state);
+
+        switch (ch) {
+            case 'q':
+                endwin();
+                exit(0);
+            case KEY_LEFT:
+                if (current_tab > 0) current_tab--;
+                break;
+            case KEY_RIGHT:
+                if (current_tab < TAB_COUNT - 1) current_tab++;
+                break;
+            case '1':
+                current_tab = 0;
+                break;
+            case '2':
+                current_tab = 1;
+                break;
+            case '3':
+                current_tab = 2;
+                break;
+            case '4':
+                current_tab = 3;
+                break;
+            default:
+                break;
+        }
+        switch_tab(current_tab);
     }
 
-    draw_tabs(tabs, current_tab);
-    draw_tab_content(tab_content[current_tab], current_tab);
-
-    show_panel(tab_panels[1]);
-    update_panels();
-    doupdate();
-
-    hifs_info("hi-command: Looping polls...\n");
-    ret = poll(cmd_pfd, (unsigned long)1, 300);   //wait for 3 secs
-    
-    if( ret < 0 ) 
-    {
-        hifs_info("hi-command: poll\n");
-        assert(0);
+    // Clean up
+    for (int i = 0; i < TAB_COUNT; i++) {
+        del_panel(tab_panels[i]);
+        delwin(tab_content[i]);
     }
-    
-    //User-space has total access to this file, so the order here determines which direction is processed first.
-    if( ( cmd_pfd->revents & POLLIN )  == POLLIN )
-    {   
-        read_from_queue();
-        printf("hi-command: POLLOUT (Read from user side finished\n");
-    }
+    delwin(tab_headers);
 
-    write_to_queue();
-    hifs_info("hi-command: POLLIN (Write from user side finished)\n");
-    
-    hifs_debug("hi-command: kernel module status is: %d\n", hifs_kern_link.state);
-    hifs_debug("hi-command: user-space status is: %d\n", hifs_user_link.state);
-
-    ch = getch();
-    switch (ch) {
-        case 'q':
-            endwin();
-            exit(0);
-        case KEY_LEFT:
-            if (current_tab > 0) current_tab--;
-            break;
-        case KEY_RIGHT:
-            if (current_tab < TAB_COUNT - 1) current_tab++;
-            break;
-        default:
-            mvwprintw(tab_content[0], 1, 1, "Key '%c' pressed in tab %d", ch, current_tab + 1);
-            break;
-    }
-}
+    endwin();
     
 }

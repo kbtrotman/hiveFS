@@ -9,26 +9,48 @@
 
 #include "hi_command.h"
 
+extern PANEL *tab_panels[TAB_COUNT];
+extern const char Tab_Names[TAB_COUNT][TAB_NAME_LENGTH];
+extern WINDOW *tabs[TAB_COUNT];
+extern WINDOW *tab_content[TAB_COUNT];
+extern WINDOW *tab_headers;
 
-void draw_tabs(WINDOW *tabs[], int current_tab) {
+void draw_tab_headers() {
     for (int i = 0; i < TAB_COUNT; i++) {
-        if (i == current_tab) {
-            wattron(tabs[i], A_REVERSE); // Highlight current tab
-        }
-        box(tabs[i], 0, 0);
-        mvwprintw(tabs[i], 1, 1, "%s", Tab_Names[i]);
-        if (i == current_tab) {
-            wattroff(tabs[i], A_REVERSE);
-        }
-        wrefresh(tabs[i]);
+        mvwprintw(tab_headers, 0, (i * TAB_WIDTH / TAB_COUNT), Tab_Names[i]);
     }
+    wrefresh(tab_headers);
 }
 
-void draw_tab_content(WINDOW *tab_content, int tab_index) {
-    werase(tab_content);
-    box(tab_content, 0, 0);
-    mvwprintw(tab_content, 1, 1, "%s", Tab_Names[tab_index]);
-    wrefresh(tab_content);
+void switch_tab(int tab_index) {
+    for (int i = 0; i < TAB_COUNT; i++) {
+        hide_panel(tab_panels[i]);
+    }
+    show_panel(tab_panels[tab_index]);
+    update_panels();
+    doupdate();
+}
+
+void hicomm_draw_tab_contents( void ) {
+    initscr();
+    cbreak();
+    noecho();
+    keypad(stdscr, TRUE);
+
+    // Create tab headers window
+    tab_headers = newwin(TAB_HEADER_HEIGHT, TAB_WIDTH, 0, 0);
+    draw_tab_headers();
+
+    // Initialize tab content windows and panels
+    for (int i = 0; i < TAB_COUNT; i++) {
+        tab_content[i] = newwin(TAB_CONTENT_HEIGHT, TAB_WIDTH, TAB_HEADER_HEIGHT, 0);
+        tab_panels[i] = new_panel(tab_content[i]);
+        wprintw(tab_content[i], "Content of Tab %d\n", i + 1);
+        wrefresh(tab_content[i]);
+    }
+
+    // Show the first tab initially
+    switch_tab(0);
 }
 
 long hifs_get_host_id( void ) {
