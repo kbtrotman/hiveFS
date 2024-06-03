@@ -39,17 +39,18 @@
 
 
 #define TAB_COUNT 4
-#define TAB_HEIGHT 3
-#define TAB_WIDTH 80
-#define TAB_NAME_LENGTH 15
-#define TAB_HEADER_HEIGHT 3
-#define TAB_CONTENT_HEIGHT 20
+#define TAB_HEIGHT 6
+#define TAB_WIDTH 20
+#define TAB_NAME_LENGTH 20
+#define TAB_HEADER_HEIGHT 6
+#define TAB_CONTENT_HEIGHT 30
+#define TAB_CONTENT_WIDTH 140
 
-extern WINDOW *tab_headers;
-extern PANEL *tab_panels[TAB_COUNT];
 extern const char Tab_Names[TAB_COUNT][TAB_NAME_LENGTH];
-extern WINDOW *tabs[TAB_COUNT];
 extern WINDOW *tab_content[TAB_COUNT];
+extern WINDOW *tab_headers[TAB_COUNT];
+extern PANEL *tab_panels[TAB_COUNT];
+extern int log_line;
 
 /*  This file is for definitions specific to the Hi_Command router in user-space.  */
 extern const char *kern_atomic_device;
@@ -66,7 +67,7 @@ extern char *device_file_block;
 extern char *device_file_cmd;
 extern int fd_cmd, fd_inode, fd_block;
 
-// Prototypes Here:
+// Prototypes Here:q
 
 /* hi_command.c */
 
@@ -99,12 +100,12 @@ int save_binary_data(char *data_block, char *hash);
 int register_hive_host(void);
 
 /* hi_command_io.c */
-void draw_tab_headers( void );
+void draw_tab_headers(int current_tab);
 void switch_tab(int tab_index);
 long hifs_get_host_id( void );
 char *hifs_get_machine_id( void );
 char *hifs_read_file_to_string( char filename[50] );
-void hicomm_draw_tab_contents( void );
+void hicomm_draw_tab_contents(int tab_index);
 void log_to_window(WINDOW *win, const char *format, ...);
 // Prototypes Here/
 
@@ -133,12 +134,12 @@ void log_to_window(WINDOW *win, const char *format, ...);
     log_to_window(tab_content[0], "hi_commond: WARNING " f "\n", ## a)
 
 #define hifs_notice(f, a...)                           \
-    log_to_window(tab_content[1], "hi_commond: NOTICE (file: %s, line: %d): funct: %s:\n", __FILE__, __LINE__, __func__);   \
-    log_to_window(tab_content[1], "hi_commond: NOTICE " f "\n", ## a)
+    log_to_window(tab_content[0], "hi_commond: NOTICE (file: %s, line: %d): funct: %s:\n", __FILE__, __LINE__, __func__);   \
+    log_to_window(tab_content[0], "hi_commond: NOTICE " f "\n", ## a)
 
 #define hifs_info(f, a...)                             \
-    log_to_window(tab_content[1], "hi_commond: INFO (file: %s, line: %d): funct: %s:\n", __FILE__, __LINE__, __func__);     \
-    log_to_window(tab_content[1], "hi_commond: INFO " f "\n", ## a)
+    log_to_window(tab_content[0], "hi_commond: INFO (file: %s, line: %d): funct: %s:\n", __FILE__, __LINE__, __func__);     \
+    log_to_window(tab_content[0], "hi_commond: INFO " f "\n", ## a)
 
 #define hifs_debug(f, a...)                            \
     log_to_window(tab_content[0], "hi_commond: DEBUG (file: %s, line: %d): funct: %s:\n", __FILE__, __LINE__, __func__);    \

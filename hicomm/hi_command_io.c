@@ -9,20 +9,30 @@
 
 #include "hi_command.h"
 
-extern PANEL *tab_panels[TAB_COUNT];
 extern const char Tab_Names[TAB_COUNT][TAB_NAME_LENGTH];
-extern WINDOW *tabs[TAB_COUNT];
 extern WINDOW *tab_content[TAB_COUNT];
-extern WINDOW *tab_headers;
+extern WINDOW *tab_headers[TAB_COUNT];
+extern PANEL *tab_panels[TAB_COUNT];
+extern int log_line;
 
-void draw_tab_headers() {
+void draw_tab_headers(int current_tab) 
+{
     for (int i = 0; i < TAB_COUNT; i++) {
-        mvwprintw(tab_headers, 0, (i * TAB_WIDTH / TAB_COUNT), Tab_Names[i]);
+        tab_headers[i] = newwin(1, TAB_WIDTH, i * TAB_HEIGHT, 0);
+        if (i == current_tab) {
+            wattron(tab_headers[i], A_REVERSE);
+        }
+        mvwprintw(tab_headers[i], 0, 0, Tab_Names[i]);
+        if (i == current_tab) {
+            wattroff(tab_headers[i], A_REVERSE);
+        }
+        //wprintw(tab_headers, "%s", Tab_Names[i]);
     }
-    wrefresh(tab_headers);
+    wrefresh(tab_headers[current_tab]);
 }
 
-void switch_tab(int tab_index) {
+void switch_tab(int tab_index) 
+{
     for (int i = 0; i < TAB_COUNT; i++) {
         hide_panel(tab_panels[i]);
     }
@@ -31,26 +41,16 @@ void switch_tab(int tab_index) {
     doupdate();
 }
 
-void hicomm_draw_tab_contents( void ) {
-    initscr();
-    cbreak();
-    noecho();
-    keypad(stdscr, TRUE);
-
-    // Create tab headers window
-    tab_headers = newwin(TAB_HEADER_HEIGHT, TAB_WIDTH, 0, 0);
-    draw_tab_headers();
+void hicomm_draw_tab_contents(int tab_index) 
+{
+    // Initialize tab headers window
+    draw_tab_headers(tab_index);
 
     // Initialize tab content windows and panels
     for (int i = 0; i < TAB_COUNT; i++) {
-        tab_content[i] = newwin(TAB_CONTENT_HEIGHT, TAB_WIDTH, TAB_HEADER_HEIGHT, 0);
+        tab_content[i] = newwin(TAB_CONTENT_HEIGHT, TAB_CONTENT_WIDTH, TAB_HEADER_HEIGHT + 1, 0);
         tab_panels[i] = new_panel(tab_content[i]);
-        wprintw(tab_content[i], "Content of Tab %d\n", i + 1);
-        wrefresh(tab_content[i]);
     }
-
-    // Show the first tab initially
-    switch_tab(0);
 }
 
 long hifs_get_host_id( void ) {
@@ -107,7 +107,8 @@ char *hifs_read_file_to_string( char filename[50] )
 void log_to_window(WINDOW *win, const char *format, ...) {
     va_list args;
     va_start(args, format);
-    vw_printw(win, format, args);
+    mvwprintw(win, log_line, 0, format, args);
     va_end(args);
     wrefresh(win); // Refresh to update the window
+    log_line++;
 }

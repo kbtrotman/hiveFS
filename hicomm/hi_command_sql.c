@@ -110,19 +110,20 @@ int register_hive_host(void)
     hifs_info("Hive machine ID is [%s] and host ID is [%ld]\n", hive_mach_id, hive_host_id);
 
     get_hive_host_data(hive_mach_id);
+
     if ( sqldb.rows > 0 ) {
         // Populate Host Data
         /* first, print out the attribute names */
         nFields = PQnfields(sqldb.last_qury);
         for (int i = 0; i < nFields; i++)
-            printf("%-15s", PQfname(sqldb.last_qury, i));
+            printf("%s", PQfname(sqldb.last_qury, i));
         printf("\n\n");
 
         /* next, print out the rows */
         for (int i = 0; i < PQntuples(sqldb.last_qury); i++)
         {
             for (int j = 0; j < nFields; j++)
-                printf("%-15s", PQgetvalue(sqldb.last_qury, i, j));
+                printf("%s", PQgetvalue(sqldb.last_qury, i, j));
             printf("\n");
         }
     } else {
