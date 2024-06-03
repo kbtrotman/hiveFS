@@ -54,9 +54,11 @@ const char Tab_Names[TAB_COUNT][TAB_NAME_LENGTH] = {
     "Cache Items"
 };
 
-PANEL *tab_panels[TAB_COUNT];
 WINDOW *tab_content[TAB_COUNT];
-WINDOW *tab_headers;
+WINDOW *tab_headers[TAB_COUNT];
+PANEL *tab_panels[TAB_COUNT];
+int log_line;
+
 
 int main(int argc, char *argv[])
 {
@@ -98,6 +100,14 @@ int main(int argc, char *argv[])
     inode_pfd = malloc(sizeof(struct pollfd));
     block_pfd = malloc(sizeof(struct pollfd));
 
+
+    initscr();
+    cbreak();
+    noecho();
+    keypad(stdscr, TRUE);
+    hicomm_draw_tab_contents(current_tab);
+
+
     fd_cmd = open(device_file_cmd, O_RDWR | O_NONBLOCK);   
     if( fd_cmd == -1 )  { hifs_err("hi-command: error in open [CMD queue]\n"); exit(EXIT_FAILURE); }
 
@@ -121,10 +131,7 @@ int main(int argc, char *argv[])
     hifs_comm_set_program_up(HIFS_COMM_PROGRAM_USER_HICOMM);
     hifs_comm_set_program_up(HIFS_COMM_PROGRAM_KERN_MOD);
 
-    //hicomm_draw_tab_contents();
-
     init_hive_link();
-
 
     while ((ch = getch()) != 'q') {
         kern_atomic_value = hifs_comm_check_program_up(HIFS_COMM_PROGRAM_KERN_MOD);
@@ -149,7 +156,7 @@ int main(int argc, char *argv[])
         if( ( cmd_pfd->revents & POLLIN )  == POLLIN )
         {   
             read_from_queue();
-            printf("hi-command: POLLOUT (Read from user side finished\n");
+            hifs_info("hi-command: POLLOUT (Read from user side finished\n");
         }
 
         write_to_queue();
@@ -184,14 +191,17 @@ int main(int argc, char *argv[])
                 break;
         }
         switch_tab(current_tab);
+        wrefresh(tab_headers[current_tab]);
+        wrefresh(tab_content[current_tab]);
     }
 
     // Clean up
     for (int i = 0; i < TAB_COUNT; i++) {
         del_panel(tab_panels[i]);
         delwin(tab_content[i]);
+        delwin(tab_headers[i]);
     }
-    delwin(tab_headers);
+   
 
     endwin();
     
