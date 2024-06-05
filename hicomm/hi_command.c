@@ -48,23 +48,22 @@ struct pollfd *inode_pfd;
 struct pollfd *block_pfd;
 
 const char Tab_Names[TAB_COUNT][TAB_NAME_LENGTH] = {
-    "Hi_Command Log",
-    "Queue Status",
-    "I/O Perf",
-    "Cache Items"
+    "Hi_Command Log    ",
+    "Queue Status      ",
+    "I/O Perf          ",
+    "Cache Items       "
 };
 
 WINDOW *tab_content[TAB_COUNT];
 WINDOW *tab_headers[TAB_COUNT];
 PANEL *tab_panels[TAB_COUNT];
-int log_line;
-
+int log_line = 1;
+int current_tab = 0;
 
 int main(int argc, char *argv[])
 {
     int ret;
     int ch;
-    int current_tab = 0;
 
     hifs_user_link.clockstart = GET_TIME();
     sqldb.hive_conn = NULL;
@@ -104,9 +103,9 @@ int main(int argc, char *argv[])
     initscr();
     cbreak();
     noecho();
-    keypad(stdscr, TRUE);
-    hicomm_draw_tab_contents(current_tab);
-
+    //keypad(stdscr, TRUE);
+    hicomm_draw_new_Content(current_tab);
+    hicomm_draw_tabs(current_tab);
 
     fd_cmd = open(device_file_cmd, O_RDWR | O_NONBLOCK);   
     if( fd_cmd == -1 )  { hifs_err("hi-command: error in open [CMD queue]\n"); exit(EXIT_FAILURE); }
@@ -167,6 +166,12 @@ int main(int argc, char *argv[])
 
         switch (ch) {
             case 'q':
+                // Clean up
+                for (int i = 0; i < TAB_COUNT; i++) {
+                    del_panel(tab_panels[i]);
+                    delwin(tab_content[i]);
+                    delwin(tab_headers[i]);
+                }
                 endwin();
                 exit(0);
             case KEY_LEFT:
@@ -174,6 +179,10 @@ int main(int argc, char *argv[])
                 break;
             case KEY_RIGHT:
                 if (current_tab < TAB_COUNT - 1) current_tab++;
+                break;
+            case KEY_BTAB:
+                if (current_tab < 3) current_tab++;
+                if (current_tab == 3) current_tab = 0;
                 break;
             case '1':
                 current_tab = 0;
@@ -191,8 +200,8 @@ int main(int argc, char *argv[])
                 break;
         }
         switch_tab(current_tab);
+        hicomm_draw_tabs(current_tab);
         wrefresh(tab_headers[current_tab]);
-        wrefresh(tab_content[current_tab]);
     }
 
     // Clean up
@@ -201,8 +210,6 @@ int main(int argc, char *argv[])
         delwin(tab_content[i]);
         delwin(tab_headers[i]);
     }
-   
-
     endwin();
     
 }

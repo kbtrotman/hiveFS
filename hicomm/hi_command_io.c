@@ -14,22 +14,7 @@ extern WINDOW *tab_content[TAB_COUNT];
 extern WINDOW *tab_headers[TAB_COUNT];
 extern PANEL *tab_panels[TAB_COUNT];
 extern int log_line;
-
-void draw_tab_headers(int current_tab) 
-{
-    for (int i = 0; i < TAB_COUNT; i++) {
-        tab_headers[i] = newwin(1, TAB_WIDTH, i * TAB_HEIGHT, 0);
-        if (i == current_tab) {
-            wattron(tab_headers[i], A_REVERSE);
-        }
-        mvwprintw(tab_headers[i], 0, 0, Tab_Names[i]);
-        if (i == current_tab) {
-            wattroff(tab_headers[i], A_REVERSE);
-        }
-        //wprintw(tab_headers, "%s", Tab_Names[i]);
-    }
-    wrefresh(tab_headers[current_tab]);
-}
+extern int current_tab;
 
 void switch_tab(int tab_index) 
 {
@@ -37,20 +22,79 @@ void switch_tab(int tab_index)
         hide_panel(tab_panels[i]);
     }
     show_panel(tab_panels[tab_index]);
+    top_panel(tab_panels[tab_index]);
     update_panels();
     doupdate();
 }
 
-void hicomm_draw_tab_contents(int tab_index) 
+void hicomm_draw_new_Content(int tab_index) 
 {
-    // Initialize tab headers window
-    draw_tab_headers(tab_index);
-
     // Initialize tab content windows and panels
     for (int i = 0; i < TAB_COUNT; i++) {
-        tab_content[i] = newwin(TAB_CONTENT_HEIGHT, TAB_CONTENT_WIDTH, TAB_HEADER_HEIGHT + 1, 0);
+        tab_headers[i] = newwin(TAB_HEADER_HEIGHT, TAB_WIDTH, 0, TAB_WIDTH * i);
+        box(tab_headers[i], 0, 0);
+        tab_content[i] = newwin(TAB_CONTENT_HEIGHT, TAB_CONTENT_WIDTH, TAB_HEADER_HEIGHT, 0);
+        box(tab_content[i], 0, 0);
         tab_panels[i] = new_panel(tab_content[i]);
+        wrefresh(tab_headers[i]);
     }
+    show_panel(tab_panels[0]);
+    top_panel(tab_panels[0]);
+    update_panels();
+    doupdate();
+}
+
+void hicomm_draw_tabs(int tab_index) 
+{
+    // Initialize tab headers window
+    // Initialize tab content windows and panels
+    for (int i = 0; i < TAB_COUNT; i++) {
+        if (i == tab_index) {
+            wattron(tab_headers[i], A_REVERSE);
+        }
+        mvwprintw(tab_headers[i], 1, 1, Tab_Names[i]);
+        box(tab_headers[i], 0, 0);
+        if (i == tab_index) {
+            wattroff(tab_headers[i], A_REVERSE);
+        }
+        wrefresh(tab_headers[i]);
+    }
+    doupdate();
+}
+
+int show_yes_no_dialog(const char *message) {
+    int startx, starty, width, height;
+    WINDOW *dialog_win;
+    int ch, response = 0;
+
+    height = 7; // Dialog box height
+    width = 80; // Dialog box width
+    starty = 30; // Center the dialog box
+    startx = (TAB_CONTENT_WIDTH - width) / 2;   // Center the dialog box
+
+    dialog_win = newwin(height, width, starty, startx);
+    box(dialog_win, 0, 0);
+    mvwprintw(dialog_win, 2, 2, "%s", message);
+    mvwprintw(dialog_win, 4, 2, "Press 'y' for Yes or 'n' for No");
+    wrefresh(dialog_win);
+
+    while (1) {
+        ch = wgetch(dialog_win);
+        if (ch == 'y' || ch == 'Y') {
+            response = 1;
+            break;
+        } else if (ch == 'n' || ch == 'N') {
+            response = 0;
+            break;
+        }
+    }
+
+    delwin(dialog_win);
+
+    update_panels(); // Update the panels after closing the dialog
+    doupdate();
+
+    return response;
 }
 
 long hifs_get_host_id( void ) {
@@ -104,11 +148,14 @@ char *hifs_read_file_to_string( char filename[50] )
     return NULL;
 }
 
-void log_to_window(WINDOW *win, const char *format, ...) {
-    va_list args;
-    va_start(args, format);
-    mvwprintw(win, log_line, 0, format, args);
-    va_end(args);
-    wrefresh(win); // Refresh to update the window
-    log_line++;
+void hifs_set_log(void) {
+    log_line += 2;
+    if (log_line >= TAB_CONTENT_HEIGHT) {
+        log_line = 1;
+        werase(tab_content[0]);
+    }
+    box(tab_content[0], 0, 0);
+    show_panel(tab_panels[current_tab]);
+    update_panels();
+    doupdate();
 }
