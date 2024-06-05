@@ -22,7 +22,14 @@
 #include <ctype.h>
 #include <ncurses.h>
 #include <panel.h>
-
+#include <sys/utsname.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <sys/ioctl.h>
+#include <netdb.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 
 // A user-space definition for a kernel-style Doubly Linked List
 // Modified by:  kazutomo@mcs.anl.gov
@@ -39,11 +46,11 @@
 
 
 #define TAB_COUNT 4
-#define TAB_HEIGHT 6
+#define TAB_HEIGHT 3
 #define TAB_WIDTH 20
 #define TAB_NAME_LENGTH 20
-#define TAB_HEADER_HEIGHT 6
-#define TAB_CONTENT_HEIGHT 30
+#define TAB_HEADER_HEIGHT 3
+#define TAB_CONTENT_HEIGHT 50
 #define TAB_CONTENT_WIDTH 140
 
 extern const char Tab_Names[TAB_COUNT][TAB_NAME_LENGTH];
@@ -51,6 +58,7 @@ extern WINDOW *tab_content[TAB_COUNT];
 extern WINDOW *tab_headers[TAB_COUNT];
 extern PANEL *tab_panels[TAB_COUNT];
 extern int log_line;
+extern int current_tab;
 
 /*  This file is for definitions specific to the Hi_Command router in user-space.  */
 extern const char *kern_atomic_device;
@@ -92,21 +100,23 @@ void hi_comm_close_queues(void);
 char *hifs_strlcpy(char *dest_string, const char *src_string, int max_size);
 
 /* hi_command_sql.c */
-int execute_sql(char* sql_string);
+PGresult *hifs_execute_sql(char* sql_string);
 void init_hive_link(void);
 void close_hive_link (void);
 int get_hive_vers(void);
 int save_binary_data(char *data_block, char *hash);
 int register_hive_host(void);
+PGresult *hifs_get_hive_host_data(char *machine_id);
 
 /* hi_command_io.c */
-void draw_tab_headers(int current_tab);
 void switch_tab(int tab_index);
 long hifs_get_host_id( void );
 char *hifs_get_machine_id( void );
 char *hifs_read_file_to_string( char filename[50] );
-void hicomm_draw_tab_contents(int tab_index);
-void log_to_window(WINDOW *win, const char *format, ...);
+void hicomm_draw_tabs(int tab_index);
+void hicomm_draw_new_Content(int tab_index);
+void hifs_set_log(void) ;
+int show_yes_no_dialog(const char *message);
 // Prototypes Here/
 
 
@@ -114,33 +124,51 @@ void log_to_window(WINDOW *win, const char *format, ...);
  * Hi_Command Log Functions
  ***************************/
 #define hifs_emerg(f, a...)                            \
-    log_to_window(tab_content[0], "hi_commond: EMERGENCY (file: %s, line: %d): funct: %s:\n", __FILE__, __LINE__, __func__); \
-    log_to_window(tab_content[0], "hi_commond: EMERGENCY " f "\n", ## a)
+    do {                                                 \
+    mvwprintw(tab_content[0], log_line, 1, "hi_commond: EMERGENCY (file: %s, line: %d): funct: %s:", __FILE__, __LINE__, __func__); \
+    mvwprintw(tab_content[0], log_line + 1, 1, "hi_commond: EMERGENCY " f, ## a);                                                \
+    hifs_set_log();\
+    } while (0)
 
 #define hifs_alert(f, a...)                            \
-    log_to_window(tab_content[0], "hi_commond: ALERT (file: %s, line: %d): funct: %s:\n", __FILE__, __LINE__, __func__);    \
-    log_to_window(tab_content[0], "hi_commond: ALERT " f "\n", ## a)
-
+    do {                                                 \
+    mvwprintw(tab_content[0], log_line, 1, "hi_commond: ALERT (file: %s, line: %d): funct: %s:", __FILE__, __LINE__, __func__);    \
+    mvwprintw(tab_content[0], log_line + 1, 1, "hi_commond: ALERT " f, ## a);                                                   \
+    hifs_set_log();\
+    } while (0)
 #define hifs_crit(f, a...)                             \
-    log_to_window(tab_content[0], "hi_commond: CRITICAL (file: %s, line: %d): funct: %s:\n", __FILE__, __LINE__, __func__); \
-    log_to_window(tab_content[0], "hi_commond: CRITICAL " f "\n", ## a)
-
+    do {                                                 \
+    mvwprintw(tab_content[0], log_line, 1, "hi_commond: CRITICAL (file: %s, line: %d): funct: %s:", __FILE__, __LINE__, __func__); \
+    mvwprintw(tab_content[0], log_line + 1, 1, "hi_commond: CRITICAL " f, ## a);                                                \
+    hifs_set_log();\
+    } while (0)
 #define hifs_err(f, a...)                              \
-    log_to_window(tab_content[0], "hi_commond: ERROR (file: %s, line: %d): funct: %s:\n", __FILE__, __LINE__, __func__);    \
-    log_to_window(tab_content[0], "hi_commond: ERROR " f "\n", ## a)
-
+    do {                                                 \
+    mvwprintw(tab_content[0], log_line, 1, "hi_commond: ERROR (file: %s, line: %d): funct: %s:", __FILE__, __LINE__, __func__);    \
+    mvwprintw(tab_content[0], log_line + 1, 1, "hi_commond: ERROR " f, ## a);                                                   \
+    hifs_set_log();\
+    } while (0)
 #define hifs_warning(f, a...)                          \
-    log_to_window(tab_content[0], "hi_commond: WARNING (file: %s, line: %d): funct: %s:\n", __FILE__, __LINE__, __func__);  \
-    log_to_window(tab_content[0], "hi_commond: WARNING " f "\n", ## a)
-
+    do {                                                 \
+    mvwprintw(tab_content[0], log_line, 1, "hi_commond: WARNING (file: %s, line: %d): funct: %s:", __FILE__, __LINE__, __func__);  \
+    mvwprintw(tab_content[0], log_line + 1, 1, "hi_commond: WARNING " f, ## a);                                                 \
+    hifs_set_log();\
+    } while (0)
 #define hifs_notice(f, a...)                           \
-    log_to_window(tab_content[0], "hi_commond: NOTICE (file: %s, line: %d): funct: %s:\n", __FILE__, __LINE__, __func__);   \
-    log_to_window(tab_content[0], "hi_commond: NOTICE " f "\n", ## a)
-
+    do {                                                 \
+    mvwprintw(tab_content[0], log_line, 1, "hi_commond: NOTICE (file: %s, line: %d): funct: %s:", __FILE__, __LINE__, __func__);   \
+    mvwprintw(tab_content[0], log_line + 1, 1, "hi_commond: NOTICE " f, ## a);                                                  \
+    hifs_set_log();\
+    } while (0)
 #define hifs_info(f, a...)                             \
-    log_to_window(tab_content[0], "hi_commond: INFO (file: %s, line: %d): funct: %s:\n", __FILE__, __LINE__, __func__);     \
-    log_to_window(tab_content[0], "hi_commond: INFO " f "\n", ## a)
-
+    do {                                                 \
+    mvwprintw(tab_content[0], log_line, 1, "hi_commond: INFO (file: %s, line: %d): funct: %s:", __FILE__, __LINE__, __func__);     \
+    mvwprintw(tab_content[0], log_line + 1, 1, "hi_commond: INFO " f, ## a);                                                    \
+    hifs_set_log();\
+    } while (0)
 #define hifs_debug(f, a...)                            \
-    log_to_window(tab_content[0], "hi_commond: DEBUG (file: %s, line: %d): funct: %s:\n", __FILE__, __LINE__, __func__);    \
-    log_to_window(tab_content[0], "hi_commond: DEBUG " f "\n", ## a)
+    do {                                                 \
+    mvwprintw(tab_content[0], log_line, 1, "hi_commond: DEBUG (file: %s, line: %d): funct: %s:", __FILE__, __LINE__, __func__);    \
+    mvwprintw(tab_content[0], log_line + 1, 1, "hi_commond: DEBUG " f, ## a);                                                   \
+    hifs_set_log();\
+    } while (0)

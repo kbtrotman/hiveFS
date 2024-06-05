@@ -46,18 +46,16 @@ int get_hive_vers()
         return hi_psql_vers;
 }
 
-int execute_sql(char* sql_string) 
+PGresult *hifs_execute_sql(char* sql_string) 
 {
     PGresult *res = PQexec(sqldb.hive_conn, sql_string);
     if (PQresultStatus(res) != PGRES_COMMAND_OK) {
         hifs_err("SQL execution failed: %s\n", PQerrorMessage(sqldb.hive_conn));
         PQclear(res);
-        //PQfinish(sql.hive_conn);
-        return -1;
+        return NULL;
     }
-    sqldb.last_qury = res;
-    sqldb.rows = atoi(PQcmdTuples(res));
-    return 0;
+    sqldb.rec_count = atoi(PQcmdTuples(res));
+    return res;
 }
 
 int save_binary_data(char *data_block, char *hash)
@@ -90,52 +88,143 @@ int save_binary_data(char *data_block, char *hash)
 }
 
 
-int get_hive_host_data(char *machine_id) 
+PGresult *hifs_get_hive_host_data(char *machine_id) 
 {
     char sql_query[512];
-    int res = 0;
+    PGresult *res;
     MACHINE_GETINFO(machine_id, sql_query);
-    res = execute_sql(sql_query); 
+    res = hifs_execute_sql(sql_query);
+    sqldb.last_qury = res;
+    sqldb.rows = atoi(PQcmdTuples(res)); 
     return res;
 }
 
 int register_hive_host(void) 
 {
-    char *hive_mach_id;
+    PGresult *res;
+    char *name, *hive_mach_id, *ip_address, *os_name, *os_version, *os_release, *machine_type;
+    struct hostent *host_entry;
+    struct utsname uts;
+    name = (char *) malloc(100);
+    hive_mach_id = (char *) malloc(100);
+    ip_address = (char *) malloc(30);
+    os_name = (char *) malloc(100);
+    os_version = (char *) malloc(100);
+    os_release = (char *) malloc(65);
+    machine_type = (char *) malloc(65);
+    host_entry = malloc(sizeof(struct hostent));
     long hive_host_id;
     int nFields;
+
+    gethostname(name, sizeof(name));
+    host_entry = gethostbyname(name);
+    ip_address = inet_ntoa(*((struct in_addr*)host_entry->h_addr_list[0]));
+    uname(&uts);
+    
+    os_name = uts.sysname;
+    os_version = uts.version;
+    os_release = uts.release;
+    machine_type = uts.machine;
+
     hive_mach_id = hifs_get_machine_id();
     hive_host_id = hifs_get_host_id();
 
     hifs_info("Hive machine ID is [%s] and host ID is [%ld]\n", hive_mach_id, hive_host_id);
 
-    get_hive_host_data(hive_mach_id);
-
+    res = hifs_get_hive_host_data(hive_mach_id);
+    sqldb.last_qury = res;
+    sqldb.rec_count = sqldb.rows = atoi(PQcmdTuples(res));
+    
     if ( sqldb.rows > 0 ) {
         // Populate Host Data
         /* first, print out the attribute names */
         nFields = PQnfields(sqldb.last_qury);
         for (int i = 0; i < nFields; i++)
-            printf("%s", PQfname(sqldb.last_qury, i));
-        printf("\n\n");
+            hifs_debug("%s", PQfname(sqldb.last_qury, i));
 
         /* next, print out the rows */
         for (int i = 0; i < PQntuples(sqldb.last_qury); i++)
         {
             for (int j = 0; j < nFields; j++)
-                printf("%s", PQgetvalue(sqldb.last_qury, i, j));
-            printf("\n");
+                hifs_debug("%s", PQgetvalue(sqldb.last_qury, i, j));
+
         }
     } else {
-        char c;
-        do{
-            printf("This host does not exist in the hive. Filesystems cannot be mounted without a hive connection.\nDo you want to register this host to the hive now to obtain filesystems? (y/n)");
-            scanf(" %c",&c); c = tolower(c);
-        }while(c != 'n' && c != 'y');
-        if (c == 'n') return 0;
-        hifs_info("Registering machine to Hive.\n");
+        PGresult *res;
+        char *sql_query;
+        int yes_no;
+        sql_query = (char *) malloc(100);
+        hifs_notice("This host does not exist in the hive. Filesystems cannot be mounted without a hive connection.");
+        hifs_notice();
+        yes_no = show_yes_no_dialog("This host is not part of the hive. Add it to the hive now?");
+        if (yes_no == 1) {
+            hifs_notice("Registering host to Hive.");
+            MACHINE_INSERT(sql_query, name, hive_mach_id, hive_host_id, ip_address, os_name, os_version, os_release, machine_type);
+            res = hifs_get_hive_host_data(sql_query);
+            sqldb.last_ins = res;
+            sqldb.rows_ins = atoi(PQcmdTuples(res));
+            return 0;
+        } else if (yes_no == 0) {
+            hifs_notice("Not registering host to Hive.");
+        }
+        return 1;
     }
-    printf("\n\n");
     
     return 0;
 }
+
+char *hifs_get_quoted_value(char *in_str) 
+{
+    size_t escaped_binary_field_size = strlen(in_str);
+    unsigned char *esc_field = (unsigned char *) malloc(150);
+    PQescapeBytea(esc_field, 0, &escaped_binary_field_size);
+
+    if (!esc_field) {
+        hifs_err("Failed to ESCAPE binary data FOR sql: {}", PQerrorMessage(sqldb.hive_conn));
+        return NULL;
+    } else {
+        hifs_debug("unescaped string value for sql = {}", esc_field);
+        return (char *)esc_field;
+    }
+    return NULL;
+}
+
+char *hifs_get_unquoted_value(char *in_str) 
+{
+    size_t unescaped_binary_field_size = strlen(in_str);
+    unsigned char *unesc_field = (unsigned char *) malloc(150);
+    PQunescapeBytea(unesc_field, &unescaped_binary_field_size);
+
+    if (!unesc_field) {
+        hifs_err("Failed to UN-ESCAPE binary data FOR sql: {}", PQerrorMessage(sqldb.hive_conn));
+        return NULL;
+    } else {
+        hifs_debug("unescaped string value for sql = {}", unesc_field);
+        return (char *)unesc_field;
+    }
+    return NULL;
+}
+
+void hifs_release_query (void) { PQclear(sqldb.last_qury); PQclear(sqldb.last_ins); }
+
+PGresult *hifs_insert_data(char *q_string) 
+{
+    PGresult *res;
+    char *quoted_query;
+    quoted_query = (char *) malloc(100);
+
+    quoted_query = hifs_get_quoted_value(q_string);
+        
+    res = hifs_execute_sql(quoted_query);
+
+    if (sqldb.rows_ins == 0) {
+        hifs_err("Failed to execute sql: {}", PQerrorMessage(sqldb.hive_conn));
+        return res;
+    } else {
+        sqldb.rows_ins = atoi(PQcmdTuples(res));
+        sqldb.last_ins = res;
+        return res;
+    }
+    return res;
+}
+
