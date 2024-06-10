@@ -110,6 +110,16 @@ void hi_comm_close_queues(void)
     close(fd_cmd);
 }
 
+void hi_comm_safe_cleanup(void)
+{
+    free(device_file_inode);
+    free(device_file_block);
+    free(device_file_cmd);
+    free(cmd_pfd);
+    free(inode_pfd);
+    free(block_pfd);
+}
+
 int read_from_inode_dev( void )
 {
     // A read initiated from user space...

@@ -20,12 +20,26 @@
 #define NO_RECORDS 0x099
 #define DBSTRING "user=" USER " dbname=" DATABASE " password=" PASSWORD " hostaddr=" HOST " port=" PORT
 
-#define MACHINE_INSERT(buffer, a,b,c,d,e,f,g,h) sprintf(buffer, "INSERT INTO machines (name, machine_id, host_id, ip_address, os_name, os_version, os_release, machine_type) VALUES ('%s', '%s', '%ld', '%s', '%s', '%s', '%s', '%s');",a,b,c,d,e,f,g,h);
+#define MACHINE_INSERT(buffer, a, b, c, d, e, f, g, h) \
+    sprintf(buffer, "INSERT INTO machines (name, machine_id, host_id, ip_address, os_name, os_version, os_release, machine_type) VALUES ('%s', '%s', %ld, '%s', '%s', '%s', '%s', '%s');", a, b, c, d, e, f, g, h)
 
-#define MACHINE_GETINFO(a, buffer) sprintf(buffer, "SELECT FROM machines name, host_id, ip_address, os_name, os_version WHERE machine_id = '%s';", a)
+
+#define MACHINE_GETINFO(a, buffer) \
+    sprintf(buffer, "SELECT name, host_id, ip_address, os_name, os_version FROM machines WHERE machine_id = '%s';", a)
 
 
 /* SQL Connect */
+
+struct machine {
+	char *name;
+	char *machine_id;
+	long host_id;
+	char *ip_address;
+	char *os_name;
+	char *os_version;
+	char *os_release;
+	char *machine_type;
+};
 struct PSQL {
 	PGconn *hive_conn;	/* Connection to hive */
 	PGresult   *last_qury; /* Last query result */
@@ -35,5 +49,6 @@ struct PSQL {
 	int  cols;
 	int  rows_ins;
 	bool sql_init;
+	struct machine host;
 };
 extern struct PSQL sqldb;
