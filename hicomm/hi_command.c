@@ -63,7 +63,7 @@ int current_tab = 0;
 int main(int argc, char *argv[])
 {
     int ret;
-    int ch;
+    //int ch;
 
     hifs_user_link.clockstart = GET_TIME();
     sqldb.hive_conn = NULL;
@@ -99,22 +99,34 @@ int main(int argc, char *argv[])
     inode_pfd = malloc(sizeof(struct pollfd));
     block_pfd = malloc(sizeof(struct pollfd));
 
-
+/*
     initscr();
     cbreak();
     noecho();
     //keypad(stdscr, TRUE);
     hicomm_draw_new_Content(current_tab);
     hicomm_draw_tabs(current_tab);
-
+*/
     fd_cmd = open(device_file_cmd, O_RDWR | O_NONBLOCK);   
-    if( fd_cmd == -1 )  { hifs_err("hi-command: error in open [CMD queue]\n"); exit(EXIT_FAILURE); }
+    if( fd_cmd == -1 )  { 
+        hi_comm_safe_cleanup();
+        printf("Please start the HiveFS kernel module first before starting Hi_Command\n");
+        hifs_err("hi-command: error in open [CMD queue]\n"); exit(EXIT_FAILURE); 
+    }
 
     fd_inode = open(device_file_cmd, O_RDWR | O_NONBLOCK);   
-    if( fd_inode == -1 )  { hifs_err("hi-command: error in open [INODE queue]\n"); exit(EXIT_FAILURE); }
+    if( fd_inode == -1 )  { 
+        hi_comm_safe_cleanup();
+        printf("Please start the HiveFS kernel module first before starting Hi_Command\n");
+        hifs_err("hi-command: error in open [INODE queue]\n"); exit(EXIT_FAILURE); 
+    }
 
     fd_block = open(device_file_cmd, O_RDWR | O_NONBLOCK);   
-    if( fd_block == -1 )  { hifs_err("hi-command: error in open [BLOCK queue]\n"); exit(EXIT_FAILURE); }
+    if( fd_block == -1 )  { 
+        hi_comm_safe_cleanup();
+        printf("Please start the HiveFS kernel module first before starting Hi_Command\n");
+        hifs_err("hi-command: error in open [BLOCK queue]\n"); exit(EXIT_FAILURE); 
+    }
 
     hifs_init_queues();
 
@@ -132,7 +144,15 @@ int main(int argc, char *argv[])
 
     init_hive_link();
 
-    while ((ch = getch()) != 'q') {
+    ret = register_hive_host();
+    if (ret == 0) {
+        hifs_crit("hi-command: error while registering host with hive, bailing out\n");
+        hi_comm_safe_cleanup();
+        exit(EXIT_FAILURE);
+    }
+
+    //while ((ch = getch()) != 'q') {
+    while (1) {
         kern_atomic_value = hifs_comm_check_program_up(HIFS_COMM_PROGRAM_KERN_MOD);
         if (kern_atomic_value == HIFS_COMM_LINK_DOWN) {
             hifs_info("hi-command: Kernel link is down. Waiting for kernel module to come up...\n");
@@ -163,7 +183,7 @@ int main(int argc, char *argv[])
         
         hifs_debug("hi-command: kernel module status is: %d\n", hifs_kern_link.state);
         hifs_debug("hi-command: user-space status is: %d\n", hifs_user_link.state);
-
+/*
         switch (ch) {
             case 'q':
                 // Clean up
@@ -202,14 +222,18 @@ int main(int argc, char *argv[])
         switch_tab(current_tab);
         hicomm_draw_tabs(current_tab);
         wrefresh(tab_headers[current_tab]);
+*/
     }
-
-    // Clean up
+/*
+   // Clean up
     for (int i = 0; i < TAB_COUNT; i++) {
         del_panel(tab_panels[i]);
         delwin(tab_content[i]);
         delwin(tab_headers[i]);
     }
     endwin();
-    
+*/  
+
+    hi_comm_safe_cleanup();
+    return 0;
 }

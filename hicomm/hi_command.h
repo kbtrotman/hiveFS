@@ -88,6 +88,7 @@ int hifs_comm_set_program_up( int program );
 int hifs_comm_set_program_down(int program);
 
 /* hi_command_memman.c */
+void hi_comm_safe_cleanup(void);
 int read_from_atomic(enum hifs_module program);
 int write_to_atomic(int value, enum hifs_module program);
 int write_to_inode_dev(void);
@@ -115,7 +116,7 @@ char *hifs_get_machine_id( void );
 char *hifs_read_file_to_string( char filename[50] );
 void hicomm_draw_tabs(int tab_index);
 void hicomm_draw_new_Content(int tab_index);
-void hifs_set_log(void) ;
+void hifs_set_log(void);
 int show_yes_no_dialog(const char *message);
 // Prototypes Here/
 
@@ -123,6 +124,7 @@ int show_yes_no_dialog(const char *message);
 /***************************
  * Hi_Command Log Functions
  ***************************/
+/*
 #define hifs_emerg(f, a...)                            \
     do {                                                 \
     mvwprintw(tab_content[0], log_line, 1, "hi_commond: EMERGENCY (file: %s, line: %d): funct: %s:", __FILE__, __LINE__, __func__); \
@@ -172,3 +174,37 @@ int show_yes_no_dialog(const char *message);
     mvwprintw(tab_content[0], log_line + 1, 1, "hi_commond: DEBUG " f, ## a);                                                   \
     hifs_set_log();\
     } while (0)
+*/
+
+#define hifs_emerg(f, a...)\
+    printf("hi_commond: EMERGENCY (file: %s, line: %d): funct: %s:\n", __FILE__, __LINE__, __func__); \
+    printf("hi_commond: EMERGENCY " f, ## a)
+
+#define hifs_alert(f, a...)\
+    printf("hi_commond: ALERT (file: %s, line: %d): funct: %s:\n", __FILE__, __LINE__, __func__);\
+    printf("hi_commond: ALERT " f, ## a)
+
+#define hifs_crit(f, a...)\
+    printf("hi_commond: CRITICAL (file: %s, line: %d): funct: %s:\n", __FILE__, __LINE__, __func__);\
+    printf("hi_commond: CRITICAL " f, ## a)
+
+#define hifs_err(f, a...)\
+    printf("hi_commond: ERROR (file: %s, line: %d): funct: %s:\n", __FILE__, __LINE__, __func__);\
+    printf("hi_commond: ERROR " f, ## a)
+
+#define hifs_warning(f, a...)\
+    printf("hi_commond: WARNING (file: %s, line: %d): funct: %s:\n", __FILE__, __LINE__, __func__);\
+    printf("hi_commond: WARNING " f, ## a)
+
+#define hifs_notice(f, a...)\
+    printf("hi_commond: NOTICE (file: %s, line: %d): funct: %s:\n", __FILE__, __LINE__, __func__);\
+    printf("hi_commond: NOTICE " f, ## a)
+
+#define hifs_info(f, a...)\
+    printf("hi_commond: INFO (file: %s, line: %d): funct: %s:\n", __FILE__, __LINE__, __func__);\
+    printf("hi_commond: INFO " f, ## a)
+
+#define hifs_debug(f, a...)\
+    printf("hi_commond: DEBUG (file: %s, line: %d): funct: %s:\n", __FILE__, __LINE__, __func__);\
+    printf("hi_commond: DEBUG " f, ## a)
+
