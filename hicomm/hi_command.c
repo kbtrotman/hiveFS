@@ -150,6 +150,13 @@ int main(int argc, char *argv[])
         hi_comm_safe_cleanup();
         exit(EXIT_FAILURE);
     }
+    ret = hifs_get_hive_host_sbs();
+    if (ret == 0) {
+        hifs_crit("hi-command: This host has not been assigned a superblock. Assign filesystems from the hive interface.\n");
+        hifs_crit("hi-command: Or run mkfs to add a filesystem and assign it a hive attach-point. Bailing out due to lack of superblock(s).\n");
+        hi_comm_safe_cleanup();
+        exit(EXIT_FAILURE);
+    }
 
     //while ((ch = getch()) != 'q') {
     while (1) {
