@@ -101,13 +101,15 @@ void hi_comm_close_queues(void);
 char *hifs_strlcpy(char *dest_string, const char *src_string, int max_size);
 
 /* hi_command_sql.c */
-PGresult *hifs_execute_sql(char* sql_string);
+PGresult *hifs_execute_sql(char *sql_string);
 void init_hive_link(void);
 void close_hive_link (void);
 int get_hive_vers(void);
 int save_binary_data(char *data_block, char *hash);
 int register_hive_host(void);
 PGresult *hifs_get_hive_host_data(char *machine_id);
+PGresult *hifs_insert_data(char *q_string);
+int hifs_get_hive_host_sbs(void);
 
 /* hi_command_io.c */
 void switch_tab(int tab_index);
@@ -178,33 +180,33 @@ int show_yes_no_dialog(const char *message);
 
 #define hifs_emerg(f, a...)\
     printf("hi_commond: EMERGENCY (file: %s, line: %d): funct: %s:\n", __FILE__, __LINE__, __func__); \
-    printf("hi_commond: EMERGENCY " f, ## a)
+    printf("hi_commond: EMERGENCY " f " \n", ## a)
 
 #define hifs_alert(f, a...)\
     printf("hi_commond: ALERT (file: %s, line: %d): funct: %s:\n", __FILE__, __LINE__, __func__);\
-    printf("hi_commond: ALERT " f, ## a)
+    printf("hi_commond: ALERT " f " \n", ## a)
 
 #define hifs_crit(f, a...)\
     printf("hi_commond: CRITICAL (file: %s, line: %d): funct: %s:\n", __FILE__, __LINE__, __func__);\
-    printf("hi_commond: CRITICAL " f, ## a)
+    printf("hi_commond: CRITICAL " f " \n", ## a)
 
 #define hifs_err(f, a...)\
     printf("hi_commond: ERROR (file: %s, line: %d): funct: %s:\n", __FILE__, __LINE__, __func__);\
-    printf("hi_commond: ERROR " f, ## a)
+    printf("hi_commond: ERROR " f " \n", ## a)
 
 #define hifs_warning(f, a...)\
     printf("hi_commond: WARNING (file: %s, line: %d): funct: %s:\n", __FILE__, __LINE__, __func__);\
-    printf("hi_commond: WARNING " f, ## a)
+    printf("hi_commond: WARNING " f " \n", ## a)
 
 #define hifs_notice(f, a...)\
     printf("hi_commond: NOTICE (file: %s, line: %d): funct: %s:\n", __FILE__, __LINE__, __func__);\
-    printf("hi_commond: NOTICE " f, ## a)
+    printf("hi_commond: NOTICE " f " \n", ## a)
 
 #define hifs_info(f, a...)\
     printf("hi_commond: INFO (file: %s, line: %d): funct: %s:\n", __FILE__, __LINE__, __func__);\
-    printf("hi_commond: INFO " f, ## a)
+    printf("hi_commond: INFO " f " \n", ## a)
 
 #define hifs_debug(f, a...)\
     printf("hi_commond: DEBUG (file: %s, line: %d): funct: %s:\n", __FILE__, __LINE__, __func__);\
-    printf("hi_commond: DEBUG " f, ## a)
+    printf("hi_commond: DEBUG " f " \n", ## a)
 
