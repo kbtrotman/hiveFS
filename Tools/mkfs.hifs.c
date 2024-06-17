@@ -145,51 +145,6 @@ static void create_root_dir(ext2_filsys fs)
 	}
 }
 
-#ifdef HAVE_BLKID_PROBE_GET_TOPOLOGY
-/*
- * Sets the geometry of a device (stripe/stride), and returns the
- * device's alignment offset, if any, or a negative error.
- */
-static int get_device_geometry(const char *file, unsigned int blocksize, unsigned int psector_size, struct device_param *dev_param)
-{
-	int rc = -1;
-	blkid_probe pr;
-	blkid_topology tp;
-	struct stat statbuf;
-
-	memset(dev_param, 0, sizeof(*dev_param));
-
-	/* Nothing to do for a regular file */
-	if (!stat(file, &statbuf) && S_ISREG(statbuf.st_mode))
-		return 0;
-
-	pr = blkid_new_probe_from_filename(file);
-	if (!pr)
-		goto out;
-
-	tp = blkid_probe_get_topology(pr);
-	if (!tp)
-		goto out;
-
-	dev_param->min_io = blkid_topology_get_minimum_io_size(tp);
-	dev_param->opt_io = blkid_topology_get_optimal_io_size(tp);
-	if ((dev_param->min_io == 0) && (psector_size > blocksize))
-		dev_param->min_io = psector_size;
-	if ((dev_param->opt_io == 0) && dev_param->min_io > 0)
-		dev_param->opt_io = dev_param->min_io;
-	if ((dev_param->opt_io == 0) && (psector_size > blocksize))
-		dev_param->opt_io = psector_size;
-
-	dev_param->alignment_offset = blkid_topology_get_alignment_offset(tp);
-#ifdef HAVE_BLKID_TOPOLOGY_GET_DAX
-	dev_param->dax = blkid_topology_get_dax(tp);
-#endif
-	rc = 0;
-out:
-	blkid_free_probe(pr);
-	return rc;
-}
-
 static void create_lost_and_found(ext2_filsys fs)
 {
 	unsigned int		lpf_size = 0;
@@ -226,21 +181,6 @@ static void create_lost_and_found(ext2_filsys fs)
 			exit(1);
 		}
 	}
-}
-
-static void create_bad_block_inode(ext2_filsys fs, badblocks_list bb_list)
-{
-	errcode_t	retval;
-
-	ext2fs_mark_inode_bitmap2(fs->inode_map, EXT2_BAD_INO);
-	ext2fs_inode_alloc_stats2(fs, EXT2_BAD_INO, +1, 0);
-	retval = ext2fs_update_bb_inode(fs, bb_list);
-	if (retval) {
-		com_err("ext2fs_update_bb_inode", retval, "%s",
-			_("while setting bad block inode"));
-		exit(1);
-	}
-
 }
 
 static void reserve_inodes(ext2_filsys fs)
@@ -401,4 +341,26 @@ static int hifs_mkfs(struct file_system_type *fs_type, int flags, const char *de
 
 
     return 0;
+}
+
+int hifs_write_sblock(void)
+{
+	/*
+	 * Wipe out the old on-disk superblock
+	 */
+	if (!noaction)
+		zap_sector(fs, 2, 6);
+
+#ifdef ZAP_BOOTBLOCK
+	zap_sector(fs, 0, 2);
+#endif
+
+// fopen();
+// lseek();
+// write;   
+
+	write_inode_tables(fs, lazy_itable_init, itable_zeroed);
+	create_root_dir(fs);
+	create_lost_and_found(fs);
+
 }
