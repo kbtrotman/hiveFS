@@ -244,13 +244,31 @@ extern struct list_head shared_inode_incoming_lst;
 extern struct list_head shared_block_incoming_lst;   
 extern struct list_head shared_cmd_incoming_lst;     
 
-
 struct hifs_dir_entry 
 {
 	uint32_t inode_nr;		/* inode number */
 	uint32_t name_len;		/* Name length */
 	char name[256];			/* File name, up to HIFS_NAME_LEN */
 };
+
+struct hifs_block_bitmap {
+	uint8_t *bitmap;
+	uint64_t size;
+	uint64_t block_size;
+	uint64_t block_count;
+	uint64_t block_count_free;
+};
+
+struct hifs_cache_bitmap {
+	uint8_t *bitmap;
+	uint64_t size;
+	uint64_t entries;
+	uint64_t cache_block_size;
+	uint64_t cache_block_count;
+	uint64_t cache_blocks_free;
+	uint8_t dirty;
+}
+
 /***********************
  * END Hive FS Structures
  ***********************/

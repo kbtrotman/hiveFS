@@ -81,41 +81,7 @@ const struct super_operations hifs_sb_operations =
 
 static int hifs_mkfs(struct file_system_type *fs_type, int flags, const char *dev_name, void *data)
 {
-    /*
-    struct inode *root_inode;
-    struct dentry *root_dentry;
-    // Allocate a superblock structure
 
-
-    struct super_block sb = get_sb_nodev(fs_type, flags, data, hifs_fill_super);
-    if (IS_ERR(sb)) {
-        return PTR_ERR(sb);
-    }
-
-    // Create a root inode for the filesystem
-    *root_inode = new_inode(sb);
-    if (!root_inode) {
-        return -ENOMEM;
-    }
-
-    // Initialize the root inode
-    root_inode->i_ino = 1;
-    root_inode->i_sb = sb;
-    root_inode->i_op = &hifs_inode_operations;
-    root_inode->i_fop = &hifs_dir_operations;
-    root_inode->i_mode = S_IFDIR | 0755;
-
-    // Create a dentry for the root directory
-    *root_dentry = d_make_root(root_inode);
-    if (!root_dentry) {
-        iput(root_inode);
-        return -ENOMEM;
-    }
-
-    // Set the root dentry for the superblock
-    sb->s_root = root_dentry;
-    */
-    return 0;
 }
 
 static int __init hifs_init(void)

@@ -585,3 +585,50 @@ __poll_t hifs_cmd_device_poll (struct file *filp, poll_table *wait) {
 
     return mask;
 }
+
+void write_blocks_bitmap(int fd, hifs_block_bitmap *bitmap, uint64_t bitmap_start) {
+    uint64_t size_in_bytes = (bitmap->size + 7) / 8;
+
+    if (pwrite(fd, bitmap->bitmap, size_in_bytes, bitmap_start * bitmap->blocksize) != size_in_bytes) {
+        hifs_error("Error writing inode bitmap to disk");
+    }
+}
+
+void toggle_inode_bitmap(ihifs_block_bitmap *bitmap, uint64_t block_number) {
+    if (block_number >= bitmap->size) {
+        hifs_error("Error: inode number out of range\n");
+        return;
+    }
+
+    uint64_t byte_index = block_number / 8;
+    uint8_t bit_index = block_number % 8;
+
+    bitmap->bitmap[byte_index] ^= (1 << bit_index);
+}
+
+hifs_block_bitmap *read_inode_bitmap(int fd, uint64_t bitmap_start, uint64_t size_in_bits, uint64_t blocksize) {
+    hifs_block_bitmap *bitmap = (hifs_block_bitmap *)malloc(sizeof(hifs_block_bitmap));
+    if (!bitmap) {
+        hifs_error("Unable to allocate memory for block bitmap");
+        return NULL;
+    }
+
+    uint64_t size_in_bytes = (size_in_bits + 7) / 8; // Convert bits to bytes, rounding up
+    bitmap->bitmap = (uint8_t *)malloc(size_in_bytes);
+    if (!bitmap->bitmap) {
+        hifs_error("Unable to allocate memory for bitmap data");
+        free(bitmap);
+        return NULL;
+    }
+
+    if (pread(fd, bitmap->bitmap, size_in_bytes, bitmap_start * blocksize) != size_in_bytes) {
+        perror("Error reading inode bitmap from disk");
+        free(bitmap->bitmap);
+        free(bitmap);
+        return NULL;
+    }
+
+    bitmap->size = size_in_bits;
+    bitmap->blocksize = blocksize;
+    return bitmap;
+}
