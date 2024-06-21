@@ -320,11 +320,13 @@ write_superblock:
 	}
 }
 
-static int hifs_mkfs(int flags, const char *dev_name, const char *mount_point)
+static int hifs_mkfs(int bsize, int blocks, const char *dev_name, const char *mount_point)
 {
     struct super_block sb;
     struct inode *root_inode;
     struct dentry *root_dentry;
+	struct hifs_block_bitmap block_bitmap;
+	struct hifs_cache_bitmap cache_bitmap;
 
     // Allocate a superblock structure
     sb = get_sb_nodev(flags, mount_point, hifs_fill_super);
@@ -334,9 +336,24 @@ static int hifs_mkfs(int flags, const char *dev_name, const char *mount_point)
 
 
     // Allocate a block bitmap
+	block_bitmap = (struct hifs_block_bitmap) {
+		.bitmap = NULL, 
+		.size = blocks/8,
+		.block_size = bsize,
+		.block_count = blocks,
+		.block_count_free = blocks,
+	};
 
-    // Allocate an inode bitmap
 
+    // Allocate a cache inode bitmap
+	cache_bitmap = (struct hifs_cache_bitmap) {
+		.bitmap = NULL, 
+		.size = 0,
+		.entries = 0,
+		.cache_block_size = 0,
+		.cache_block_count = 0,
+		.cache_blocks_free = 0,
+	};
 
     // Create a root inode for the filesystem
     *root_inode = new_inode(sb);
@@ -409,6 +426,7 @@ int hifs_standard_warning( char *file)
 int main(int argc, char *argv[])
 {
     int c, res;
+	long blocks;
     char *unit;
 
     while (1)
@@ -486,8 +504,9 @@ int main(int argc, char *argv[])
             fprintf(stderr, "block size must be a power of 2: %d\n", block_size);
             return 1;
         }
-        bs/=2;
+        bs/=2;	
     }
+	blocks = fs_size/block_size;
 
     // check partition size
     if (fs_size>0 && fs_size<2*block_size)
@@ -500,7 +519,7 @@ int main(int argc, char *argv[])
 	if (res == -1)
 		exit(-1);
 
-	hifs_mkfs(&fs_type, 0, NULL, NULL);
+	hifs_mkfs(block_size, blocks, file_name, mount_point);
 
 	return 0;
 
