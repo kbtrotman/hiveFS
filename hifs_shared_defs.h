@@ -138,27 +138,28 @@ extern struct
 	int block_size;
 } settings;
 
+/* FS constants */
+#define HIFS_MAGIC_NUM		0x1fa7d0d0
+#define HIFS_EMPTY_ENTRY		0xdeeddeed
+
+#define HIFS_NAME_LEN		255
+
 /* FS SIZE/OFFSET CONST */
 #define HIFS_INODE_TSIZE		3
 #define HIFS_SUPER_OFFSET		1024
+
 #define HIFS_OLT_OFFSET		    (HIFS_SUPER_OFFSET + 1)
 #define HIFS_INODE_TABLE_OFFSET	(HIFS_OLT_OFFSET + 1)
 #define HIFS_INODE_BITMAP_OFFSET (HIFS_INODE_TABLE_OFFSET + HIFS_INODE_TABLE_SIZE + 1)
 #define HIFS_ROOT_INODE_OFFSET	(HIFS_INODE_BITMAP_OFFSET + 1)
 #define HIFS_ROOT_IN_EXT_OFF	(HIFS_ROOT_INODE_OFFSET + 1)
 #define HIFS_LF_INODE_OFFSET	(HIFS_ROOT_IN_EXT_OFF + HIFS_DEF_ALLOC)
-
-/* Default place where FS will start using after mkfs (all above are used for mkfs) */
-#define HIFS_CACHE_SPACE_START	(HIFS_LF_INODE_OFFSET + HIFS_DEF_ALLOC)
-
-/* FS constants */
-#define HIFS_MAGIC_NUM		0x1fa7d0d0
 #define HIFS_INODE_SIZE		512
 #define HIFS_INODE_NUMBER_TABLE	128
 #define HIFS_INODE_TABLE_SIZE	(HIFS_INODE_NUMBER_TABLE * HIFS_INODE_SIZE)/HIFS_DEFAULT_BLOCK_SIZE
-#define HIFS_EMPTY_ENTRY		0xdeeddeed
 
-#define HIFS_NAME_LEN		255
+/* Default place where FS will start using after mkfs (all above are used for mkfs) */
+#define HIFS_CACHE_SPACE_START	(HIFS_LF_INODE_OFFSET + HIFS_DEF_ALLOC)
 
 /**
  * Special inode numbers 
