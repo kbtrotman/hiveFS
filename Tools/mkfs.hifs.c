@@ -6,29 +6,62 @@
  * License: GNU GPL as of 2023
  *
  */
+#include <getopt.h>
 
 #include "../hifs.h"
 
 const char * program_name = "mkfs.hifs";
 
 
-static void usage(void)
-{
-	fprintf(stderr, _("Usage: %s [-c|-l filename] [-b block-size] "
-	"[-J journal-options]\n"
-	"\t[-G flex-group-size] [-N number-of-inodes] "
-	"[-d root-directory|tarball]\n"
-	"\t[-m reserved-blocks-percentage] [-o creator-os]\n"
-	"\t[-L volume-label] "
-	"[-M last-mounted-directory]\n\t[-O feature[,...]] "
-	"[-r fs-revision] [-E extended-option[,...]]\n"
-	"\t[-t fs-type] [-T usage-type ] [-U UUID] [-e errors_behavior]"
-	"[-z undo_file]\n"
-	"\t[-jnqvDFSV] device [blocks-count]\n"),
-		program_name);
-	exit(1);
-}
+static int verbose_flag=0;
+static int force_flag=0;
+char *vol_label="HIFS_Default_Label";
+char *file_name="";
+char *mount_point="";
 
+long long int fs_size=0;
+int block_size=HIFS_DEFAULT_BLOCK_SIZE;
+float overflow=1.3;
+off_t ALLOCATIONGRANULARITY=65536; // max(linux.mmap.ALLOCATIONGRANULARITY, windows.mmap.ALLOCATIONGRANULARITY)
+
+static struct option long_options[] =
+{
+    {"help",         no_argument,       0, 'h'},
+    {"force",        no_argument,       0, 'f'},
+    {"label",        no_argument,       0, 'L'},
+    {"filename",     required_argument, 0, 'F'},
+	{"mount",        required_argument, 0, 'm'},
+    {"size",         required_argument, 0, 's'},
+    {"block-size",   required_argument, 0, 'b'},
+    {"overflow",     required_argument, 0, 'o'},
+    {0, 0, 0, 0}
+};
+
+
+void usage()
+{
+    printf("Usage: mkfs.hifs [options] target_dir\n"
+            "\n    initialize hifs superblock and cache disk\n\nOptions:\n"
+            "  -h, --help            show this help message and exit\n"
+            "  -f, --force           don't ask questions, just do it\n"
+            "  -L VOL_LABEL, --label=VOL_LABEL\n"
+            "                        specify the volume label for device\n"
+            "  -b BLOCKSIZE, --block-size=BLOCKSIZE (values in bytes)\n"
+            "                        specify the block size to init for device\n"
+            "  -F FILE/DEV-NAME, --filename=/dev/name or /file/name specify the device\n"
+            "                        name or file name filesystem is to be built on\n"
+            "  -m /dir/, --mount=/dir/  the directory to mount the filesystem on\n"
+            "                        from the / root dir\n"
+            "  -s SIZE,    --size=SIZE size in bytes of the filesystem to create (only\n"
+            "                        if less than the size of the device/file created on)\n"
+            "  -o OVERFLOW, --overflow=OVERFLOW\n"
+            "                        the overflow factor (default is 1.3)\n"
+            "\nSamples:\n"
+            "  mkfs.hifs -s 21474836480 -m /data/myfs\n"
+            "  mkfs.hifs -s 21474836480 -b 65536 -m /data/myfs\n"
+            "  mkfs.hifs -F /dev/sdb3 -m /data/myfs\n"
+    );
+}
 
 static void write_inode_tables(ext2_filsys fs, int lazy_flag, int itable_zeroed)
 {
@@ -192,10 +225,6 @@ static void reserve_inodes(ext2_filsys fs)
 	ext2fs_mark_ib_dirty(fs);
 }
 
-#define BSD_DISKMAGIC   (0x82564557UL)  /* The disk magic number */
-#define BSD_MAGICDISK   (0x57455682UL)  /* The disk magic number reversed */
-#define BSD_LABEL_OFFSET        64
-
 static void zap_sector(ext2_filsys fs, int sect, int nsect)
 {
 	char *buf;
@@ -291,17 +320,14 @@ write_superblock:
 	}
 }
 
-static int hifs_mkfs(struct file_system_type *fs_type, int flags, const char *dev_name, void *data)
+static int hifs_mkfs(int flags, const char *dev_name, const char *mount_point)
 {
-    
+    struct super_block sb;
     struct inode *root_inode;
     struct dentry *root_dentry;
 
-    // Create a boot control block
-
-
     // Allocate a superblock structure
-    struct super_block sb = get_sb_nodev(fs_type, flags, data, hifs_fill_super);
+    sb = get_sb_nodev(flags, mount_point, hifs_fill_super);
     if (IS_ERR(sb)) {
         return PTR_ERR(sb);
     }
@@ -362,5 +388,120 @@ int hifs_write_sblock(void)
 	write_inode_tables(fs, lazy_itable_init, itable_zeroed);
 	create_root_dir(fs);
 	create_lost_and_found(fs);
+
+}
+
+int hifs_standard_warning( char *file)
+{
+	char c;
+	printf("This process will destroy any existing data on the disk other than the boot block.\n");
+	printf("Are you sure you wish to make a new filesystem on this device? [y/n] ");
+	scanf("%c");
+	if (c == 'y' || c == 'Y') {
+		printf("Creating a new filesystem on dev %s.\n", file);
+		return 0;
+	} else {
+		printf("Aborting.\n");
+		return -1;
+	}
+}
+
+int main(int argc, char *argv[])
+{
+    int c, res;
+    char *unit;
+
+    while (1)
+    {
+        // getopt_long stores the option index here.
+        int option_index = 0;
+
+        c=getopt_long(argc, argv, "h:f:L:F:m:b:o:b:", long_options, &option_index);
+
+        // Detect the end of the options.
+        if (c==-1) break;
+
+        switch (c)
+        {
+
+            case 'h':
+                usage();
+                return 0;
+                break;
+
+            case 'v':
+                verbose_flag=1;
+                break;
+
+            case 'f':
+                force_flag=1;
+                break;
+
+            case 'L':
+                vol_label=strdup(optarg);
+                break;
+
+            case 'F':
+                file_name=strdup(optarg);
+                break;
+
+            case 'm':
+                mount_point=strdup(optarg);
+                break;
+
+            case 's':
+                fs_size=strtol(optarg, &unit, 10);
+                fs_size*=unitvalue(unit);
+                break;
+
+            case 'b':
+                block_size=strtol(optarg, &unit, 10);
+                block_size*=unitvalue(unit);
+                break;
+
+            case 'o':
+                overflow=strtod(optarg, NULL);
+                break;
+
+            case '?':
+                // getopt_long already printed an error message.
+                break;
+
+            default:
+                abort();
+        }
+    }
+
+    // check block size
+    if (block_size<512 || 2*1024*1024<block_size)
+    {
+        fprintf(stderr, "block size must be between 4k and 128k (between 512 and 2Mo for test only): %d\n", block_size);
+        return 1;
+    }
+    int bs=block_size;
+    while (bs>2)
+    {
+        if (bs%2)
+        {
+            fprintf(stderr, "block size must be a power of 2: %d\n", block_size);
+            return 1;
+        }
+        bs/=2;
+    }
+
+    // check partition size
+    if (fs_size>0 && fs_size<2*block_size)
+    {
+        fprintf(stderr, "partition size must be a least 2 blocks wide: %lld\n", fs_size);
+        return 1;
+    }
+
+	res = hifs_standard_warning(file_name);
+	if (res == -1)
+		exit(-1);
+
+	hifs_mkfs(&fs_type, 0, NULL, NULL);
+
+	return 0;
 
 }
