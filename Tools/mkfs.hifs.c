@@ -7,6 +7,7 @@
  *
  */
 #include <getopt.h>
+#include <linux/fs.h>
 
 #include "../hifs.h"
 
@@ -15,7 +16,7 @@ const char * program_name = "mkfs.hifs";
 
 static int verbose_flag=0;
 static int force_flag=0;
-char *vol_label="HIFS_Default_Label";
+char *vol_label="HIFS Filesystem";
 char *file_name="";
 char *mount_point="";
 
@@ -320,72 +321,6 @@ write_superblock:
 	}
 }
 
-static int hifs_mkfs(int bsize, int blocks, const char *dev_name, const char *mount_point)
-{
-    struct super_block sb;
-    struct inode *root_inode;
-    struct dentry *root_dentry;
-	struct hifs_block_bitmap block_bitmap;
-	struct hifs_cache_bitmap cache_bitmap;
-
-    // Allocate a superblock structure
-    sb = get_sb_nodev(flags, mount_point, hifs_fill_super);
-    if (IS_ERR(sb)) {
-        return PTR_ERR(sb);
-    }
-
-
-    // Allocate a block bitmap
-	block_bitmap = (struct hifs_block_bitmap) {
-		.bitmap = NULL, 
-		.size = blocks/8,
-		.block_size = bsize,
-		.block_count = blocks,
-		.block_count_free = blocks,
-	};
-
-
-    // Allocate a cache inode bitmap
-	cache_bitmap = (struct hifs_cache_bitmap) {
-		.bitmap = NULL, 
-		.size = 0,
-		.entries = 0,
-		.cache_block_size = 0,
-		.cache_block_count = 0,
-		.cache_blocks_free = 0,
-	};
-
-    // Create a root inode for the filesystem
-    *root_inode = new_inode(sb);
-    if (!root_inode) {
-        return -ENOMEM;
-    }
-
-    // Initialize the root inode
-    root_inode->i_ino = 1;
-    root_inode->i_sb = sb;
-    root_inode->i_op = &hifs_inode_operations;
-    root_inode->i_fop = &hifs_dir_operations;
-    root_inode->i_mode = S_IFDIR | 0755;
-
-    // Create a dentry for the root directory
-    *root_dentry = d_make_root(root_inode);
-    if (!root_dentry) {
-        iput(root_inode);
-        return -ENOMEM;
-    }
-
-    // Set the root dentry for the superblock
-    sb->s_root = root_dentry;
-    */
-
-    // Create a cache table and cache bitmap
-
-
-
-    return 0;
-}
-
 int hifs_write_sblock(void)
 {
 	/*
@@ -406,6 +341,87 @@ int hifs_write_sblock(void)
 	create_root_dir(fs);
 	create_lost_and_found(fs);
 
+}
+
+static struct hifs_block_bitmap *create_cache_table(struct hifs_cache_bitmap *ct)
+{
+	ct->bitmap = calloc(ct->size, ct->cache_block_size);
+	if (!ct->bitmap) {
+		return -ENOMEM;
+	}
+
+	// Populate anything necessary to start the bitmap. Cache's 1st entry should be sb, 2nd r_dentry
+	//ct->cache_block_count = ct->size/ct->cache_block_size;
+	//ct->cache_blocks_free = ct->cache_block_count;
+	return ct;
+}
+
+static int hifs_mkfs(int bsize, int blocks, const char *dev_name, const char *mount_point)
+{
+    struct super_block sb;
+    struct inode *root_inode;
+    struct dentry *root_dentry;
+	struct hifs_block_bitmap *block_bitmap;
+	struct hifs_cache_bitmap *cache_bitmap;
+
+    // Allocate a superblock structure
+    sb = get_sb_nodev(flags, mount_point, hifs_fill_super);
+    if (IS_ERR(sb)) {
+        return PTR_ERR(sb);
+    }
+
+
+    // Allocate a block bitmap
+
+	block_bitmap = (struct hifs_block_bitmap) {
+		.bitmap = NULL, 
+		.size = blocks/8,
+		.block_size = bsize,
+		.block_count = blocks,
+		.block_count_free = blocks,
+	};
+
+
+    // Allocate a cache inode bitmap
+	cache_bitmap = (struct hifs_cache_bitmap) {
+		.bitmap = NULL, 
+		.size = 0,
+		.entries = 0,
+		.cache_block_size = 0,
+		.cache_block_count = 0,
+		.cache_blocks_free = 0,
+	};
+
+    // Create a root inode for the filesystem
+    root_inode = new_inode(sb);
+    if (!root_inode) {
+        return -ENOMEM;
+    }
+
+    // Initialize the root inode
+    root_inode->i_ino = 1;
+    root_inode->i_sb = &sb;
+    root_inode->i_op = &hifs_inode_operations;
+    root_inode->i_fop = &hifs_dir_operations;
+    root_inode->i_mode = S_IFDIR | 0755;
+
+    // Create a dentry for the root directory
+    root_dentry = d_make_root(root_inode);
+    if (!root_dentry) {
+        iput(root_inode);
+        return -ENOMEM;
+    }
+
+    // Set the root dentry for the superblock
+    sb.s_root = &root_dentry;
+
+    // Create a cache table and cache bitmap
+	cache_bitmap = create_cache_table(cache_bitmap);
+	if (!cache_bitmap) {
+		return -ENOMEM;
+	}
+
+    return 0;
 }
 
 int hifs_standard_warning( char *file)
@@ -491,9 +507,9 @@ int main(int argc, char *argv[])
     }
 
     // check block size
-    if (block_size<512 || 2*1024*1024<block_size)
+    if (block_size<4096 || 2*1024*1024<block_size)
     {
-        fprintf(stderr, "block size must be between 4k and 128k (between 512 and 2Mo for test only): %d\n", block_size);
+        fprintf(stderr, "block size must be between 4k and 128k and specified in bytes, value entered: %d\n", block_size);
         return 1;
     }
     int bs=block_size;
@@ -501,7 +517,7 @@ int main(int argc, char *argv[])
     {
         if (bs%2)
         {
-            fprintf(stderr, "block size must be a power of 2: %d\n", block_size);
+            fprintf(stderr, "block size must be a power of 2, value entered: %d\n", block_size);
             return 1;
         }
         bs/=2;	
