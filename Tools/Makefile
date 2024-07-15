@@ -2,7 +2,7 @@
 CC = gcc
 
 # Includes
-INCS = -I /usr/lib/gcc/x86_64-redhat-linux/8/include -I /usr/include/ -I /usr/include/libnl3/ -I /usr/include/postgresql/
+INCS = -I /usr/include/ -I /usr/include/postgresql/ -I /usr/lib/gcc/x86_64-redhat-linux/8/include
 
 # Libraries
 LIBS = -L/usr/lib/ -L/usr/lib64/ -L/usr/
