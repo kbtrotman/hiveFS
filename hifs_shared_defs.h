@@ -139,40 +139,44 @@ extern struct
 } settings;
 
 /* FS constants */
-#define HIFS_MAGIC_NUM		0x1fa7d0d0
+#define HIFS_MAGIC_NUM		    0x1fa7d0d0
 #define HIFS_EMPTY_ENTRY		0xdeeddeed
 
-#define HIFS_NAME_LEN		255
+#define HIFS_NAME_LEN		     255
+#define HIFS_INODE_MSIZE		 4
+#define HIFS_INODE_TSIZE		 4
+#define HIFS_BOOT_OFFSET		 0
+#define HIFS_BOOT_LEN            512
+#define HIFS_BOOT2_OFFSET		 (HIFS_BOOT_LEN + 512)
+#define HIFS_BOOT2_LEN           512
+#define HIFS_SUPER_OFFSET		 1024
+#define HIFS_SUPER2_OFFSET		 (HIFS_SUPER_OFFSET + 1024)
+#define HIFS_SUPER2_LEN          1024
+#define HIFS_INODE_BITMAP_OFFSET HIFS_DEFAULT_BLOCK_SIZE
+#define HIFS_INODE_TABLE_OFFSET	 (HIFS_DEFAULT_BLOCK_SIZE * 2)
+#define HIFS_INODE_TABLE2_OFFSET (HIFS_DEFAULT_BLOCK_SIZE * 3)
+#define HIFS_ROOT_INODE_OFFSET	 (HIFS_INODE_TABLE2_OFFSET + HIFS_DEFAULT_BLOCK_SIZE)
+/* Default place where FS will start using after mkfs (all above are used for mkfs) */
+#define HIFS_CACHE_SPACE_START	 (HIFS_INODE_TABLE2_OFFSET + HIFS_DEFAULT_BLOCK_SIZE)
 
-/* FS SIZE/OFFSET CONST */
-#define HIFS_INODE_TSIZE		3
-#define HIFS_SUPER_OFFSET		1024
-
-#define HIFS_OLT_OFFSET		    (HIFS_SUPER_OFFSET + 1)
-#define HIFS_INODE_TABLE_OFFSET	(HIFS_OLT_OFFSET + 1)
-#define HIFS_INODE_BITMAP_OFFSET (HIFS_INODE_TABLE_OFFSET + HIFS_INODE_TABLE_SIZE + 1)
-#define HIFS_ROOT_INODE_OFFSET	(HIFS_INODE_BITMAP_OFFSET + 1)
-#define HIFS_ROOT_IN_EXT_OFF	(HIFS_ROOT_INODE_OFFSET + 1)
-#define HIFS_LF_INODE_OFFSET	(HIFS_ROOT_IN_EXT_OFF + HIFS_DEF_ALLOC)
 #define HIFS_INODE_SIZE		512
 #define HIFS_INODE_NUMBER_TABLE	128
 #define HIFS_INODE_TABLE_SIZE	(HIFS_INODE_NUMBER_TABLE * HIFS_INODE_SIZE)/HIFS_DEFAULT_BLOCK_SIZE
 
-/* Default place where FS will start using after mkfs (all above are used for mkfs) */
-#define HIFS_CACHE_SPACE_START	(HIFS_LF_INODE_OFFSET + HIFS_DEF_ALLOC)
-
 /**
- * Special inode numbers 
+ * Special inode numbers inhereted from Ext2 or new to HIFS...
+ * NOTE: Our virtual FS cache uses a basic EXT2 style layout for the most part.
+ *       This is a good way to keep things consistent.
  **/
-#define EXT4_BAD_INO	     1  /* Bad blocks inode */
-#define EXT4_LAF_INO		 2  /* Lost and Found inode nr */
-#define EXT4_USR_QUOTA_INO	 3	/* User quota inode */
-#define EXT4_GRP_QUOTA_INO	 4	/* Group quota inode */
-#define EXT4_BOOT_LOADER_INO 5	/* Boot loader inode */
-#define EXT4_UNDEL_DIR_INO	 6	/* Undelete directory inode */
-#define EXT4_RESIZE_INO		 7	/* Reserved group descriptors inode */
-#define EXT4_JOURNAL_INO	 8	/* Journal inode */
-#define EXT4_EXCLUDE_INO	 9	/* The "exclude" inode, for snapshots */
+#define EXT2_BAD_INO	     1  /* Bad blocks inode */
+#define EXT2_LAF_INO		 2  /* Lost and Found inode nr */
+#define EXT2_USR_QUOTA_INO	 3	/* User quota inode */
+#define EXT2_GRP_QUOTA_INO	 4	/* Group quota inode */
+#define EXT2_BOOT_LOADER_INO 5	/* Boot loader inode */
+#define EXT2_UNDEL_DIR_INO	 6	/* Undelete directory inode */
+#define EXT2_RESIZE_INO		 7	/* Reserved group descriptors inode */
+#define EXT2_JOURNAL_INO	 8	/* Journal inode */
+#define EXT2_EXCLUDE_INO	 9	/* The "exclude" inode, for snapshots */
 #define HIFS_ROOT_INODE      15  /* Root inode nbr */
 
 /**
@@ -251,14 +255,6 @@ struct hifs_dir_entry
 	char name[256];			/* File name, up to HIFS_NAME_LEN */
 };
 
-struct hifs_block_bitmap {
-	uint8_t *bitmap;
-	uint64_t size;
-	uint64_t block_size;
-	uint64_t block_count;
-	uint64_t block_count_free;
-};
-
 struct hifs_cache_bitmap {
 	uint8_t *bitmap;
 	uint64_t size;
@@ -267,7 +263,9 @@ struct hifs_cache_bitmap {
 	uint64_t cache_block_count;
 	uint64_t cache_blocks_free;
 	uint8_t dirty;
-}
+};
+
+
 
 /***********************
  * END Hive FS Structures
