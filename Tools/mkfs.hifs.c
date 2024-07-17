@@ -254,6 +254,7 @@ static void write_cache_table(ext2_filsys fs, struct hifs_cache_bitmap *cache_ta
 				// Eventually put this in a config file to size each table.
 			// Max of 50/50 split
 			blocks_size = inode_size = flags.size / 2;
+			
 			// 2. Size of each inode determines # of inodes per block.
 			// 3. Table keeps track of each inode location/ block location.
 			// 4. Initially, we need 0 inodes and 0 blocks, and only place holder structs.
