@@ -204,12 +204,15 @@ static void write_root_dir(ext2_filsys fs)
 	}
 }
 
-static void write_cache_table(ext2_filsys fs, struct hifs_cache_bitmap *cache_table, struct hifs_cache_bitmap *dirty_table)
+static void write_cache_table(ext2_filsys fs, struct hifs_cache_bitmap *cache_table, struct hifs_cache_bitmap *dirty_table,
+	struct inode_table ctable, struct inode_table btable)
 {
 	errcode_t	retval;
 	blk64_t		start = 0;
 	dgrp_t		i;
 	int		len = 0;
+	int inode_size = 0;
+	int blocks_size = 0;
 	struct ext2fs_numeric_progress_struct progress;
 
 	ext2fs_numeric_progress_init(fs, &progress, _("Writing inode tables: "), fs->group_desc_count);
@@ -248,14 +251,27 @@ static void write_cache_table(ext2_filsys fs, struct hifs_cache_bitmap *cache_ta
 	// Next zero out both tables and write those. (IE: tables with no actual data yet.)
 		// This one is slightly more difficult. There are a few questions:
 			// 1. Percentage of inodes to blocks to allow? Configurable?
+				// Eventually put this in a config file to size each table.
+			// Max of 50/50 split
+			blocks_size = inode_size = flags.size / 2;
 			// 2. Size of each inode determines # of inodes per block.
-			// 3. Table keeps tract of each inode location/ block location.
+			// 3. Table keeps track of each inode location/ block location.
 			// 4. Initially, we need 0 inodes and 0 blocks, and only place holder structs.
-			// 5. Once determined, place holders are written out.
-
-
+	
+	// 5. Once determined, place holders are written out.
+	retval = io_channel_write_blk64(fs->io, 2, 1, ctable);	
+	if (retval) {
+		com_err("write_cache_table", retval, "%s", _("while writing inode cache table"));
+		exit(1);
+	}
+	retval = io_channel_write_blk64(fs->io, 3, 1, btable);
+	if (retval) {
+		com_err("write_cache_table", retval, "%s", _("while writing block cache table"));
+		exit(1);
+	}
 
 	ext2fs_numeric_progress_close(fs, &progress, _("done                            \n"));
+
 }
 
 static void zap_sector(ext2_filsys fs, int sect, int nsect)
@@ -387,6 +403,9 @@ static int hifs_mkfs(const char *dev_name, const char *mount_point)
     struct dentry *root_dentry;
 	struct hifs_cache_bitmap *dirty_bitmap;
 	struct hifs_cache_bitmap *cache_bitmap;
+	struct inode_table ctable;
+	struct inode_table btable;
+
 
 
     // Allocate a dirty bitmap
@@ -446,7 +465,7 @@ static int hifs_mkfs(const char *dev_name, const char *mount_point)
 	// Now how does this all compare to hi_command's idea of things?
 
 	// Now everythig is resolved, write out the cache device structure.
-	hifs_write_sblock(sb, cache_bitmap, dirty_bitmap);
+	hifs_write_sblock(sb, cache_bitmap, dirty_bitmap, ctable, btable);
 
     return 0;
 }
