@@ -9,12 +9,10 @@
 #pragma once
 
 #include <getopt.h>
-#include <sys/stat.h>
-#include <linux/fs.h>
 #include <stdbool.h>
 #include <ext2fs/ext2_fs.h>
 #include <ext2fs/ext2fs.h>
-#include <linux/genhd.h>
+
 
 struct command_line_flags {
     char *target_drive;

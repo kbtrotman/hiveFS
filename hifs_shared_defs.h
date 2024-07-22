@@ -155,11 +155,12 @@ extern struct
 #define HIFS_INODE_BITMAP_OFFSET HIFS_DEFAULT_BLOCK_SIZE
 #define HIFS_INODE_TABLE_OFFSET	 (HIFS_DEFAULT_BLOCK_SIZE * 2)
 #define HIFS_INODE_TABLE2_OFFSET (HIFS_DEFAULT_BLOCK_SIZE * 3)
-#define HIFS_ROOT_INODE_OFFSET	 (HIFS_INODE_TABLE2_OFFSET + HIFS_DEFAULT_BLOCK_SIZE)
+#define HIFS_DIRTY_TABLE_OFFSET (HIFS_DEFAULT_BLOCK_SIZE * 4)
+#define HIFS_ROOT_DENTRY_OFFSET	 (HIFS_DIRTY_TABLE_OFFSET + HIFS_DEFAULT_BLOCK_SIZE)
 /* Default place where FS will start using after mkfs (all above are used for mkfs) */
-#define HIFS_CACHE_SPACE_START	 (HIFS_INODE_TABLE2_OFFSET + HIFS_DEFAULT_BLOCK_SIZE)
+#define HIFS_CACHE_SPACE_START	 (HIFS_INODE_TABLE2_OFFSET + (HIFS_DEFAULT_BLOCK_SIZE * 5))
 
-#define HIFS_INODE_SIZE		512
+#define HIFS_INODE_SIZE		128
 #define HIFS_INODE_NUMBER_TABLE	128
 #define HIFS_INODE_TABLE_SIZE	(HIFS_INODE_NUMBER_TABLE * HIFS_INODE_SIZE)/HIFS_DEFAULT_BLOCK_SIZE
 
@@ -177,7 +178,7 @@ extern struct
 #define EXT2_RESIZE_INO		 7	/* Reserved group descriptors inode */
 #define EXT2_JOURNAL_INO	 8	/* Journal inode */
 #define EXT2_EXCLUDE_INO	 9	/* The "exclude" inode, for snapshots */
-#define HIFS_ROOT_INODE      15  /* Root inode nbr */
+#define HIFS_ROOT_INODE      11 /* Root inode nbr */
 
 /**
  * The on-Disk inode
