@@ -8,7 +8,8 @@
  */
 #include "tools.h"
 
-#include "../hifs.h"
+#include "../hifs_shared_defs.h"
+
 
 struct command_line_flags flags;
 const char * program_name = "mkfs.hifs";
@@ -233,13 +234,17 @@ void alloocate_Special_Inode(ext2_filsys fs, ext2_ino_t *ino, struct ext2_inode 
     // Initialize the inode structure
     memset(&inode, 0, sizeof(struct ext2_inode));
 
-    // Allocate and write a new inode
-    write_new_inode(fs, &ino, &inode);
+
+	// Create a dentry for the file.
+	//
+	// At this point we only need root dentry.
+	struct ext2_dir_entry root_dentry;
+
 
 	switch (ino)
 	{
 	case EXT2_BAD_INO:
-		/* code */
+		
 		break;
 	
 	case EXT2_LAF_INO:
@@ -270,7 +275,20 @@ void alloocate_Special_Inode(ext2_filsys fs, ext2_ino_t *ino, struct ext2_inode 
 		/* code */
 		break;
 	
+	case HIFS_ROOT_INODE:
+		memset(&root_dentry, 0, sizeof(struct ext2_dir_entry));
+
+		root_dentry.inode = HIFS_ROOT_INODE;
+		root_dentry.rec_len = 7 + sizeof(flags.mount_point);
+		root_dentry.name_len = sizeof(flags.mount_point);
+		root_dentry.name[0] = ".";
+		//root_dentry.file_type = EXT2_FT_DIR;
+		int block = (HIFS_ROOT_DENTRY_OFFSET/flags.block_size);
+		write_root_dir(fs);
+		break;
+	
 	default:
+		return;
 		break;
 	}
 
@@ -278,31 +296,19 @@ void alloocate_Special_Inode(ext2_filsys fs, ext2_ino_t *ino, struct ext2_inode 
     inode->i_gid = 0;
     inode->i_mode = LINUX_S_IFREG | 0644;
     inode->i_size = HIFS_DEFAULT_BLOCK_SIZE;
-	inode->i_block = 1;
+	inode->i_block = (ino + 4);
 	inode->i_atime = now;
 	inode->i_ctime = now;
 	inode->i_mtime = now;
 	inode->i_dtime = now;
 	inode->i_links_count = 1;
-	inode->i_blocks = 
-
+	inode->i_blocks = 1;
+	inode->i_size_high = 0;
 
     // Allocate and write a new inode
     write_new_inode(fs, &ino, &inode);
-
-    printf("Inode number [%u], to block [%u], allocated and written.\n", ino, );
-	
-#define EXT2_BAD_INO	     1  /* Bad blocks inode */
-#define EXT2_LAF_INO		 2  /* Lost and Found inode nr */
-#define EXT2_USR_QUOTA_INO	 3	/* User quota inode */
-#define EXT2_GRP_QUOTA_INO	 4	/* Group quota inode */
-#define EXT2_BOOT_LOADER_INO 5	/* Boot loader inode */
-#define EXT2_UNDEL_DIR_INO	 6	/* Undelete directory inode */
-#define EXT2_RESIZE_INO		 7	/* Reserved group descriptors inode */
-#define EXT2_JOURNAL_INO	 8	/* Journal inode */
-#define EXT2_EXCLUDE_INO	 9	/* The non-global "exclude" inode, for snapshots */
-#define HIFS_ROOT_INODE      12  /* Root inode nbr */
-
+    printf("Inode number [%u], pointing to block [%u], allocated and written.\n", ino, inode->i_block);
+	free(inode);
 }
 
 static void write_cache_table(ext2_filsys fs, struct hifs_cache_bitmap *cache_table, struct hifs_cache_bitmap *dirty_table)
@@ -314,6 +320,8 @@ static void write_cache_table(ext2_filsys fs, struct hifs_cache_bitmap *cache_ta
 	int inode_size = 0;
 	int blocks_size = 0;
 	struct ext2fs_numeric_progress_struct progress;
+    struct ext2_inode *inode;
+	int prog = 0;
 
 	ext2fs_numeric_progress_init(fs, &progress, _("Writing inode tables: "), fs->group_desc_count);
 
@@ -334,7 +342,7 @@ static void write_cache_table(ext2_filsys fs, struct hifs_cache_bitmap *cache_ta
 				len = flags.blocks - i;
 			}
 			zap_sector(fs, i, len);
-			ext2fs_numeric_progress_update(fs, &progress, i);
+			ext2fs_numeric_progress_update(fs, &progress, prog + i);
 		}
 	}
 
@@ -350,22 +358,25 @@ static void write_cache_table(ext2_filsys fs, struct hifs_cache_bitmap *cache_ta
 
 	// Next zero out both tables and write those. (IE: tables with little actual data yet.)
 		// There are a few questions:
-			// 2. Size of each inode determines # of inodes per block.
 				// ext2_fs inodes are 128 Bytes per inode.
 				// With one Inode Tabloe block, we can have 32,768 inodes in cache.
-				// With two blocks given to Inode Table, we can have 65,536. <-<Default to 2 Blocks>
-			// 3. Table keeps track of each inode location/ block location.
-			// 4. Initially, we need 0 inodes and 0 blocks, and only place holder structs.
-			// 5. We have a set of pre-determined blocks that we must populate, then write the cache table.
-
+				// With two blocks given to Inode Table, we can have 65,536. 
+				// ext4_fs inodes are 256 Bytes per inode.
+				// One block = 16,384 inodes in cache.
+				// Two blocks = 32,768 inodes in cache.  <---<Default to EXT4, 2 Blocks>
+	
+	// We have a set of pre-determined inodes that we must populate, then write the cache table.
 	for (i = 0; i < EXT2_EXCLUDE_INO; i++) {
-		allocate_Special_Inode(fs, i);
+		allocate_Special_Inode(fs, i, inode);
+		ext2fs_numeric_progress_update(fs, &progress, prog + (i * 2));
 	}
 
+	// Allocate ROOT Dentry here.
+	allocate_Special_Inode(fs, EXT2_ROOT_INO, inode);
+	ext2fs_numeric_progress_update(fs, &progress, prog + 20);
 
 
 	ext2fs_numeric_progress_close(fs, &progress, _("done                            \n"));
-
 }
 
 static void zap_sector(ext2_filsys fs, int sect, int nsect)
@@ -449,7 +460,6 @@ int hifs_write_sblock(struct super_block *sb, struct hifs_cache_bitmap *cache_ta
     }
 
 	write_cache_table(fs_hifs, cache_table, dirty_table);
-	write_root_dir(sb);
 	write_lost_and_found(fs_hifs);
 
 }
