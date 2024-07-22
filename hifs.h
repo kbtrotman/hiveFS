@@ -32,7 +32,7 @@
 #include <linux/blkdev.h>
 #include <linux/magic.h>
 #include <linux/debugfs.h>
-#include <asm/uaccess.h>
+//#include <asm/uaccess.h>
 #include <linux/fs_struct.h>
 #include <linux/list.h>
 #include <linux/mutex.h>
