@@ -498,7 +498,12 @@ static int hifs_mkfs(const char *dev_name, const char *mount_point)
 	struct hifs_cache_bitmap *dirty_bitmap;
 	struct hifs_cache_bitmap *cache_bitmap;
 
-
+	/*
+	The filesystem is using a standard ext2/ext4 style filesystem locally.
+	Unlike most filesystems, however, the local disk is only a cache.
+	So, we have a typical inode table and blocks like any FS, but they're
+	full of data being cached from remote, not the complete FS structure.
+	*/
 
     // Allocate a dirty bitmap
 	*dirty_bitmap = (struct hifs_cache_bitmap) {
