@@ -1,0 +1,31 @@
+# Define the compiler
+CC = gcc
+
+# Includes
+INCS = -I /usr/include/ -I /usr/include/postgresql/ -I /usr/lib/gcc/x86_64-redhat-linux/8/include
+
+# Libraries
+LIBS = -L/usr/lib/ -L/usr/lib64/ -L/usr/
+
+# Define any compile-time flags
+CFLAGS = -std=gnu11 -Wall -g $(INCS) $(LIBS)
+
+# Define the C source files
+SRCS = get-size.c
+
+# Define the C object files 
+OBJS = $(SRCS:.c=.o)
+
+# Define the executable file 
+MAIN = get-size
+
+all: $(MAIN)
+
+$(MAIN): $(OBJS) 
+	$(CC) $(CFLAGS) -o $(MAIN) $(OBJS)
+
+.c.o:
+	$(CC) $(CFLAGS) -c $<  -o $@
+
+clean:
+	$(RM) *.o *~ $(MAIN)

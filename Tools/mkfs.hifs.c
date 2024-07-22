@@ -204,8 +204,108 @@ static void write_root_dir(ext2_filsys fs)
 	}
 }
 
-static void write_cache_table(ext2_filsys fs, struct hifs_cache_bitmap *cache_table, struct hifs_cache_bitmap *dirty_table,
-	struct inode_table ctable, struct inode_table btable)
+void write_new_inode(ext2_filsys fs, ext2_ino_t *ino, struct ext2_inode *inode) {
+    errcode_t retval;
+
+    // Allocate a new inode
+    retval = ext2fs_new_inode(fs, 0, LINUX_S_IFREG | 0644, 0, ino);
+    if (retval) {
+        fprintf(stderr, "Error allocating new inode: %s\n", error_message(retval));
+        exit(1);
+    }
+
+    // Write the inode data to the newly allocated inode
+    retval = ext2fs_write_inode(fs, *ino, inode);
+    if (retval) {
+        fprintf(stderr, "Error writing inode: %s\n", error_message(retval));
+        exit(1);
+    }
+}
+
+void alloocate_Special_Inode(ext2_filsys fs, ext2_ino_t *ino, struct ext2_inode *inode) {
+	errcode_t retval;
+    struct ext2_inode inode;
+    ext2_ino_t ino;
+	time_t now;
+
+	now = time(NULL);
+
+    // Initialize the inode structure
+    memset(&inode, 0, sizeof(struct ext2_inode));
+
+    // Allocate and write a new inode
+    write_new_inode(fs, &ino, &inode);
+
+	switch (ino)
+	{
+	case EXT2_BAD_INO:
+		/* code */
+		break;
+	
+	case EXT2_LAF_INO:
+		/* code */
+		break;
+	
+	case EXT2_USR_QUOTA_INO:
+		/* code */
+		break;
+	
+	case EXT2_GRP_QUOTA_INO:
+		/* code */
+		break;
+	
+	case EXT2_BOOT_LOADER_INO:
+		/* code */
+		break;
+	
+	case EXT2_UNDEL_DIR_INO:
+		/* code */
+		break;
+	
+	case EXT2_JOURNAL_INO:
+		/* code */
+		break;
+	
+	case EXT2_EXCLUDE_INO:
+		/* code */
+		break;
+	
+	default:
+		break;
+	}
+
+	inode->i_uid = 0;
+    inode->i_gid = 0;
+    inode->i_mode = LINUX_S_IFREG | 0644;
+    inode->i_size = HIFS_DEFAULT_BLOCK_SIZE;
+	inode->i_block = 1;
+	inode->i_atime = now;
+	inode->i_ctime = now;
+	inode->i_mtime = now;
+	inode->i_dtime = now;
+	inode->i_links_count = 1;
+	inode->i_blocks = 
+
+
+    // Allocate and write a new inode
+    write_new_inode(fs, &ino, &inode);
+
+    printf("Inode number [%u], to block [%u], allocated and written.\n", ino, );
+	
+#define EXT2_BAD_INO	     1  /* Bad blocks inode */
+#define EXT2_LAF_INO		 2  /* Lost and Found inode nr */
+#define EXT2_USR_QUOTA_INO	 3	/* User quota inode */
+#define EXT2_GRP_QUOTA_INO	 4	/* Group quota inode */
+#define EXT2_BOOT_LOADER_INO 5	/* Boot loader inode */
+#define EXT2_UNDEL_DIR_INO	 6	/* Undelete directory inode */
+#define EXT2_RESIZE_INO		 7	/* Reserved group descriptors inode */
+#define EXT2_JOURNAL_INO	 8	/* Journal inode */
+#define EXT2_EXCLUDE_INO	 9	/* The non-global "exclude" inode, for snapshots */
+#define HIFS_ROOT_INODE      12  /* Root inode nbr */
+
+}
+
+static void write_cache_table(ext2_filsys fs, struct hifs_cache_bitmap *cache_table, struct hifs_cache_bitmap *dirty_table)
 {
 	errcode_t	retval;
 	blk64_t		start = 0;
@@ -248,28 +348,21 @@ static void write_cache_table(ext2_filsys fs, struct hifs_cache_bitmap *cache_ta
 		exit(1);
 	}
 
-	// Next zero out both tables and write those. (IE: tables with no actual data yet.)
-		// This one is slightly more difficult. There are a few questions:
-			// 1. Percentage of inodes to blocks to allow? Configurable?
-				// Eventually put this in a config file to size each table.
-				// Max of 50/50 split, assume that for now.
-			blocks_size = inode_size = flags.size / 2;
-
+	// Next zero out both tables and write those. (IE: tables with little actual data yet.)
+		// There are a few questions:
 			// 2. Size of each inode determines # of inodes per block.
+				// ext2_fs inodes are 128 Bytes per inode.
+				// With one Inode Tabloe block, we can have 32,768 inodes in cache.
+				// With two blocks given to Inode Table, we can have 65,536. <-<Default to 2 Blocks>
 			// 3. Table keeps track of each inode location/ block location.
 			// 4. Initially, we need 0 inodes and 0 blocks, and only place holder structs.
-	
-	// 5. Once determined, place holders are written out.
-	retval = io_channel_write_blk64(fs->io, 2, 1, ctable);	
-	if (retval) {
-		com_err("write_cache_table", retval, "%s", _("while writing inode cache table"));
-		exit(1);
+			// 5. We have a set of pre-determined blocks that we must populate, then write the cache table.
+
+	for (i = 0; i < EXT2_EXCLUDE_INO; i++) {
+		allocate_Special_Inode(fs, i);
 	}
-	retval = io_channel_write_blk64(fs->io, 3, 1, btable);
-	if (retval) {
-		com_err("write_cache_table", retval, "%s", _("while writing block cache table"));
-		exit(1);
-	}
+
+
 
 	ext2fs_numeric_progress_close(fs, &progress, _("done                            \n"));
 
@@ -361,7 +454,7 @@ int hifs_write_sblock(struct super_block *sb, struct hifs_cache_bitmap *cache_ta
 
 }
 
-static struct hifs_cache_bitmap *create_dirty_table(struct hifs_cache_bitmap *dt)
+static struct hifs_cache_bitmap *create_dirty_bitmap(struct hifs_cache_bitmap *dt)
 {
 	dt->bitmap = calloc((flags.blocks/8) + 1, sizeof(uint8_t));
 	if (!dt->bitmap) {
@@ -379,7 +472,7 @@ static struct hifs_cache_bitmap *create_dirty_table(struct hifs_cache_bitmap *dt
 	return dt;
 }
 
-static struct hifs_cache_bitmap *create_cache_table(struct hifs_cache_bitmap *ct)
+static struct hifs_cache_bitmap *create_cache_bitmap(struct hifs_cache_bitmap *ct)
 {
 	ct->bitmap = calloc((flags.blocks/8) + 1, sizeof(uint8_t));
 	if (!ct->bitmap) {
@@ -404,8 +497,6 @@ static int hifs_mkfs(const char *dev_name, const char *mount_point)
     struct dentry *root_dentry;
 	struct hifs_cache_bitmap *dirty_bitmap;
 	struct hifs_cache_bitmap *cache_bitmap;
-	struct inode_table ctable;
-	struct inode_table btable;
 
 
 
@@ -454,19 +545,19 @@ static int hifs_mkfs(const char *dev_name, const char *mount_point)
     sb->s_root = &root_dentry;
 
     // Create a cache table and cache bitmap
-	cache_bitmap = create_cache_table(cache_bitmap);
+	cache_bitmap = create_cache_bitmap(cache_bitmap);
 	if (!cache_bitmap) {
 		return -ENOMEM;
 	}
 
-	dirty_bitmap = create_dirty_table(dirty_bitmap);
+	dirty_bitmap = create_dirty_bitmap(dirty_bitmap);
 	if (!dirty_bitmap) {
 		return -ENOMEM;
 	}
 	// Now how does this all compare to hi_command's idea of things?
 
 	// Now everythig is resolved, write out the cache device structure.
-	hifs_write_sblock(sb, cache_bitmap, dirty_bitmap, ctable, btable);
+	hifs_write_sblock(sb, cache_bitmap, dirty_bitmap);
 
     return 0;
 }
