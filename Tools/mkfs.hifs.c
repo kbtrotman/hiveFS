@@ -160,7 +160,7 @@ static void write_lost_and_found(ext2_filsys fs)
 	}
 }
 
-static void write_root_dir(ext2_filsys fs)
+static void write_root_dir(ext2_filsys fs, int block, struct ext2_dir_entry *r_dentry)
 {
 	errcode_t		retval;
 	struct ext2_inode	inode;
@@ -225,8 +225,6 @@ void write_new_inode(ext2_filsys fs, ext2_ino_t *ino, struct ext2_inode *inode) 
 
 void alloocate_Special_Inode(ext2_filsys fs, ext2_ino_t *ino, struct ext2_inode *inode) {
 	errcode_t retval;
-    struct ext2_inode inode;
-    ext2_ino_t ino;
 	time_t now;
 
 	now = time(NULL);
@@ -284,7 +282,7 @@ void alloocate_Special_Inode(ext2_filsys fs, ext2_ino_t *ino, struct ext2_inode 
 		root_dentry.name[0] = ".";
 		//root_dentry.file_type = EXT2_FT_DIR;
 		int block = (HIFS_ROOT_DENTRY_OFFSET/flags.block_size);
-		write_root_dir(fs);
+		write_root_dir(fs, block, &root_dentry);
 		break;
 	
 	default:
