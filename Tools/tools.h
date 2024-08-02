@@ -10,8 +10,8 @@
 
 #include <getopt.h>
 #include <stdbool.h>
-#include <ext2fs/ext2_fs.h>
 #include <ext2fs/ext2fs.h>
+#include <ext2fs/ext2_fs.h>
 
 
 struct command_line_flags {

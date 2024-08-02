@@ -10,6 +10,10 @@
 
 #include "../hifs_shared_defs.h"
 
+#define root_uid 0
+#define root_gid 0
+#define root_perms 644
+
 
 struct command_line_flags flags;
 const char * program_name = "mkfs.hifs";
@@ -67,7 +71,7 @@ void usage()
 
 static void create_journal_dev(ext2_filsys fs)
 {
-	struct ext2fs_numeric_progress_struct progress;
+	struct ext2fs_progress_ops *progress;
 	errcode_t		retval;
 	char			*buf;
 	blk64_t			blk, err_blk;
@@ -112,9 +116,7 @@ static void create_journal_dev(ext2_filsys fs)
 
 	ext2fs_numeric_progress_close(fs, &progress, NULL);
 write_superblock:
-	retval = io_channel_write_blk64(fs->io,
-					fs->super->s_first_data_block+1,
-					1, buf);
+	retval = io_channel_write_blk64(fs->io, fs->super->s_first_data_block+1, 1, buf);
 	(void) ext2fs_free_mem(&buf);
 	if (retval) {
 		com_err("create_journal_dev", retval, "%s", _("while writing journal superblock"));
@@ -317,7 +319,7 @@ static void write_cache_table(ext2_filsys fs, struct hifs_cache_bitmap *cache_ta
 	int		len = 0;
 	int inode_size = 0;
 	int blocks_size = 0;
-	struct ext2fs_numeric_progress_struct progress;
+	struct ext2fs_progress_ops *progress;
     struct ext2_inode *inode;
 	int prog = 0;
 
@@ -358,10 +360,10 @@ static void write_cache_table(ext2_filsys fs, struct hifs_cache_bitmap *cache_ta
 		// There are a few questions:
 				// ext2_fs inodes are 128 Bytes per inode.
 				// With one Inode Tabloe block, we can have 32,768 inodes in cache.
-				// With two blocks given to Inode Table, we can have 65,536. 
+				// With two blocks given to Inode Table, we can have 65,536.    <---<Default to EXT4, 2 Blocks>
 				// ext4_fs inodes are 256 Bytes per inode.
 				// One block = 16,384 inodes in cache.
-				// Two blocks = 32,768 inodes in cache.  <---<Default to EXT4, 2 Blocks>
+				// Two blocks = 32,768 inodes in cache. 
 	
 	// We have a set of pre-determined inodes that we must populate, then write the cache table.
 	for (i = 0; i < EXT2_EXCLUDE_INO; i++) {
@@ -425,9 +427,6 @@ int hifs_write_sblock(struct super_block *sb, struct hifs_cache_bitmap *cache_ta
 	ext2_filsys fs_hifs;
 	errcode_t err;
 
-	// First let's populate our new sb before we do any device IO.
-	hifs_fill_super(&sb);
-
 	// fopen();
 	err = ext2fs_open(flags.device_name, EXT2_FLAG_RW, 0, 0, unix_io_manager, &fs_hifs);
     if (err) {
@@ -452,7 +451,7 @@ int hifs_write_sblock(struct super_block *sb, struct hifs_cache_bitmap *cache_ta
 
 	// write super;   
     // Write the superblock to the device
-    if (write(fd, sb, sizeof(struct super_block)) != sizeof(struct super_block)) {
+    if (write(fd, sb, sizeof(struct ext2_super_block)) != sizeof(struct ext2_super_block)) {
         perror("write");
         return -1;
     }
@@ -464,6 +463,13 @@ int hifs_write_sblock(struct super_block *sb, struct hifs_cache_bitmap *cache_ta
 
 static struct hifs_cache_bitmap *create_dirty_bitmap(struct hifs_cache_bitmap *dt)
 {
+
+    dt = (struct hifs_cache_bitmap *)malloc(sizeof(struct hifs_cache_bitmap));
+	if (!dt) {
+		return -ENOMEM;
+	}
+
+
 	dt->bitmap = calloc((flags.blocks/8) + 1, sizeof(uint8_t));
 	if (!dt->bitmap) {
 		return -ENOMEM;
@@ -482,6 +488,11 @@ static struct hifs_cache_bitmap *create_dirty_bitmap(struct hifs_cache_bitmap *d
 
 static struct hifs_cache_bitmap *create_cache_bitmap(struct hifs_cache_bitmap *ct)
 {
+
+	ct = (struct hifs_cache_bitmap *)malloc(sizeof(struct hifs_cache_bitmap));
+	if (!ct) {
+		return -ENOMEM;
+	}
 	ct->bitmap = calloc((flags.blocks/8) + 1, sizeof(uint8_t));
 	if (!ct->bitmap) {
 		return -ENOMEM;
@@ -498,54 +509,81 @@ static struct hifs_cache_bitmap *create_cache_bitmap(struct hifs_cache_bitmap *c
 	return ct;
 }
 
+struct ext2_super_block *hifs_fill_super(struct ext2_super_block *super) {
+
+	super = (struct ext2_super_block *)malloc(sizeof(struct ext2_super_block));
+	if (!super) {
+		return -ENOMEM;
+	}
+
+	memset(&super, 0, sizeof(super));
+
+	*super = (struct ext2_super_block) {
+		.s_inode_size = sizeof(struct ext2_inode),
+		.s_max_mnt_count = 20,
+		.s_magic = HIFS_MAGIC_NUM,
+		.s_blocks_count = flags.blocks,
+		.s_inodes_count =  HIFS_MAX_CACHE_INODES,
+    	.s_free_blocks_count = 1024 - 1, // All blocks except boot/superblock
+    	.s_free_inodes_count = HIFS_MAX_CACHE_INODES - 1, // All inodes except the root
+    	.s_first_data_block = 1, // First data block number
+    	.s_blocks_per_group = 8192, // Blocks per group
+    	.s_inodes_per_group = 128, // Inodes per group
+    	.s_mtime = time(NULL), // Mount time
+    	.s_wtime = time(NULL), // Write time
+    	.s_creator_os = EXT2_OS_LINUX, // Creator OS
+    	.s_rev_level = EXT2_GOOD_OLD_REV, // Revision level
+	};
+
+	return super;
+}
+
+struct root_inode *hifs_create_root_inode(struct super_block *sb, struct ext2_inode *rt) {
+    rt = new_inode(sb);
+    if (!rt) {
+        return -ENOMEM;
+    }
+
+	memset(&rt, 0, sizeof(rt));
+
+	*rt = (struct ext2_inode) {
+    	. = 1,
+		.i_sb = &sb,
+		.i_op = &hifs_inode_operations,
+		.i_fop = &hifs_dir_operations,
+		.i_mode = S_IFDIR | 0755,
+		.i_uid = 0,
+		.i_gid = 0,
+		.i_links_count = 1,
+	};
+
+	return rt;
+}
+
 static int hifs_mkfs(const char *dev_name, const char *mount_point)
 {
-    struct super_block *sb;
+    struct ext2_super_block *sb;
     struct inode *root_inode;
     struct dentry *root_dentry;
 	struct hifs_cache_bitmap *dirty_bitmap;
 	struct hifs_cache_bitmap *cache_bitmap;
 
 	/*
-	The filesystem is using a standard ext2/ext4 style filesystem locally.
-	Unlike most filesystems, however, the local disk is only a cache.
-	So, we have a typical inode table and blocks like any FS, but they're
-	full of data being cached from remote, not the complete FS structure.
+	The filesystem is using a standard ext2/ext4 style structure locally.
+	Unlike other filesystems, however, local disk is only a cache.
+	We have a typical inode table and blocks like any FS, but they
+	point to data being cached, not a complete FS structure/files.
 	*/
 
-    // Allocate a dirty bitmap
-	*dirty_bitmap = (struct hifs_cache_bitmap) {
-		.bitmap = NULL, 
-		.size = flags.size,
-		.entries = 0,
-		.cache_block_size = flags.block_size,
-		.cache_block_count = flags.blocks,
-		.cache_blocks_free = flags.blocks,
-	};
+	// Create a cache table and cache bitmap
+	cache_bitmap = create_cache_bitmap(cache_bitmap);
+	dirty_bitmap = create_dirty_bitmap(dirty_bitmap);
 
-
-    // Allocate a cache inode bitmap
-	*cache_bitmap = (struct hifs_cache_bitmap) {
-		.bitmap = NULL, 
-		.size = flags.size,
-		.entries = 0,
-		.cache_block_size = flags.block_size,
-		.cache_block_count = flags.blocks,
-		.cache_blocks_free = flags.blocks,
-	};
+	// Create our blank superblock first
+	sb = hifs_create_root_inode(sb, root_inode);
 
     // Create a root inode for the filesystem
-    root_inode = new_inode(sb);
-    if (!root_inode) {
-        return -ENOMEM;
-    }
-
-    // Initialize the root inode
-    root_inode->i_ino = 1;
-    root_inode->i_sb = &sb;
-    root_inode->i_op = &hifs_inode_operations;
-    root_inode->i_fop = &hifs_dir_operations;
-    root_inode->i_mode = S_IFDIR | 0755;
+	root_inode = hifs_create_root_inode(sb, root_inode);
 
     // Create a dentry for the root directory
     root_dentry = d_make_root(root_inode);
@@ -555,19 +593,14 @@ static int hifs_mkfs(const char *dev_name, const char *mount_point)
     }
 
     // Set the root dentry for the superblock
-    sb->s_root = &root_dentry;
+    sb->s_root = root_dentry;
 
-    // Create a cache table and cache bitmap
-	cache_bitmap = create_cache_bitmap(cache_bitmap);
-	if (!cache_bitmap) {
-		return -ENOMEM;
-	}
-
-	dirty_bitmap = create_dirty_bitmap(dirty_bitmap);
-	if (!dirty_bitmap) {
-		return -ENOMEM;
-	}
 	// Now how does this all compare to hi_command's idea of things?
+	//
+	//
+	//
+	//////////////////////////////////////////
+
 
 	// Now everythig is resolved, write out the cache device structure.
 	hifs_write_sblock(sb, cache_bitmap, dirty_bitmap);

@@ -141,6 +141,7 @@ extern struct
 /* FS constants */
 #define HIFS_MAGIC_NUM		    0x1fa7d0d0
 #define HIFS_EMPTY_ENTRY		0xdeeddeed
+#define HIFS_MAX_CACHE_INODES   65536
 
 #define HIFS_NAME_LEN		     255
 #define HIFS_INODE_MSIZE		 4
