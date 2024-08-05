@@ -10,6 +10,13 @@
 
 #include <getopt.h>
 #include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <string.h>
+#include <time.h>
+#include <sys/stat.h>
 #include <ext2fs/ext2fs.h>
 #include <ext2fs/ext2_fs.h>
 

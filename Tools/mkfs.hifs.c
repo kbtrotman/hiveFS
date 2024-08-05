@@ -18,6 +18,7 @@
 struct command_line_flags flags;
 const char * program_name = "mkfs.hifs";
 int itable_zeroed = 0;
+int fd;
 
 off_t ALLOCATIONGRANULARITY=65536; // max(linux.mmap.ALLOCATIONGRANULARITY, windows.mmap.ALLOCATIONGRANULARITY)
 
@@ -32,7 +33,6 @@ static struct option long_options[] =
     {"filename",     required_argument, 0, 'F'},
 	{"mount",        required_argument, 0, 'm'},
     {"size",         required_argument, 0, 's'},
-    {"block-size",   required_argument, 0, 'b'},
     {"noaction",     required_argument, 0, 'n'},
     {0, 0, 0, 0}
 };
@@ -71,57 +71,25 @@ void usage()
 
 static void create_journal_dev(ext2_filsys fs)
 {
-	struct ext2fs_progress_ops *progress;
+	struct ext2fs_progress *progress;
 	errcode_t		retval;
 	char			*buf;
 	blk64_t			blk, err_blk;
 	int			c, count, err_count;
-	struct ext2fs_journal_params	jparams;
+	struct ext2fs_journal	*jparams;
+	blk_t journal_block;
 
-	retval = ext2fs_get_journal_params(&jparams, fs);
+	// Specify the starting block of the journal (example value)
+	journal_block = 8192; // This should be appropriately calculated or defined
+
+	// Add a journal device
+	retval = ext2fs_add_journal_device(fs, journal_block);
 	if (retval) {
-		com_err("create_journal_dev", retval, "%s",
-			_("while splitting the journal size"));
-		exit(1);
+		com_err("hifs_mkfs", retval, "while adding journal device");
+		ext2fs_close(fs);
+		return -1;
 	}
 
-	retval = ext2fs_create_journal_superblock2(fs, &jparams, 0, &buf);
-	if (retval) {
-		com_err("create_journal_dev", retval, "%s",
-			_("while initializing journal superblock"));
-		exit(1);
-	}
-
-	if (journal_flags & EXT2_MKJOURNAL_LAZYINIT)
-		goto write_superblock;
-
-	ext2fs_numeric_progress_init(fs, &progress, _("Zeroing journal device: "), ext2fs_blocks_count(fs->super));
-	blk = 0;
-	count = ext2fs_blocks_count(fs->super);
-	while (count > 0) {
-		if (count > 1024)
-			c = 1024;
-		else
-			c = count;
-		retval = ext2fs_zero_blocks2(fs, blk, c, &err_blk, &err_count);
-		if (retval) {
-			com_err("create_journal_dev", retval, ("while zeroing journal device (block %llu, count %d)"),
-				(unsigned long long) err_blk, err_count);
-			exit(1);
-		}
-		blk += c;
-		count -= c;
-		ext2fs_numeric_progress_update(fs, &progress, blk);
-	}
-
-	ext2fs_numeric_progress_close(fs, &progress, NULL);
-write_superblock:
-	retval = io_channel_write_blk64(fs->io, fs->super->s_first_data_block+1, 1, buf);
-	(void) ext2fs_free_mem(&buf);
-	if (retval) {
-		com_err("create_journal_dev", retval, "%s", _("while writing journal superblock"));
-		exit(1);
-	}
 }
 
 static void write_lost_and_found(ext2_filsys fs)
@@ -135,14 +103,14 @@ static void write_lost_and_found(ext2_filsys fs)
 	fs->umask = 077;
 	retval = ext2fs_mkdir(fs, EXT2_ROOT_INO, 0, name);
 	if (retval) {
-		com_err("ext2fs_mkdir", retval, "%s",
+		com_err("ext2fs_mkdir", retval, "%d",
 			_("while creating /lost+found"));
 		exit(1);
 	}
 
 	retval = ext2fs_lookup(fs, EXT2_ROOT_INO, name, strlen(name), 0, &ino);
 	if (retval) {
-		com_err("ext2_lookup", retval, "%s",
+		com_err("ext2_lookup", retval, "%d",
 			_("while looking up /lost+found"));
 		exit(1);
 	}
@@ -155,7 +123,7 @@ static void write_lost_and_found(ext2_filsys fs)
 			break;
 		retval = ext2fs_expand_dir(fs, ino);
 		if (retval) {
-			com_err("ext2fs_expand_dir", retval, "%s",
+			com_err("ext2fs_expand_dir", retval, "%d",
 				_("while expanding /lost+found"));
 			exit(1);
 		}
@@ -170,7 +138,7 @@ static void write_root_dir(ext2_filsys fs, int block, struct ext2_dir_entry *r_d
 
 	retval = ext2fs_mkdir(fs, EXT2_ROOT_INO, EXT2_ROOT_INO, 0);
 	if (retval) {
-		com_err("ext2fs_mkdir", retval, "%s",
+		com_err("ext2fs_mkdir", retval, "%d",
 			_("while creating root dir"));
 		exit(1);
 	}
@@ -180,7 +148,7 @@ static void write_root_dir(ext2_filsys fs, int block, struct ext2_dir_entry *r_d
 	if (need_inode_change) {
 		retval = ext2fs_read_inode(fs, EXT2_ROOT_INO, &inode);
 		if (retval) {
-			com_err("ext2fs_read_inode", retval, "%s",
+			com_err("ext2fs_read_inode", retval, "%d",
 				_("while reading root inode"));
 			exit(1);
 		}
@@ -200,7 +168,7 @@ static void write_root_dir(ext2_filsys fs, int block, struct ext2_dir_entry *r_d
 	if (need_inode_change) {
 		retval = ext2fs_write_new_inode(fs, EXT2_ROOT_INO, &inode);
 		if (retval) {
-			com_err("ext2fs_write_inode", retval, "%s",
+			com_err("ext2fs_write_inode", retval, "%d",
 				_("while setting root inode ownership"));
 			exit(1);
 		}
@@ -225,8 +193,7 @@ void write_new_inode(ext2_filsys fs, ext2_ino_t *ino, struct ext2_inode *inode) 
     }
 }
 
-void alloocate_Special_Inode(ext2_filsys fs, ext2_ino_t *ino, struct ext2_inode *inode) {
-	errcode_t retval;
+void allocate_Special_Inode(ext2_filsys fs, ext2_ino_t ino, struct ext2_inode *inode) {
 	time_t now;
 
 	now = time(NULL);
@@ -236,8 +203,6 @@ void alloocate_Special_Inode(ext2_filsys fs, ext2_ino_t *ino, struct ext2_inode 
 
 
 	// Create a dentry for the file.
-	//
-	// At this point we only need root dentry.
 	struct ext2_dir_entry root_dentry;
 
 
@@ -296,7 +261,6 @@ void alloocate_Special_Inode(ext2_filsys fs, ext2_ino_t *ino, struct ext2_inode 
     inode->i_gid = 0;
     inode->i_mode = LINUX_S_IFREG | 0644;
     inode->i_size = HIFS_DEFAULT_BLOCK_SIZE;
-	inode->i_block = (ino + 4);
 	inode->i_atime = now;
 	inode->i_ctime = now;
 	inode->i_mtime = now;
@@ -307,83 +271,14 @@ void alloocate_Special_Inode(ext2_filsys fs, ext2_ino_t *ino, struct ext2_inode 
 
     // Allocate and write a new inode
     write_new_inode(fs, &ino, &inode);
-    printf("Inode number [%u], pointing to block [%u], allocated and written.\n", ino, inode->i_block);
+    printf("Inode number [%u], pointing to block [%ls], allocated and written.\n", ino, inode->i_block);
 	free(inode);
-}
-
-static void write_cache_table(ext2_filsys fs, struct hifs_cache_bitmap *cache_table, struct hifs_cache_bitmap *dirty_table)
-{
-	errcode_t	retval;
-	blk64_t		start = 0;
-	dgrp_t		i;
-	int		len = 0;
-	int inode_size = 0;
-	int blocks_size = 0;
-	struct ext2fs_progress_ops *progress;
-    struct ext2_inode *inode;
-	int prog = 0;
-
-	ext2fs_numeric_progress_init(fs, &progress, _("Writing inode tables: "), fs->group_desc_count);
-
-	// Next let's zap the other sectors if lazy_init is not set.
-	if (!itable_zeroed) {
-		if (!flags.lazy_init) {
-			zap_sector(fs, 1, 4); // Zap the inode tables if they haven't already been zeroed.
-		}
-	}
-
-	// This would run out of memory quickly allocating 4096 bytes for each sector, all zeros, so it could write them out.
-	// Instead, let's zap it 5 sectors at a time to avoid memory exhaustion. (It frees after every zap.)
-	if (!flags.lazy_init) {
-		for (i = 5; i < flags.blocks; i = i + 5) {
-			if ((i + 5) < flags.blocks) {
-				len = 5;
-			} else {
-				len = flags.blocks - i;
-			}
-			zap_sector(fs, i, len);
-			ext2fs_numeric_progress_update(fs, &progress, prog + i);
-		}
-	}
-
-	// Then write the inode bitmap, inode tables and dirty bitmap.
-	// Start with a zeroed bitmap, then write it.
-	io_channel_set_blksize(fs->io, flags.block_size);
-	retval = io_channel_write_blk64(fs->io, 1, 1, cache_table->bitmap);	
-	retval = io_channel_write_blk64(fs->io, 4, 1, dirty_table->bitmap);
-	if (retval) {
-		com_err("write_cache_table", retval, "%s", _("while writing cache bitmaps"));
-		exit(1);
-	}
-
-	// Next zero out both tables and write those. (IE: tables with little actual data yet.)
-		// There are a few questions:
-				// ext2_fs inodes are 128 Bytes per inode.
-				// With one Inode Tabloe block, we can have 32,768 inodes in cache.
-				// With two blocks given to Inode Table, we can have 65,536.    <---<Default to EXT4, 2 Blocks>
-				// ext4_fs inodes are 256 Bytes per inode.
-				// One block = 16,384 inodes in cache.
-				// Two blocks = 32,768 inodes in cache. 
-	
-	// We have a set of pre-determined inodes that we must populate, then write the cache table.
-	for (i = 0; i < EXT2_EXCLUDE_INO; i++) {
-		allocate_Special_Inode(fs, i, inode);
-		ext2fs_numeric_progress_update(fs, &progress, prog + (i * 2));
-	}
-
-	// Allocate ROOT Dentry here.
-	allocate_Special_Inode(fs, EXT2_ROOT_INO, inode);
-	ext2fs_numeric_progress_update(fs, &progress, prog + 20);
-
-
-	ext2fs_numeric_progress_close(fs, &progress, _("done                            \n"));
 }
 
 static void zap_sector(ext2_filsys fs, int sect, int nsect)
 {
 	char *buf;
 	int retval;
-	unsigned int *magic;
 
 zap_them:
 	if (sect == 0) {
@@ -418,12 +313,108 @@ its_done:
 	io_channel_set_blksize(fs->io, fs->blocksize);
 	free(buf);
 	if (retval)
-		fprintf(stderr, _("Warning: could not erase sector %d: %s\n"), sect, error_message(retval));
+		fprintf(stderr, ("Warning: could not erase sector %d: %s\n"), sect, error_message(retval));
 }
 
-int hifs_write_sblock(struct super_block *sb, struct hifs_cache_bitmap *cache_table, struct hifs_cache_bitmap *dirty_table)
+static void write_cache_table(ext2_filsys fs, struct hifs_cache_bitmap *cache_table, struct hifs_cache_bitmap *dirty_table)
 {
-	int fd;
+	errcode_t	retval;
+	dgrp_t		i;
+	int		len = 0;
+	struct ext2fs_progress *progress;
+    struct ext2_inode *inode;
+	int prog = 0;
+
+	char *block = malloc(flags.block_size);
+    if (!block) {
+        perror("malloc");
+        return;
+    }
+	memset(block, 0, flags.block_size);
+
+	ext2fs_progress_init(fs, &progress, ("Writing inode tables: "), fs->group_desc_count);
+
+	// Next let's zap the other sectors if lazy_init is not set.
+	if (!itable_zeroed) {
+		if (!flags.lazy_init) {
+			zap_sector(fs, 1, 4); // Zap the inode tables if they haven't already been zeroed.
+		}
+	}
+
+	// This would run out of memory quickly allocating 4096 bytes for each sector, all zeros, so it could write them out.
+	// Instead, let's zap it 5 sectors at a time to avoid memory exhaustion. (It frees after every zap.)
+	if (!flags.lazy_init) {
+		for (i = 5; i < flags.blocks; i = i + 5) {
+			if ((i + 5) < flags.blocks) {
+				len = 5;
+			} else {
+				len = flags.blocks - i;
+			}
+			zap_sector(fs, i, len);
+			ext2fs_progress_update(fs, &progress, prog + i);
+		}
+	}
+
+	// Then write the inode bitmap, inode tables and dirty bitmap.
+	// Start with a zeroed bitmap, then write it.
+	io_channel_set_blksize(fs->io, flags.block_size);
+	retval = io_channel_write_blk64(fs->io, 1, 1, cache_table->bitmap);	
+	retval = io_channel_write_blk64(fs->io, 4, 1, dirty_table->bitmap);
+	if (retval) {
+		com_err("write_cache_table", retval, "%d", ("while writing cache bitmaps"));
+		exit(1);
+	}
+
+	// Next zero out both tables and write those. (IE: tables with little actual data yet.)
+		// There are a few questions:
+				// ext2_fs inodes are 128 Bytes per inode.
+				// With one Inode Tabloe block, we can have 32,768 inodes in cache.
+				// With two blocks given to Inode Table, we can have 65,536.    <---<Default to EXT4, 2 Blocks>
+				// ext4_fs inodes are 256 Bytes per inode.
+				// One block = 16,384 inodes in cache.
+				// Two blocks = 32,768 inodes in cache. 
+	
+	// We have a set of pre-determined inodes that we must populate, then write the cache table.
+	for (i = 0; i < EXT2_EXCLUDE_INO; i++) {
+		allocate_Special_Inode(fs, i, inode);
+		ext2fs_progress_update(fs, &progress, prog + (i * 2));
+	}
+
+	// Allocate ROOT Dentry here.
+	allocate_Special_Inode(fs, EXT2_ROOT_INO, inode);
+	ext2fs_progress_update(fs, &progress, prog + 20);
+
+	// Initialize the root directory block
+    struct ext2_dir_entry_2 *de = (struct ext2_dir_entry_2 *)block;
+
+    // Create "." entry
+    de->inode = HIFS_ROOT_INODE; // Root inode
+    de->rec_len = 12; // Length of this directory entry
+    de->name_len = 1; // Length of the name
+    de->file_type = EXT2_FT_DIR; // Directory type
+    strncpy(de->name, ".", de->name_len);
+
+    // Create ".." entry
+    de = (struct ext2_dir_entry_2 *)((char *)de + de->rec_len);
+    de->inode = HIFS_ROOT_INODE; // Parent inode (root itself in this case)
+    de->rec_len = flags.block_size - 12; // Length of this directory entry
+    de->name_len = 2; // Length of the name
+    de->file_type = EXT2_FT_DIR; // Directory type
+    strncpy(de->name, "..", de->name_len);
+	ext2fs_progress_update(fs, &progress, prog + 20);
+
+    // Write the root directory block to the device
+    if (pwrite(fd, block, flags.block_size, HIFS_ROOT_DENTRY_OFFSET * flags.block_size) != flags.block_size) {
+        perror("root dentry write");
+        close(fd);
+        return -1;
+    }
+
+	ext2fs_progress_close(fs, &progress, ("done                            \n"));
+}
+
+int hifs_write_sblock(struct ext2_super_block *sb, struct hifs_cache_bitmap *cache_table, struct hifs_cache_bitmap *dirty_table)
+{
 	ext2_filsys fs_hifs;
 	errcode_t err;
 
@@ -446,7 +437,7 @@ int hifs_write_sblock(struct super_block *sb, struct hifs_cache_bitmap *cache_ta
     // lSeek() to the superblock position
     if (lseek(fd, HIFS_SUPER_OFFSET, SEEK_SET) < 0) {
         perror("lseek");
-        return -1;
+        return;
     }
 
 	// write super;   
@@ -458,6 +449,10 @@ int hifs_write_sblock(struct super_block *sb, struct hifs_cache_bitmap *cache_ta
 
 	write_cache_table(fs_hifs, cache_table, dirty_table);
 	write_lost_and_found(fs_hifs);
+	create_journal_dev(fs_hifs);
+
+	ext2fs_close(fs_hifs);
+	return 0;
 
 }
 
@@ -466,13 +461,13 @@ static struct hifs_cache_bitmap *create_dirty_bitmap(struct hifs_cache_bitmap *d
 
     dt = (struct hifs_cache_bitmap *)malloc(sizeof(struct hifs_cache_bitmap));
 	if (!dt) {
-		return -ENOMEM;
+		return NULL;
 	}
 
 
 	dt->bitmap = calloc((flags.blocks/8) + 1, sizeof(uint8_t));
 	if (!dt->bitmap) {
-		return -ENOMEM;
+		return NULL;
 	}
 
 	// Populate anything necessary to start the bitmap. Cache's 1st entry should be sb, 2nd r_dentry
@@ -491,11 +486,11 @@ static struct hifs_cache_bitmap *create_cache_bitmap(struct hifs_cache_bitmap *c
 
 	ct = (struct hifs_cache_bitmap *)malloc(sizeof(struct hifs_cache_bitmap));
 	if (!ct) {
-		return -ENOMEM;
+		return NULL;
 	}
 	ct->bitmap = calloc((flags.blocks/8) + 1, sizeof(uint8_t));
 	if (!ct->bitmap) {
-		return -ENOMEM;
+		return NULL;
 	}
 
 	// Populate anything necessary to start the bitmap. Cache's 1st entry should be sb, 2nd r_dentry
@@ -511,17 +506,14 @@ static struct hifs_cache_bitmap *create_cache_bitmap(struct hifs_cache_bitmap *c
 
 struct ext2_super_block *hifs_fill_super(struct ext2_super_block *super) {
 
-	super = (struct ext2_super_block *)malloc(sizeof(struct ext2_super_block));
-	if (!super) {
-		return -ENOMEM;
-	}
-
 	memset(&super, 0, sizeof(super));
+	int magic = 0;
+	strtoi(HIFS_MAGIC_NUM, &magic, 10);
 
 	*super = (struct ext2_super_block) {
 		.s_inode_size = sizeof(struct ext2_inode),
 		.s_max_mnt_count = 20,
-		.s_magic = HIFS_MAGIC_NUM,
+		.s_magic = magic,
 		.s_blocks_count = flags.blocks,
 		.s_inodes_count =  HIFS_MAX_CACHE_INODES,
     	.s_free_blocks_count = 1024 - 1, // All blocks except boot/superblock
@@ -533,28 +525,30 @@ struct ext2_super_block *hifs_fill_super(struct ext2_super_block *super) {
     	.s_wtime = time(NULL), // Write time
     	.s_creator_os = EXT2_OS_LINUX, // Creator OS
     	.s_rev_level = EXT2_GOOD_OLD_REV, // Revision level
+		.s_def_resuid = 0, // Default user ID for reserved blocks
+    	.s_def_resgid = 0, // Default group ID for reserved blocks
 	};
 
 	return super;
 }
 
-struct root_inode *hifs_create_root_inode(struct super_block *sb, struct ext2_inode *rt) {
+struct root_inode *hifs_create_root_inode(struct ext2_super_block *sb, struct ext2_inode *rt) {
+
+	memset(rt, 0, sizeof(struct ext2_inode));
     rt = new_inode(sb);
     if (!rt) {
-        return -ENOMEM;
+        return NULL;
     }
 
 	memset(&rt, 0, sizeof(rt));
 
 	*rt = (struct ext2_inode) {
-    	. = 1,
-		.i_sb = &sb,
-		.i_op = &hifs_inode_operations,
-		.i_fop = &hifs_dir_operations,
 		.i_mode = S_IFDIR | 0755,
 		.i_uid = 0,
 		.i_gid = 0,
 		.i_links_count = 1,
+		.i_size = 0,
+		.i_atime = rt->i_ctime = rt->i_mtime = rt->i_dtime = time(NULL),
 	};
 
 	return rt;
@@ -563,10 +557,21 @@ struct root_inode *hifs_create_root_inode(struct super_block *sb, struct ext2_in
 static int hifs_mkfs(const char *dev_name, const char *mount_point)
 {
     struct ext2_super_block *sb;
-    struct inode *root_inode;
-    struct dentry *root_dentry;
+    struct ext2_inode *root_inode;
+    struct ext2_dentry *root_dentry;
 	struct hifs_cache_bitmap *dirty_bitmap;
 	struct hifs_cache_bitmap *cache_bitmap;
+
+	sb = (struct ext2_super_block *)malloc(sizeof(struct ext2_super_block));
+	if (!sb) {
+		return -1;
+	}
+
+	root_inode = (struct ext2_inode *)malloc(sizeof(struct ext2_inode));
+	if (!sb) {
+		return -1;
+	}
+	sb = hifs_fill_super(sb);
 
 	/*
 	The filesystem is using a standard ext2/ext4 style structure locally.
@@ -585,15 +590,6 @@ static int hifs_mkfs(const char *dev_name, const char *mount_point)
     // Create a root inode for the filesystem
 	root_inode = hifs_create_root_inode(sb, root_inode);
 
-    // Create a dentry for the root directory
-    root_dentry = d_make_root(root_inode);
-    if (!root_dentry) {
-        iput(root_inode);
-        return -ENOMEM;
-    }
-
-    // Set the root dentry for the superblock
-    sb->s_root = root_dentry;
 
 	// Now how does this all compare to hi_command's idea of things?
 	//
@@ -610,11 +606,11 @@ static int hifs_mkfs(const char *dev_name, const char *mount_point)
 
 int hifs_standard_warning( char *file)
 {
-	char c;
-	printf("This process will destroy any existing data on the disk other than the boot block.\n");
+	char yn;
+	printf("This process will destroy any existing data on the disk other than any existing boot block.\n");
 	printf("Are you sure you wish to make a new filesystem on this device? [y/n] ");
-	scanf("%c");
-	if (c == 'y' || c == 'Y') {
+	scanf(&yn);
+	if (yn == 'y' || yn == 'Y') {
 		printf("Creating a new filesystem on dev %s.\n", file);
 		return 0;
 	} else {
