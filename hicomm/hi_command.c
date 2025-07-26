@@ -78,6 +78,10 @@ int main(int argc, char *argv[])
     device_file_block = malloc(256);
     device_file_cmd = malloc(50);
 
+    // These queues are current;ly shared and they need to be un-coupled and not shared.
+    // This will allow mutation to note when queues change.
+
+
     strcpy(kern_atomic_path, "/dev/");
     strcpy(kern_atomic_device_name, kern_atomic_path);
     strcat(kern_atomic_device_name, kern_atomic_device);
