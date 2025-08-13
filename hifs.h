@@ -37,6 +37,8 @@
 #include <linux/list.h>
 #include <linux/mutex.h>
 #include <linux/device.h>
+#include <linux/bpf.h>
+#include <linux/perf_event.h>
 
 #include "hifs_shared_defs.h"
 

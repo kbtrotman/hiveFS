@@ -73,7 +73,7 @@ void write_to_queue(void)
 
 void read_from_queue(void)
 {
-    int ret;
+    struct hifs_blocks_user *block_data;
     hifs_info("Reading from queue...\n");
     ret = read_from_cmd_dev();
     if (ret < 0) {
@@ -141,24 +141,6 @@ int hifs_init_queues(void) {
         .block = "test_block_data:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:test_block_data",
 
     };
-
-    INIT_LIST_HEAD(&shared_inode_incoming->hifs_inode_list);
-    INIT_LIST_HEAD(&shared_cmd_incoming->hifs_cmd_list);
-    INIT_LIST_HEAD(&shared_block_incoming->hifs_block_list);
-    INIT_LIST_HEAD(&shared_inode_outgoing->hifs_inode_list);
-    INIT_LIST_HEAD(&shared_cmd_outgoing->hifs_cmd_list);
-    INIT_LIST_HEAD(&shared_block_outgoing->hifs_block_list);
-
-    INIT_LIST_HEAD(&shared_inode_outgoing_lst);
-    INIT_LIST_HEAD(&shared_block_outgoing_lst);
-    INIT_LIST_HEAD(&shared_cmd_outgoing_lst);
-    INIT_LIST_HEAD(&shared_inode_incoming_lst);
-    INIT_LIST_HEAD(&shared_block_incoming_lst);
-    INIT_LIST_HEAD(&shared_cmd_incoming_lst);
-
-    list_add_tail(&shared_cmd_outgoing->hifs_cmd_list, &shared_cmd_outgoing_lst);
-    list_add_tail(&shared_inode_outgoing->hifs_inode_list, &shared_inode_outgoing_lst);
-    list_add_tail(&shared_block_outgoing->hifs_block_list, &shared_block_outgoing_lst);
     return 0;
 }
 
