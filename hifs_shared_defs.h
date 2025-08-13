@@ -35,9 +35,9 @@
 // shared these memory areas to send and receive data.
 #define HIFS_QUEUE_COUNT 3
 
-#define DEVICE_FILE_INODE "hivefs_comq_inode"     //Device queue names
-#define DEVICE_FILE_BLOCK "hivefs_comq_block"
-#define DEVICE_FILE_CMDS "hivefs_comq_cmds"
+struct bpf_map *inode_ringbuf;
+struct bpf_map *block_ringbuf;
+struct bpf_map *cmd_ringbuf;
 #define ATOMIC_KERN_DEVICE_NAME "hivefs_kern_link_device"   //Atomic sync device. Used to ensure we have a link to send data.
 #define ATOMIC_KERN_CLASS_NAME "hivefs_kern_atomic_class"
 #define ATOMIC_USER_DEVICE_NAME "hivefs_user_link_device"   //Atomic sync device. Used to ensure we have a link to send data.
@@ -45,7 +45,7 @@
 
 #define HIFS_DEFAULT_BLOCK_SIZE 4096
 #define HIFS_BUFFER_SIZE 4096
-#define HIFS_MAX_CMD_SIZE 50 // MAX_CMD_SIZE is the maximum size of a command
+#define HIFS_MAX_CMD_SIZE 50 // MAX_CMD_SIZE is the maximum size of a command queue
 #define HIFS_MAX_NAME_SIZE 256 //MAX NAME SIZE is the maximum size of a file name, dir name, or other name in FS.
 
 /******************************

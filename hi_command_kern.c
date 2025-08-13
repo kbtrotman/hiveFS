@@ -11,143 +11,73 @@
 
 
 // Globals
-struct hifs_link hifs_kern_link = {HIFS_COMM_LINK_DOWN, 0, 0, 0};
-int u_major, k_major, i_major, b_major, c_major;
-struct class *inode_dev_class, *block_dev_class, *cmd_dev_class;
-atomic_t kern_atomic_variable = ATOMIC_INIT(0);
-atomic_t user_atomic_variable = ATOMIC_INIT(0);
-struct device *kern_atomic_device = NULL;
-struct device *user_atomic_device = NULL;
-struct class *kern_atomic_class;
-struct class *user_atomic_class;
 struct hifs_link hifs_kern_link;
 struct hifs_link hifs_user_link;
 struct task_struct *task;
 
-extern struct hifs_inode *shared_inode_outgoing;    // These six Doubly-Linked Lists are our
-extern struct hifs_blocks *shared_block_outgoing;   // processing queues.
-extern struct hifs_cmds *shared_cmd_outgoing;       
-extern struct hifs_inode *shared_inode_incoming;    
-extern struct hifs_blocks *shared_block_incoming;   
-extern struct hifs_cmds *shared_cmd_incoming;       
-
-extern struct list_head shared_inode_outgoing_lst;    
-extern struct list_head shared_block_outgoing_lst;    
-extern struct list_head shared_cmd_outgoing_lst;       
-extern struct list_head shared_inode_incoming_lst;    
-extern struct list_head shared_block_incoming_lst;   
-extern struct list_head shared_cmd_incoming_lst;  
-
-extern wait_queue_head_t waitqueue;
-extern wait_queue_head_t thread_wq;
-
-struct pollfd *cmd_pfd;
-struct pollfd *inode_pfd;
-struct pollfd *block_pfd;
 
 int hifs_create_test_inode(void) {
+    struct hifs_inode *inode_data;
+    struct hifs_inode_user *user_data;
 
-    shared_inode_incoming = kmalloc(sizeof(*shared_inode_incoming), GFP_KERNEL);
-    shared_cmd_incoming = kmalloc(sizeof(*shared_cmd_incoming), GFP_KERNEL);
-    shared_block_incoming = kmalloc(sizeof(*shared_block_incoming), GFP_KERNEL);
+    inode_data = kmalloc(sizeof(*inode_data), GFP_KERNEL);
+    if (!inode_data) return -ENOMEM;
 
-    if (!shared_inode_incoming || !shared_cmd_incoming || !shared_block_incoming) {
-        if (shared_cmd_incoming) { kfree(shared_cmd_incoming); }
-        if (shared_inode_incoming) { kfree(shared_inode_incoming); }
-        if (shared_block_incoming) { kfree(shared_block_incoming); }
+    inode_data->i_name = "test_inode";
+    inode_data->i_mode = S_IFREG | 0644;
+    inode_data->i_uid = 000001;
+    inode_data->i_gid = 010101;
+    inode_data->i_blocks = 99;
+    inode_data->i_bytes = 512;
+    inode_data->i_size = 512;
+    inode_data->i_ino = 1;
+
+    user_data = hifs_parse_inode_struct(inode_data);
+    if (!user_data) {
+        kfree(inode_data);
         return -ENOMEM;
     }
 
-    shared_inode_outgoing = kmalloc(sizeof(*shared_inode_incoming), GFP_KERNEL);
-    shared_cmd_outgoing = kmalloc(sizeof(*shared_cmd_incoming), GFP_KERNEL);
-    shared_block_outgoing = kmalloc(sizeof(*shared_block_incoming), GFP_KERNEL);   
-
-    if (!shared_inode_outgoing || !shared_cmd_outgoing || !shared_block_outgoing) {
-        if (shared_cmd_outgoing) { kfree(shared_cmd_outgoing); }
-        if (shared_inode_outgoing) { kfree(shared_inode_outgoing); }
-        if (shared_block_outgoing) { kfree(shared_block_outgoing); }
-        return -ENOMEM;
+    // Push to ringbuffer
+    void *buf = bpf_ringbuf_output(inode_ringbuf, user_data, sizeof(*user_data), 0);
+    if (!buf) {
+        hifs_err("Failed to push inode data to ringbuffer\n");
+        kfree(user_data);
+        return -EFAULT;
     }
 
-    *shared_inode_outgoing = (struct hifs_inode) {
-        .i_name = "test_inode",
-        .i_mode = S_IFREG | 0644,
-        .i_uid = 000001,
-        .i_gid = 010101,
-        .i_blocks = 99,
-        .i_bytes = 512,
-        .i_size = 512,
-        .i_ino = 1,
-    };
-    
-    *shared_block_outgoing = (struct hifs_blocks) {
-        .block_size = 84,
-        .count = 1,
-        .block = "test_block_data:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:test_block_data",
-
-    };
-
-    *shared_cmd_outgoing = (struct hifs_cmds){
-        .cmd = HIFS_Q_PROTO_CMD_TEST,
-        .count = sizeof(HIFS_Q_PROTO_CMD_TEST),
-    };
-
-    INIT_LIST_HEAD(&shared_inode_incoming->hifs_inode_list);
-    INIT_LIST_HEAD(&shared_cmd_incoming->hifs_cmd_list);
-    INIT_LIST_HEAD(&shared_block_incoming->hifs_block_list);
-    INIT_LIST_HEAD(&shared_inode_outgoing->hifs_inode_list);
-    INIT_LIST_HEAD(&shared_cmd_outgoing->hifs_cmd_list);
-    INIT_LIST_HEAD(&shared_block_outgoing->hifs_block_list);
-
-    INIT_LIST_HEAD(&shared_inode_outgoing_lst);
-    INIT_LIST_HEAD(&shared_block_outgoing_lst);
-    INIT_LIST_HEAD(&shared_cmd_outgoing_lst);
-    INIT_LIST_HEAD(&shared_inode_incoming_lst);
-    INIT_LIST_HEAD(&shared_block_incoming_lst);
-    INIT_LIST_HEAD(&shared_cmd_incoming_lst);
-
-    list_add_tail(&shared_cmd_outgoing->hifs_cmd_list, &shared_cmd_outgoing_lst);
-    list_add_tail(&shared_inode_outgoing->hifs_inode_list, &shared_inode_outgoing_lst);
-    list_add_tail(&shared_block_outgoing->hifs_block_list, &shared_block_outgoing_lst);
-
-    // The list memory was added to the lists, so here we NULL their references.
-    shared_inode_outgoing = NULL;
-    shared_cmd_outgoing = NULL;
-    shared_block_outgoing = NULL;
-    shared_inode_incoming = NULL;
-    shared_cmd_incoming = NULL;
-    shared_block_incoming = NULL;
-
+    kfree(inode_data); // Ringbuffer owns user_data now
     return 0;
 }
 
 int hifs_thread_fn(void *data) {
-
     int value;
-    value = hifs_create_test_inode();
 
+    value = hifs_create_test_inode();
     if (value < 0) {
-        hifs_warning("Failed to create test data\n");
+        hifs_warning("Failed to create test inode\n");
         return value;
     }
-    // Before going into the data management, we up our module status here.
+
     value = hifs_comm_set_program_up(HIFS_COMM_PROGRAM_KERN_MOD);
     value = hifs_comm_set_program_up(HIFS_COMM_PROGRAM_USER_HICOMM);
 
     while (!kthread_should_stop()) {
         value = atomic_read(&user_atomic_variable);
-        wait_event_interruptible_timeout(thread_wq, 1, msecs_to_jiffies(5000));
         if (value == HIFS_COMM_LINK_DOWN) {
-            //hifs_info("user link is down. Waiting for hi_command to come up...\n");
-        } else if (hifs_user_link.state == HIFS_COMM_LINK_DOWN) {
-            hifs_info("Kernel link was recently up'd. Proceeding...\n");
-            hifs_comm_set_program_up(HIFS_COMM_PROGRAM_USER_HICOMM);
+            hifs_info("User link is down. Waiting for hi_command to come up...\n");
+        } else {
+            // Push data to ringbuffers periodically
+            hifs_create_test_inode();
+            hifs_info("Pushed test inode to ringbuffer\n");
         }
-        //hifs_notice("kernel link is [%d], user link is [%d], cycling...\n", hifs_kern_link.state, hifs_user_link.state);
 
-        // Check for things to send...
-        
+        // Sleep or wait for user signal
+        schedule_timeout_interruptible(msecs_to_jiffies(5000));
     }
+
+    return 0;
+}
 
     return 0;
 }

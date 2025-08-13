@@ -18,7 +18,6 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <assert.h>
-#include <poll.h>
 #include <ctype.h>
 #include <ncurses.h>
 #include <panel.h>
@@ -30,6 +29,8 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <bpf/libbpf.h>
+#include <bpf/ringbuf.h>
 
 // A user-space definition for a kernel-style Doubly Linked List
 // Modified by:  kazutomo@mcs.anl.gov
