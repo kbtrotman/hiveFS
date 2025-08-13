@@ -35,47 +35,16 @@
 // shared these memory areas to send and receive data.
 #define HIFS_QUEUE_COUNT 3
 
-struct bpf_map *inode_ringbuf;
-struct bpf_map *block_ringbuf;
-struct bpf_map *cmd_ringbuf;
-#define ATOMIC_KERN_DEVICE_NAME "hivefs_kern_link_device"   //Atomic sync device. Used to ensure we have a link to send data.
-#define ATOMIC_KERN_CLASS_NAME "hivefs_kern_atomic_class"
-#define ATOMIC_USER_DEVICE_NAME "hivefs_user_link_device"   //Atomic sync device. Used to ensure we have a link to send data.
-#define ATOMIC_USER_CLASS_NAME "hivefs_user_atomic_class"
+struct bpf_map *inode_ringbuf_k2u;
+struct bpf_map *block_ringbuf_k2u;
+struct bpf_map *cmd_ringbuf_k2u;
+
+struct bpf_map *inode_ringbuf_u2k;
+struct bpf_map *block_ringbuf_u2k;
+struct bpf_map *cmd_ringbuf_u2k;
 
 #define HIFS_DEFAULT_BLOCK_SIZE 4096
-#define HIFS_BUFFER_SIZE 4096
-#define HIFS_MAX_CMD_SIZE 50 // MAX_CMD_SIZE is the maximum size of a command queue
 #define HIFS_MAX_NAME_SIZE 256 //MAX NAME SIZE is the maximum size of a file name, dir name, or other name in FS.
-
-/******************************
- * Queue Comms Protocol
- ******************************/
-// Our protocol for comms using the comms queues.
-// these values are set in the atomic variable.
-
-#define HIFS_Q_PROTO_VERSION  1          // Version of the protocol
-#define HIFS_Q_PROTO_UNUSED 0            // Queue or file(mem device) is not in use at all
-#define HIFS_Q_PROTO_KERNEL_UP 1         // Kernel connection is UP.
-#define HIFS_Q_PROTO_USER_UP 1           // User connection is UP.
-
-#define HIFS_Q_PROTO_NUM_CMDS        9 //Max ENUM value of any command (same as max number of commands that exist).
-#define HIFS_Q_PROTO_CMD_FLUSH       "cache_flush_all"
-#define HIFS_Q_PROTO_CMD_BLOCK_RECV  "block_recv"
-#define HIFS_Q_PROTO_CMD_BLOCK_SEND  "block_send"
-#define HIFS_Q_PROTO_CMD_INODE_RECV  "inode_recv"
-#define HIFS_Q_PROTO_CMD_INODE_SEND  "inode_send"
-#define HIFS_Q_PROTO_CMD_FILE_RECV   "file_recv"
-#define HIFS_Q_PROTO_CMD_FILE_SEND   "file_send"
-#define HIFS_Q_PROTO_CMD_ENGINE_VERS "engine_version"
-#define HIFS_Q_PROTO_CMD_TEST        "test_cmd"
-
-enum hifs_module{HIFS_COMM_PROGRAM_KERN_MOD, HIFS_COMM_PROGRAM_USER_HICOMM};
-enum hifs_queue_direction{HIFS_COMM_TO_USER, HIFS_COMM_FROM_USER};
-
-extern struct pollfd *cmd_pfd;
-extern struct pollfd *inode_pfd;
-extern struct pollfd *block_pfd;
 
 struct hifs_blocks {
 	int block_size;
@@ -90,18 +59,6 @@ struct hifs_blocks_user {
 	char block[HIFS_DEFAULT_BLOCK_SIZE];
 };
 
-struct hifs_cmds {
-	int count;
-	char *cmd;
-	struct list_head hifs_cmd_list;
-};
-
-struct hifs_cmds_user {
-    int count;
-	char cmd[HIFS_MAX_CMD_SIZE];
-};
-
-extern int k_major, u_major, i_major, b_major, c_major;  
 
 enum hifs_link_state{HIFS_COMM_LINK_DOWN, HIFS_COMM_LINK_UP};
 struct hifs_link {
@@ -207,48 +164,8 @@ struct hifs_inode
 	uint32_t	i_addre[HIFS_INODE_TSIZE];	/* End block of extend ranges */
 	uint32_t	i_blocks;	/* Number of blocks */
 	uint32_t	i_bytes;	/* Number of bytes */
-	struct list_head hifs_inode_list;
+	//struct list_head hifs_inode_list;
 };
-
-struct hifs_inode_user 
-{
-	//const struct super_block	i_sb;      /* Superblock position */
-    uint8_t     i_version;	/* inode version */
-	uint8_t		i_flags;	/* inode flags: TYPE */
-	uint32_t	i_mode;		/* File mode */
-	uint64_t	i_ino;		/* inode number */
-	uint16_t	i_uid;		/* owner's user id */
-	uint16_t	i_gid;		/* owner's group id */
-	uint16_t	i_hrd_lnk;	/* number of hard links */
-	uint32_t    i_atime; /* Archive Time */
-	uint32_t	i_mtime; /* Modified Time */
-	uint32_t	i_ctime; /* Creation Time */
-	uint32_t	i_size;		/* Number of bytes in file */
-	char    	i_name[HIFS_MAX_NAME_SIZE]; /* File name */
-	//void		*i_private;  /* Private/Unpublished filesystrem member */
-	//const struct inode_operations	i_op;       /* operation */
-	//const struct file_operations	i_fop;	      /* file operation */
-	/* address begin - end block, range exclusive: addres end (last block) does not belogs to extend! */
-	uint32_t	i_addrb[HIFS_INODE_TSIZE];	/* Start block of extend ranges */
-	uint32_t	i_addre[HIFS_INODE_TSIZE];	/* End block of extend ranges */
-	uint32_t	i_blocks;	/* Number of blocks */
-	uint32_t	i_bytes;	/* Number of bytes */
-};
-
-
-extern struct hifs_inode *shared_inode_outgoing;    // These six Doubly-Linked Lists are our
-extern struct hifs_blocks *shared_block_outgoing;   // processing queues. They are sent & 
-extern struct hifs_cmds *shared_cmd_outgoing;       // received thru the 3 device files known
-extern struct hifs_inode *shared_inode_incoming;    // as the "queues" (to hi_command). We want
-extern struct hifs_blocks *shared_block_incoming;   // to proces them fast, so they're split into
-extern struct hifs_cmds *shared_cmd_incoming;       // incoming & outgoing queues here.
-// List pointers, for initializing the lists
-extern struct list_head shared_inode_outgoing_lst;    
-extern struct list_head shared_block_outgoing_lst;    
-extern struct list_head shared_cmd_outgoing_lst;       
-extern struct list_head shared_inode_incoming_lst;    
-extern struct list_head shared_block_incoming_lst;   
-extern struct list_head shared_cmd_incoming_lst;     
 
 struct hifs_dir_entry 
 {
@@ -267,7 +184,52 @@ struct hifs_cache_bitmap {
 	uint8_t dirty;
 };
 
+/******************************
+ * Queue Comms Protocol
+ ******************************/
+// Our protocol for comms using the comms queues.
+// these values are set in the atomic variable.
 
+#define RINGBUF_SIZE (1 << 20)  // 1 MB
+
+#define HIFS_Q_PROTO_VERSION  1          // Version of the protocol
+#define HIFS_Q_PROTO_UNUSED 0            // Queue or file(mem device) is not in use at all
+#define HIFS_Q_PROTO_KERNEL_UP 1         // Kernel connection is UP.
+#define HIFS_Q_PROTO_USER_UP 1           // User connection is UP.
+
+#define HIFS_Q_PROTO_NUM_CMDS        9 //Max ENUM value of any command (same as max number of commands that exist).
+#define HIFS_Q_PROTO_CMD_FLUSH       "cache_flush_all"
+#define HIFS_Q_PROTO_CMD_BLOCK_RECV  "block_recv"
+#define HIFS_Q_PROTO_CMD_BLOCK_SEND  "block_send"
+#define HIFS_Q_PROTO_CMD_INODE_RECV  "inode_recv"
+#define HIFS_Q_PROTO_CMD_INODE_SEND  "inode_send"
+#define HIFS_Q_PROTO_CMD_FILE_RECV   "file_recv"
+#define HIFS_Q_PROTO_CMD_FILE_SEND   "file_send"
+#define HIFS_Q_PROTO_CMD_ENGINE_VERS "engine_version"
+#define HIFS_Q_PROTO_CMD_TEST        "test_cmd"
+
+#define HICOMM_MAX_CMD_SIZE 50 // MAX_CMD_SIZE is the maximum size of a command queue
+
+enum hifs_module{HIFS_COMM_PROGRAM_KERN_MOD, HIFS_COMM_PROGRAM_USER_HICOMM};
+enum hifs_queue_direction{HIFS_COMM_TO_USER, HIFS_COMM_FROM_USER};
+
+struct hicomm_cmd_msg {
+    char command[HICOMM_MAX_CMD_SIZE];  // e.g. "HIFS_Q_PROTO CMD_TEST {payload}} {payload size}" where payload is an inode or block.
+};
+
+struct hicomm_inode_msg {
+    uint64_t inode_number;
+    uint64_t size;
+    uint32_t mode;
+    struct hifs_inode inode;
+};
+
+struct hicomm_block_msg {
+    uint64_t inode_number;
+    uint64_t size;
+    uint32_t mode;
+    struct hifs_block block;
+};
 
 /***********************
  * END Hive FS Structures
