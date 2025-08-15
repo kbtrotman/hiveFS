@@ -25,23 +25,6 @@
 
 
 extern struct task_struct *task;
-extern atomic_t kern_atomic_variable;
-extern int major;
-extern struct hifs_inode *shared_inode_outgoing;    // These six Doubly-Linked Lists are our
-extern struct hifs_blocks *shared_block_outgoing;   // processing queues.
-extern struct hifs_cmds *shared_cmd_outgoing;       
-extern struct hifs_inode *shared_inode_incoming;    
-extern struct hifs_blocks *shared_block_incoming;   
-extern struct hifs_cmds *shared_cmd_incoming;       
-
-extern struct list_head shared_inode_outgoing_lst;    
-extern struct list_head shared_block_outgoing_lst;    
-extern struct list_head shared_cmd_outgoing_lst;       
-extern struct list_head shared_inode_incoming_lst;    
-extern struct list_head shared_block_incoming_lst;   
-extern struct list_head shared_cmd_incoming_lst; 
-
-extern wait_queue_head_t waitqueue;
 
 struct file_system_type hifs_type = 
 {
@@ -96,27 +79,19 @@ static int __init hifs_init(void)
         hifs_info("Filesystem registered to kernel\n");
     }
 
-    ret = hifs_atomic_init();
+    ret = hic_register_ringbuffers();
     if (ret != 0) {
-        hifs_err("Failed to register atomic sync variable(s)\n");
+        hifs_err("Failed to register ringbuffer queues, memory issue\n");
         goto failure;
     } else {
-        hifs_info("HiFS atomic sync variable(s) registered in kernel\n");
-    }
-
-    ret = register_all_comm_queues();
-    if (ret != 0) {
-        hifs_err("Failed to register communication queues\n");
-        goto failure;
-    } else {
-        hifs_info("Memory Mapped Communication queues registered to kernel\n");
+        hifs_info("Memory Mapped ringbuffer queues registered in kernel\n");
     }
 
     ret = hifs_start_queue_thread();
     if (ret != 0) {
         hifs_err("Failed to start hivefs management routine\n");
     } else {
-        hifs_info("hive-fs communications queue manager thread start successful\n");
+        hifs_info("hive-fs communications ringbuffer manager thread started successful\n");
     }
     return ret;
 
@@ -130,8 +105,8 @@ static void __exit hifs_exit(void)
     int ret;
 
     //hifs_stop_queue_thread();
-    unregister_all_comm_queues();
-    hifs_atomic_exit();
+    hic_unregister_ringbuffers();
+
     ret = unregister_filesystem(&hifs_type);
     if (ret != 0) {
         hifs_err("Failed to unregister filesystem\n");

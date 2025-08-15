@@ -14,120 +14,40 @@
 extern struct hifs_link hifs_kern_link;
 extern struct hifs_link hifs_user_link;
 
-extern struct bpf_map *inode_ringbuf_k2u;
-extern struct bpf_map *block_ringbuf_k2u;
 extern struct bpf_map *cmd_ringbuf_k2u;
-
-extern struct bpf_map *inode_ringbuf_u2k;
-extern struct bpf_map *block_ringbuf_u2k;
 extern struct bpf_map *cmd_ringbuf_u2k;
 
-// These are for the 3 devices which controls 6 queues (1 each way) for transferring 3 types of data: inode, block, & cmd.
-int register_all_comm_ringbuffers(void) {
-    // Create ringbuffers for outgoing data (kernel -> user)
-    inode_ringbuf = bpf_map_create(BPF_MAP_TYPE_RINGBUF, "hifs_inode_ringbuf", 0, sizeof(struct hifs_inode_user), RINGBUF_SIZE, NULL);
-    if (!inode_ringbuf) {
-        hifs_err("Failed to create inode ringbuffer\n");
-        return -ENOMEM;
-    }
+// These are for devices which control queues (1 each way) for transferring 3 types of data: inode, block, & cmd via memory.
+int hic_register_ringbuffers(void) {
+    // Create ringbuffers for outgoing data (kernel -> user) and incoming data (user -> kernel)
+    cmd_ringbuf_k2u = bpf_map_get("/sys/fs/bpf/hic_ringbuff_k2u");
+    cmd_ringbuf_u2k = bpf_map_get("/sys/fs/bpf/hic_ringbuff_u2k");
 
-    block_ringbuf = bpf_map_create(BPF_MAP_TYPE_RINGBUF, "hifs_block_ringbuf", 0, sizeof(struct hifs_blocks_user), RINGBUF_SIZE, NULL);
-    if (!block_ringbuf) {
-        hifs_err("Failed to create block ringbuffer\n");
-        bpf_map_delete(inode_ringbuf);
-        return -ENOMEM;
+    if (!cmd_ringbuf_k2u || !cmd_ringbuf_u2k) {
+        hifs_err("fs_kmod: Failed to get one of the bi-directional ring buffers.\n");
+        return -EINVAL;
     }
-
-    cmd_ringbuf = bpf_map_create(BPF_MAP_TYPE_RINGBUF, "hifs_cmd_ringbuf", 0, sizeof(struct hifs_cmds_user), RINGBUF_SIZE, NULL);
-    if (!cmd_ringbuf) {
-        hifs_err("Failed to create command ringbuffer\n");
-        bpf_map_delete(inode_ringbuf);
-        bpf_map_delete(block_ringbuf);
-        return -ENOMEM;
-    }
-
-    hifs_info("eBPF ringbuffers initialized\n");
     return 0;
 }
 
-void unregister_all_comm_ringbuffers(void) {
-    if (inode_ringbuf) bpf_map_delete(inode_ringbuf);
-    if (block_ringbuf) bpf_map_delete(block_ringbuf);
-    if (cmd_ringbuf) bpf_map_delete(cmd_ringbuf);
-    hifs_info("eBPF ringbuffers destroyed\n");
+void hic_unregister_ringbuffers(void) {
+    if (cmd_ringbuf_k2u) bpf_map_delete(cmd_ringbuf_k2u);
+    if (cmd_ringbuf_u2k) bpf_map_delete(cmd_ringbuf_u2k);
+    hifs_info("eBPF ringbuffers destroyed for shutdown\n");
 }
 
-ssize_t hi_comm_inode_device_write(struct file *filep, const char __user *buffer, size_t count, loff_t *offset) {
-    struct hifs_inode *inode = kmalloc(sizeof(*inode), GFP_KERNEL);
-    if (!inode) return -ENOMEM;
+ssize_t hic_ringbuffer_write(struct hic_ringbuffer buffer, size_t count) {
 
-    if (copy_from_user(inode, buffer, min(sizeof(*inode), count))) {
-        kfree(inode);
-        return -EFAULT;
-    }
-
-    void *buf = bpf_ringbuf_output(inode_ringbuf_k2u, inode, sizeof(*inode), 0);
+    void *buf = bpf_ringbuf_output(cmd_ringbuf_k2u, buffer, sizeof(*buffer), 0);
+    kfree(buffer);
     if (!buf) {
-        hifs_err("Failed to push inode data to k2u ring buffer");
-        kfree(inode);
+        hifs_err("Failed to push inode data to k2u ring buffer"); 
         return -ENOMEM;
+    } else {
+        pr_info("fs_kmod: Sent command: %s\n", payload);
     }
-
-    kfree(inode);
-    return min(sizeof(*inode), count);
+    return min(sizeof(*buffer), count);
 }
-
-
-
-ssize_t hi_comm_block_device_write(struct file *filep, const char __user *buffer, size_t count, loff_t *offset) {
-    struct hifs_blocks *kernel_data = kmalloc(sizeof(*kernel_data), GFP_KERNEL);
-    if (!kernel_data) return -ENOMEM;
-
-    if (copy_from_user(kernel_data, buffer, min(sizeof(*kernel_data), count))) {
-        kfree(kernel_data);
-        return -EFAULT;
-    }
-
-    struct hifs_blocks_user *user_data = hifs_parse_block_struct(kernel_data);
-    if (!user_data) {
-        kfree(kernel_data);
-        return -ENOMEM;
-    }
-
-    void *buf = bpf_ringbuf_output(block_ringbuf_k2u, user_data, sizeof(*user_data), 0);
-    if (!buf) {
-        hifs_err("Failed to push block data to k2u ring buffer");
-        kfree(user_data);
-        kfree(kernel_data);
-        return -ENOMEM;
-    }
-
-    kfree(kernel_data);
-    return min(sizeof(*kernel_data), count);
-}
-
-
-ssize_t hi_comm_cmd_device_write(struct file *filep, const char __user *buffer, size_t count, loff_t *offset) {
-    struct hifs_cmd *cmd = kmalloc(sizeof(*cmd), GFP_KERNEL);
-    if (!cmd) return -ENOMEM;
-
-    if (copy_from_user(cmd, buffer, min(sizeof(*cmd), count))) {
-        kfree(cmd);
-        return -EFAULT;
-    }
-
-    void *buf = bpf_ringbuf_output(cmd_ringbuf_k2u, cmd, sizeof(*cmd), 0);
-    if (!buf) {
-        hifs_err("Failed to push command data to k2u ring buffer");
-        kfree(cmd);
-        return -ENOMEM;
-    }
-
-    kfree(cmd);
-    return min(sizeof(*cmd), count);
-}
-
-
 
 void write_blocks_bitmap(int fd, hifs_block_bitmap *bitmap, uint64_t bitmap_start) {
     uint64_t size_in_bytes = (bitmap->size + 7) / 8;
