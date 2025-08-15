@@ -35,28 +35,16 @@
 // shared these memory areas to send and receive data.
 #define HIFS_QUEUE_COUNT 3
 
-struct bpf_map *inode_ringbuf_k2u;
-struct bpf_map *block_ringbuf_k2u;
 struct bpf_map *cmd_ringbuf_k2u;
-
-struct bpf_map *inode_ringbuf_u2k;
-struct bpf_map *block_ringbuf_u2k;
 struct bpf_map *cmd_ringbuf_u2k;
 
 #define HIFS_DEFAULT_BLOCK_SIZE 4096
 #define HIFS_MAX_NAME_SIZE 256 //MAX NAME SIZE is the maximum size of a file name, dir name, or other name in FS.
 
-struct hifs_blocks {
+struct hifs_block {
 	int block_size;
 	int count;
 	char *block;
-	struct list_head hifs_block_list;
-};
-
-struct hifs_blocks_user {
-	int block_size;
-	int count;
-	char block[HIFS_DEFAULT_BLOCK_SIZE];
 };
 
 
@@ -213,21 +201,9 @@ struct hifs_cache_bitmap {
 enum hifs_module{HIFS_COMM_PROGRAM_KERN_MOD, HIFS_COMM_PROGRAM_USER_HICOMM};
 enum hifs_queue_direction{HIFS_COMM_TO_USER, HIFS_COMM_FROM_USER};
 
-struct hicomm_cmd_msg {
-    char command[HICOMM_MAX_CMD_SIZE];  // e.g. "HIFS_Q_PROTO CMD_TEST {payload}} {payload size}" where payload is an inode or block.
-};
-
-struct hicomm_inode_msg {
-    uint64_t inode_number;
-    uint64_t size;
-    uint32_t mode;
-    struct hifs_inode inode;
-};
-
-struct hicomm_block_msg {
-    uint64_t inode_number;
-    uint64_t size;
-    uint32_t mode;
+struct hic_ringbuffer {
+    char cmd[HICOMM_MAX_CMD_SIZE];
+    struct hifs_inode inode;  // Avoid deeply nested arrays or flexible arrays, is possible with inode data
     struct hifs_block block;
 };
 

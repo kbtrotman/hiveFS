@@ -29,6 +29,9 @@ struct ring_buffer *inode_ringbuf;
 struct ring_buffer *block_ringbuf;
 struct ring_buffer *cmd_ringbuf;
 
+int hic_alloc_ringbuffers(int fd, struct ring_buffer *rb) {
+
+
 int read_from_ringbuffer(int fd, struct ring_buffer *rb) {
     void *data;
     data = ring_buffer__reserve_space(rb, sizeof(struct hifs_inode_user), NULL);
@@ -42,17 +45,14 @@ int read_from_ringbuffer(int fd, struct ring_buffer *rb) {
     return 0;
 }
 
-int write_to_ringbuffer(int fd, struct hifs_inode_user *data) {
-    void *buf = ring_buffer__reserve_space(inode_ringbuf, sizeof(*data), NULL);
-    if (!buf) {
-        hifs_err("Failed to reserve ringbuffer space\n");
-        return -1;
-    }
+long write_to_ringbuffer(int fd, struct hifs_inode_user *data) {
+    long ret = 0;
+    ret =  bpf_ringbuf_output(void *ringbuf, void *data, __u64 size, __u64 flags)
 
-    memcpy(buf, data, sizeof(*data));
-    ring_buffer__submit(inode_ringbuf, NULL);
-    hifs_info("Wrote inode data to ringbuffer\n");
-    return 0;
+    if (ret == 0) {
+        bpf_ringbuf_reserve(void *ringbuf, __u64 size, __u64 flags)
+    }
+    return ret;
 }
 
 char *hifs_strlcpy(char *dest_string, const char *src_string, int max_size)
