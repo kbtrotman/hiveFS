@@ -11,9 +11,6 @@
 //* Note that the original code is adapted from a Dublin Linux User's Group presentation
 //* given by Maciej Grochowski on the topic of "Writing Linux Filesystems for Fun"
 //* available at:  https://www.youtube.com/watch?v=sLR17lUjTpc
-//* He's brilliant and it's a good way to understand the VFS layer, which is difficult
-//* to breech without some helpful documentation. It's a great intro to dev'ing simple
-//* superblock/inode/dir/file structures.
 //*****************************************************************************************
 
 #include "hifs_shared_defs.h"
@@ -22,9 +19,6 @@
 // *******************      HiveFS Entry     *******************
 // This is the entry point for the entire FS in this file.
 // *******************      HiveFS Entry     *******************
-
-
-extern struct task_struct *task;
 
 struct file_system_type hifs_type = 
 {
@@ -62,11 +56,6 @@ const struct super_operations hifs_sb_operations =
 // *******************      HiveFS Entry     *******************
 
 
-static int hifs_mkfs(struct file_system_type *fs_type, int flags, const char *dev_name, void *data)
-{
-
-}
-
 static int __init hifs_init(void)
 {
     int ret;
@@ -79,19 +68,19 @@ static int __init hifs_init(void)
         hifs_info("Filesystem registered to kernel\n");
     }
 
-    ret = hic_register_ringbuffers();
+    ret = hifs_comm_init();
     if (ret != 0) {
-        hifs_err("Failed to register ringbuffer queues, memory issue\n");
+        hifs_err("Failed to initialise communications interface\n");
         goto failure;
     } else {
-        hifs_info("Memory Mapped ringbuffer queues registered in kernel\n");
+        hifs_info("Communication control device registered\n");
     }
 
     ret = hifs_start_queue_thread();
     if (ret != 0) {
-        hifs_err("Failed to start hivefs management routine\n");
+        hifs_err("Failed to start hivefs comms management routine\n");
     } else {
-        hifs_info("hive-fs communications ringbuffer manager thread started successful\n");
+        hifs_info("hive-fs ringbuffer communication manager thread started successful\n");
     }
     return ret;
 
@@ -104,8 +93,8 @@ static void __exit hifs_exit(void)
 {
     int ret;
 
-    //hifs_stop_queue_thread();
-    hic_unregister_ringbuffers();
+    hifs_stop_queue_thread();
+    hifs_comm_exit();
 
     ret = unregister_filesystem(&hifs_type);
     if (ret != 0) {

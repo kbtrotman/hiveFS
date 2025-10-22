@@ -1,17 +1,17 @@
-# Define the compiler
 CC = gcc
 
 # Includes
-INCS = -I /usr/lib/gcc/x86_64-redhat-linux/8/include -I /usr/include/ -I /usr/include/libnl3/ -I /usr/include/postgresql/
+INCS = -I../
 
 # Libraries
-LIBS = -L/usr/lib/ -L/usr/lib64/ -L/usr/ -lpq -lncurses -lpanel
+LIBS =
 
 # Define any compile-time flags
-CFLAGS = -std=gnu11 -Wall -g $(INCS) $(LIBS)
+CFLAGS = -std=gnu11 -Wall -Wextra -g $(INCS)
+LDFLAGS = $(LIBS)
 
 # Define the C source files
-SRCS = hi_command.c hi_command_memman.c hi_command_sql.c hi_command_proto.c hi_command_cache.c hi_command_io.c
+SRCS = hi_command.c hi_command_mm.c hi_command_prot.c
 
 # Define the C object files 
 OBJS = $(SRCS:.c=.o)
@@ -22,10 +22,10 @@ MAIN = hi_command
 all: $(MAIN)
 
 $(MAIN): $(OBJS) 
-	$(CC) $(CFLAGS) -o $(MAIN) $(OBJS)
+	$(CC) $(CFLAGS) -o $(MAIN) $(OBJS) $(LDFLAGS)
 
 .c.o:
-	$(CC) $(CFLAGS) -c $<  -o $@
+	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:
 	$(RM) *.o *~ $(MAIN)
