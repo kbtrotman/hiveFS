@@ -40,7 +40,7 @@ ssize_t hifs_read(struct kiocb *iocb, struct iov_iter *to)
 	struct hifs_inode *hiinode;
 	struct buffer_head *bh;
 	char *buffer;
-	void *buf = to->iov->iov_base;
+	void *buf = to->__iov->iov_base;
 	int nbytes;
 	size_t count = iov_iter_count(to);
 	loff_t off = iocb->ki_pos;
@@ -92,7 +92,7 @@ ssize_t hifs_write(struct kiocb *iocb, struct iov_iter *from)
 	struct hifs_inode *dinode;
 	struct buffer_head *bh;
 	struct hifs_superblock *dsb;
-	void *buf = from->iov->iov_base; 
+	void *buf = from->__iov->iov_base; 
 	loff_t off = iocb->ki_pos;
 	size_t count = iov_iter_count(from);
 	size_t blk = 0;	

@@ -176,7 +176,8 @@ int hifs_add_ondir(struct inode *inode, struct inode *dir, struct dentry *dentry
 	return 0;
 }
 
-int hifs_create(struct inode *dir, struct dentry *dentry, umode_t mode, bool excl)
+int hifs_create(struct mnt_idmap *idmap, struct inode *dir, struct dentry *dentry, umode_t mode, bool excl)
+
 {
 	return hifs_create_inode(dir, dentry, mode);
 }
@@ -199,7 +200,8 @@ int hifs_create_inode(struct inode *dir, struct dentry *dentry, umode_t mode)
 	return hifs_add_ondir(inode, dir, dentry, mode);
 }
 
-int hifs_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode)
+int hifs_mkdir(struct mnt_idmap *idmap, struct inode *dir, struct dentry *dentry, umode_t mode)
+
 {
 	int ret = 0;
 
@@ -291,10 +293,8 @@ struct hifs_inode *hifs_iget(struct super_block *sb, ino_t ino)
 
 void hifs_fill_inode(struct super_block *sb, struct inode *des, struct hifs_inode *src)
 {
-	struct timespec ts;
-	ktime_t kt;
-	kt = ktime_get_real();
-	ts = ktime_to_timespec(kt);
+	struct timespec64 ts;
+	ktime_get_real_ts64(&ts);
 
 	des->i_mode = src->i_mode;
 	des->i_flags = src->i_flags;

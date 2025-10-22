@@ -37,78 +37,60 @@
 #include <linux/list.h>
 #include <linux/mutex.h>
 #include <linux/device.h>
-#include <linux/bpf.h>
-#include <linux/perf_event.h>
 
 #include "hifs_shared_defs.h"
 
 /* Definitions past this point should be specific only to the kernel-space module! */
 
-extern struct class *inode_dev_class, *block_dev_class, *cmd_dev_class;
-extern atomic_t kern_atomic_variable;
-extern atomic_t user_atomic_variable;
-extern struct device *kern_atomic_device;
-extern struct device *user_atomic_device;
-extern struct class *kern_atomic_class;
-extern struct class *user_atomic_class;
-extern wait_queue_head_t waitqueue;
-extern wait_queue_head_t thread_wq;
+/*
 
-extern bool hifs_poll_write;
-extern bool hifs_poll_read;
+ Naming convension used:
+   hifs_       =  refers to anything dealing with local cachefs or the filesystem as a whole.
+   hicom_      =  refers to anything communication layer to talk to user space or remote/direct.
+   hicom_prot_ =  refers to anything related to the remote direct comms protocol.
 
-/*hi_command_kern.c*/
-int hifs_create_test_inode(void);
+*/
+
+/*hifs_kern.c*/
 int hifs_thread_fn(void *data);
-int hifs_comm_check_program_up( int program );
-int hifs_comm_set_program_up( int program );
-int hifs_comm_check_program_down( int program );
 int hifs_start_queue_thread(void);
 int hifs_stop_queue_thread(void);
 
-/*hi_command_kern_memman.c*/
-int hifs_atomic_init(void);
-void hifs_atomic_exit(void);
-int v_atomic_open(struct inode *inodep, struct file *filep);
-int v_atomic_release(struct inode *inodep, struct file *filep);
-ssize_t k_atomic_read(struct file *filep, char __user *buffer, size_t len, loff_t *offset);
-ssize_t k_atomic_write(struct file *filep, const char __user *buffer, size_t len, loff_t *offset);
-ssize_t u_atomic_read(struct file *filep, char __user *buffer, size_t len, loff_t *offset);
-ssize_t u_atomic_write(struct file *filep, const char __user *buffer, size_t len, loff_t *offset);
-int register_all_comm_queues(void);
-void unregister_all_comm_queues(void);
-int hifs_comm_device_release(struct inode *inode, struct file *filp);
-ssize_t hi_comm_inode_device_read(struct file *filep, char __user *buf, size_t count, loff_t *offset);
-ssize_t hi_comm_block_device_read(struct file *filep, char __user *buf, size_t count, loff_t *offset);
-ssize_t hi_comm_cmd_device_read(struct file *filep, char __user *buf, size_t count, loff_t *offset);
-ssize_t hi_comm_inode_device_write(struct file *filep, const char  __user *buffer, size_t count, loff_t *offset);
-ssize_t hi_comm_block_device_write(struct file *filep, const char __user *buffer, size_t count, loff_t *offset);
-ssize_t hi_comm_cmd_device_write(struct file *filep, const char __user *buffer, size_t count, loff_t *offset);
-struct hifs_cmds_user *hifs_parse_cmd_struct( struct hifs_cmds *send_data);
-struct hifs_inode_user *hifs_parse_inode_struct( struct hifs_inode *send_data);
-struct hifs_blocks_user *hifs_parse_block_struct( struct hifs_blocks *send_data);
-__poll_t hifs_inode_device_poll (struct file *filp, poll_table *wait);
-__poll_t hifs_block_device_poll (struct file *filp, poll_table *wait);
-__poll_t hifs_cmd_device_poll (struct file *filp, poll_table *wait);
+/*hicom_kern_prot.c*/
+int hifs_create_test_inode(void);
+void hifs_comm_link_notify_online(void);
+void hifs_comm_link_notify_offline(void);
 
-/* hi_superblock.c */
+
+/*hicom_kern_mm.c*/
+int hifs_comm_init(void);
+void hifs_comm_exit(void);
+int hifs_cmd_queue_push(const struct hifs_cmds_user *msg);
+int hifs_cmd_queue_push_cstr(const char *command);
+int hifs_inode_queue_push(const struct hifs_inode_user *msg);
+int hifs_inode_queue_push_from_inode(const struct hifs_inode *inode);
+void hifs_prepare_inode_user(struct hifs_inode_user *dst, const struct hifs_inode *src);
+int hifs_cmd_response_dequeue(struct hifs_cmds_user *msg, bool nonblock);
+int hifs_inode_response_dequeue(struct hifs_inode_user *msg, bool nonblock);
+
+/* hifs_superblock.c */
 void hifs_save_sb(struct super_block *sb);
 void hifs_put_super(struct super_block *sb);
 void hifs_kill_superblock(struct super_block *sb);
 int hifs_fill_super(struct super_block *sb, void *data, int silent);
 struct dentry *hifs_mount(struct file_system_type *fs_type, int flags, const char *dev_name, void *data);
 
-/* hi_inode.c */
+/* hifs_inode.c */
 void dump_hifsinode(struct hifs_inode *dmi);
 void hifs_destroy_inode(struct inode *inode);
+int hifs_create_inode(struct inode *dir, struct dentry *dentry, umode_t mode);
 void hifs_store_inode(struct super_block *sb, struct hifs_inode *hii);
 int hifs_add_dir_record(struct super_block *sb, struct inode *dir, struct dentry *dentry, struct inode *inode);
 int alloc_inode(struct super_block *sb, struct hifs_inode *hii);
 struct inode *hifs_new_inode(struct inode *dir, struct dentry *dentry, umode_t mode);
 int hifs_add_ondir(struct inode *inode, struct inode *dir, struct dentry *dentry, umode_t mode);
-int hifs_create(struct inode *dir, struct dentry *dentry, umode_t mode, bool excl);
-int hifs_create_inode(struct inode *dir, struct dentry *dentry, umode_t mode);
-int hifs_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode);
+int hifs_create(struct mnt_idmap *idmap, struct inode *dir, struct dentry *dentry, umode_t mode, bool excl);
+int hifs_mkdir(struct mnt_idmap *idmap, struct inode *dir, struct dentry *dentry, umode_t mode);
 int hifs_rmdir(struct inode *dir, struct dentry *dentry);
 void hifs_put_inode(struct hifs_inode *inode);
 int isave_intable(struct super_block *sb, struct hifs_inode *hii, u32 i_block);
@@ -116,10 +98,10 @@ struct hifs_inode *hifs_iget(struct super_block *sb, ino_t ino);
 void hifs_fill_inode(struct super_block *sb, struct inode *des, struct hifs_inode *src);
 struct dentry *hifs_lookup(struct inode *dir, struct dentry *child_dentry, unsigned int flags);
 
-/* hi_dir.c */
+/* hifs_dir.c */
 int hifs_readdir(struct file *filp, struct dir_context *ctx);
 
-/* hi_file.c */
+/* hifs_file.c */
 ssize_t hifs_get_loffset(struct hifs_inode *hii, loff_t off);
 ssize_t hifs_read(struct kiocb *iocb, struct iov_iter *to);
 ssize_t hifs_write(struct kiocb *iocb, struct iov_iter *from);
@@ -127,7 +109,7 @@ int hifs_open_file(struct inode *inode, struct file *filp);
 int hifs_release_file(struct inode *inode, struct file *filp);
 //ssize_t hifs_alloc_if_necessary(struct hifs_superblock *sb, struct hifs_inode *di, loff_t off, size_t cnt);
 
-/* hi_cache */
+/* hifs_cache */
 struct hifs_inode *cache_get_inode(void);
 void cache_put_inode(struct hifs_inode **hii);
 
