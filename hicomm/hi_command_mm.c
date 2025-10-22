@@ -61,7 +61,7 @@ static int hifs_comm_ioctl_common(int fd, unsigned long request, void *arg)
 	return 0;
 }
 
-int hifs_comm_recv_cmd(int fd, struct hifs_cmds_user *cmd, bool nonblock)
+int hifs_comm_recv_cmd(int fd, struct hifs_cmds *cmd, bool nonblock)
 {
 	int target = resolve_fd(fd);
 
@@ -110,7 +110,7 @@ int hifs_comm_get_status(int fd, struct hifs_comm_status *status)
 	return hifs_comm_ioctl_common(fd, HIFS_IOCTL_STATUS, status);
 }
 
-int hifs_comm_send_cmd(int fd, const struct hifs_cmds_user *cmd)
+int hifs_comm_send_cmd(int fd, const struct hifs_cmds *cmd)
 {
 	if (!cmd)
 		return -EINVAL;
@@ -121,7 +121,7 @@ int hifs_comm_send_cmd(int fd, const struct hifs_cmds_user *cmd)
 
 int hifs_comm_send_cmd_string(int fd, const char *cmd)
 {
-	struct hifs_cmds_user msg;
+	struct hifs_cmds msg;
 	size_t len;
 
 	if (!cmd)

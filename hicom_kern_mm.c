@@ -18,9 +18,9 @@
 #include <linux/uaccess.h>
 #include <linux/wait.h>
 
-static DEFINE_KFIFO(hifs_cmd_fifo, struct hifs_cmds_user, HIFS_CMD_RING_CAPACITY);
+static DEFINE_KFIFO(hifs_cmd_fifo, struct hifs_cmds, HIFS_CMD_RING_CAPACITY);
 static DEFINE_KFIFO(hifs_inode_fifo, struct hifs_inode_user, HIFS_INODE_RING_CAPACITY);
-static DEFINE_KFIFO(hifs_cmd_in_fifo, struct hifs_cmds_user, HIFS_CMD_RING_CAPACITY);
+static DEFINE_KFIFO(hifs_cmd_in_fifo, struct hifs_cmds, HIFS_CMD_RING_CAPACITY);
 static DEFINE_KFIFO(hifs_inode_in_fifo, struct hifs_inode_user, HIFS_INODE_RING_CAPACITY);
 
 static DEFINE_SPINLOCK(hifs_cmd_lock);
@@ -82,7 +82,7 @@ static unsigned int hifs_inode_out_queue_len(void)
 	return len;
 }
 
-int hifs_cmd_queue_push(const struct hifs_cmds_user *msg)
+int hifs_cmd_queue_push(const struct hifs_cmds *msg)
 {
 	unsigned long flags;
 	int ret = 0;
@@ -106,7 +106,7 @@ int hifs_cmd_queue_push(const struct hifs_cmds_user *msg)
 
 int hifs_cmd_queue_push_cstr(const char *command)
 {
-	struct hifs_cmds_user msg;
+	struct hifs_cmds msg;
 	size_t len;
 
 	if (!command)
@@ -142,7 +142,7 @@ int hifs_inode_queue_push(const struct hifs_inode_user *msg)
 	return ret;
 }
 
-static int hifs_cmd_in_queue_enqueue(const struct hifs_cmds_user *msg)
+static int hifs_cmd_in_queue_enqueue(const struct hifs_cmds *msg)
 {
 	unsigned long flags;
 	int ret = 0;
@@ -222,7 +222,7 @@ int hifs_inode_queue_push_from_inode(const struct hifs_inode *inode)
 	return hifs_inode_queue_push(&msg);
 }
 
-static int hifs_cmd_queue_dequeue(struct hifs_cmds_user *msg, bool nonblock)
+static int hifs_cmd_queue_dequeue(struct hifs_cmds *msg, bool nonblock)
 {
 	int ret;
 
@@ -284,7 +284,7 @@ static int hifs_inode_queue_dequeue(struct hifs_inode_user *msg, bool nonblock)
 	}
 }
 
-static int hifs_cmd_in_queue_dequeue(struct hifs_cmds_user *msg, bool nonblock)
+static int hifs_cmd_in_queue_dequeue(struct hifs_cmds *msg, bool nonblock)
 {
 	int ret;
 
@@ -346,7 +346,7 @@ static int hifs_inode_in_queue_dequeue(struct hifs_inode_user *msg, bool nonbloc
 	}
 }
 
-int hifs_cmd_response_dequeue(struct hifs_cmds_user *msg, bool nonblock)
+int hifs_cmd_response_dequeue(struct hifs_cmds *msg, bool nonblock)
 {
 	return hifs_cmd_in_queue_dequeue(msg, nonblock);
 }
@@ -363,7 +363,7 @@ static long hifs_comm_ioctl(struct file *file, unsigned int cmd, unsigned long a
 
 	switch (cmd) {
 	case HIFS_IOCTL_CMD_DEQUEUE: {
-		struct hifs_cmds_user msg;
+		struct hifs_cmds msg;
 		int ret = hifs_cmd_queue_dequeue(&msg, nonblock);
 
 		if (ret)
@@ -400,7 +400,7 @@ static long hifs_comm_ioctl(struct file *file, unsigned int cmd, unsigned long a
 		return 0;
 	}
 	case HIFS_IOCTL_CMD_ENQUEUE: {
-		struct hifs_cmds_user msg;
+		struct hifs_cmds msg;
 
 		if (copy_from_user(&msg, user_ptr, sizeof(msg)))
 			return -EFAULT;

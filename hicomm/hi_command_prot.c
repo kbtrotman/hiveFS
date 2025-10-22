@@ -9,7 +9,7 @@
 
 #include "hi_command.h"
 
-static bool hifs_command_equals(const struct hifs_cmds_user *cmd, const char *name)
+static bool hifs_command_equals(const struct hifs_cmds *cmd, const char *name)
 {
 	size_t len;
 
@@ -20,7 +20,7 @@ static bool hifs_command_equals(const struct hifs_cmds_user *cmd, const char *na
 	return len == strlen(name) && strncmp(cmd->cmd, name, HIFS_MAX_CMD_SIZE) == 0;
 }
 
-int hifs_handle_command(int fd, const struct hifs_cmds_user *cmd)
+int hifs_handle_command(int fd, const struct hifs_cmds *cmd)
 {
 	int ret = 0;
 

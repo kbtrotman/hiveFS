@@ -18,7 +18,6 @@
 #include <time.h>
 #include <stdint.h>
 #define GET_TIME() (clock() * 1000 / CLOCKS_PER_SEC)
-#include "hicomm/hi_user_double_linked_list.h"
 #endif // __KERNEL__
 
 /******************************
@@ -46,10 +45,10 @@
 #define HIFS_INODE_RING_CAPACITY 128
 
 #define HIFS_IOCTL_MAGIC      'H'
-#define HIFS_IOCTL_CMD_DEQUEUE    _IOWR(HIFS_IOCTL_MAGIC, 0, struct hifs_cmds_user)
+#define HIFS_IOCTL_CMD_DEQUEUE    _IOWR(HIFS_IOCTL_MAGIC, 0, struct hifs_cmds)
 #define HIFS_IOCTL_INODE_DEQUEUE  _IOWR(HIFS_IOCTL_MAGIC, 1, struct hifs_inode_user)
 #define HIFS_IOCTL_STATUS         _IOR(HIFS_IOCTL_MAGIC,  2, struct hifs_comm_status)
-#define HIFS_IOCTL_CMD_ENQUEUE    _IOW (HIFS_IOCTL_MAGIC, 3, struct hifs_cmds_user)
+#define HIFS_IOCTL_CMD_ENQUEUE    _IOW (HIFS_IOCTL_MAGIC, 3, struct hifs_cmds)
 #define HIFS_IOCTL_INODE_ENQUEUE  _IOW (HIFS_IOCTL_MAGIC, 4, struct hifs_inode_user)
 
 /******************************
@@ -80,31 +79,16 @@ enum hifs_queue_direction{HIFS_COMM_TO_USER, HIFS_COMM_FROM_USER};
 extern struct pollfd *cmd_pfd;
 extern struct pollfd *inode_pfd;
 extern struct pollfd *block_pfd;
-
 struct hifs_blocks {
-	int block_size;
-	int count;
-	char *block;
-	struct list_head hifs_block_list;
-};
-
-struct hifs_blocks_user {
 	int block_size;
 	int count;
 	char block[HIFS_DEFAULT_BLOCK_SIZE];
 };
 
 struct hifs_cmds {
-	int count;
-	char *cmd;
-	struct list_head hifs_cmd_list;
-};
-
-struct hifs_cmds_user {
     int count;
 	char cmd[HIFS_MAX_CMD_SIZE];
 };
-
 struct hifs_comm_status {
 #ifdef __KERNEL__
 	__u32 cmd_available;
@@ -177,15 +161,15 @@ extern struct
  * NOTE: Our virtual FS cache uses a basic EXT2 style layout for the most part.
  *       This is a good way to keep things consistent.
  **/
-#define EXT2_BAD_INO	     1  /* Bad blocks inode */
-#define EXT2_LAF_INO		 2  /* Lost and Found inode nr */
-#define EXT2_USR_QUOTA_INO	 3	/* User quota inode */
-#define EXT2_GRP_QUOTA_INO	 4	/* Group quota inode */
-#define EXT2_BOOT_LOADER_INO 5	/* Boot loader inode */
-#define EXT2_UNDEL_DIR_INO	 6	/* Undelete directory inode */
-#define EXT2_RESIZE_INO		 7	/* Reserved group descriptors inode */
-#define EXT2_JOURNAL_INO	 8	/* Journal inode */
-#define EXT2_EXCLUDE_INO	 9	/* The "exclude" inode, for snapshots */
+#define HIFS_BAD_INO	     1  /* Bad blocks inode */
+#define HIFS_LAF_INO		 2  /* Lost and Found inode nr */
+#define HIFS_USR_QUOTA_INO	 3	/* User quota inode */
+#define HIFS_GRP_QUOTA_INO	 4	/* Group quota inode */
+#define HIFS_BOOT_LOADER_INO 5	/* Boot loader inode */
+#define HIFS_UNDEL_DIR_INO	 6	/* Undelete directory inode */
+#define HIFS_RESIZE_INO		 7	/* Reserved group descriptors inode */
+#define HIFS_JOURNAL_INO	 8	/* Journal inode */
+#define HIFS_EXCLUDE_INO	 9	/* The "exclude" inode, for snapshots */
 #define HIFS_ROOT_INODE      11 /* Root inode nbr */
 
 /**
@@ -214,7 +198,6 @@ struct hifs_inode
 	uint32_t	i_addre[HIFS_INODE_TSIZE];	/* End block of extend ranges */
 	uint32_t	i_blocks;	/* Number of blocks */
 	uint32_t	i_bytes;	/* Number of bytes */
-	struct list_head hifs_inode_list;
 };
 
 struct hifs_inode_user 

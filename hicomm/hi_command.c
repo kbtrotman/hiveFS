@@ -13,7 +13,7 @@ static int comm_fd = -1;
 
 int main(int argc, char *argv[])
 {
-	struct hifs_cmds_user cmd;
+	struct hifs_cmds cmd;
 	int ret;
 	int exit_code = EXIT_SUCCESS;
 
