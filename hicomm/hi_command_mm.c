@@ -81,7 +81,7 @@ int hifs_comm_recv_cmd(int fd, struct hifs_cmds *cmd, bool nonblock)
 	return hifs_comm_ioctl_common(target, HIFS_IOCTL_CMD_DEQUEUE, cmd);
 }
 
-int hifs_comm_recv_inode(int fd, struct hifs_inode_user *inode, bool nonblock)
+int hifs_comm_recv_inode(int fd, struct hifs_inode *inode, bool nonblock)
 {
 	int target = resolve_fd(fd);
 
@@ -135,7 +135,7 @@ int hifs_comm_send_cmd_string(int fd, const char *cmd)
 	return hifs_comm_send_cmd(fd, &msg);
 }
 
-int hifs_comm_send_inode(int fd, const struct hifs_inode_user *inode)
+int hifs_comm_send_inode(int fd, const struct hifs_inode *inode)
 {
 	if (!inode)
 		return -EINVAL;

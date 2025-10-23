@@ -25,7 +25,7 @@ int hifs_thread_fn(void *data)
 			hifs_warning("Failed to enqueue test inode: %d\n", ret);
 		} else {
 			struct hifs_cmds rsp;
-			struct hifs_inode_user inode_rsp;
+			struct hifs_inode inode_rsp;
 
 			ret = hifs_cmd_response_dequeue(&rsp, true);
 			if (!ret)

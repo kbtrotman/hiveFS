@@ -30,7 +30,7 @@ int hifs_handle_command(int fd, const struct hifs_cmds *cmd)
 	hifs_info("Command received: \"%s\" (%d bytes)", cmd->cmd, cmd->count);
 
 	if (hifs_command_equals(cmd, HIFS_Q_PROTO_CMD_TEST)) {
-		struct hifs_inode_user inode;
+		struct hifs_inode inode;
 		int err;
 
 		ret = hifs_comm_recv_inode(fd, &inode, false);
@@ -60,7 +60,7 @@ int hifs_handle_command(int fd, const struct hifs_cmds *cmd)
 	return ret;
 }
 
-void hifs_print_inode(const struct hifs_inode_user *inode)
+void hifs_print_inode(const struct hifs_inode *inode)
 {
 	if (!inode)
 		return;

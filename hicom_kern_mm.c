@@ -19,9 +19,9 @@
 #include <linux/wait.h>
 
 static DEFINE_KFIFO(hifs_cmd_fifo, struct hifs_cmds, HIFS_CMD_RING_CAPACITY);
-static DEFINE_KFIFO(hifs_inode_fifo, struct hifs_inode_user, HIFS_INODE_RING_CAPACITY);
+static DEFINE_KFIFO(hifs_inode_fifo, struct hifs_inode, HIFS_INODE_RING_CAPACITY);
 static DEFINE_KFIFO(hifs_cmd_in_fifo, struct hifs_cmds, HIFS_CMD_RING_CAPACITY);
-static DEFINE_KFIFO(hifs_inode_in_fifo, struct hifs_inode_user, HIFS_INODE_RING_CAPACITY);
+static DEFINE_KFIFO(hifs_inode_in_fifo, struct hifs_inode, HIFS_INODE_RING_CAPACITY);
 
 static DEFINE_SPINLOCK(hifs_cmd_lock);
 static DEFINE_SPINLOCK(hifs_inode_lock);
@@ -120,7 +120,7 @@ int hifs_cmd_queue_push_cstr(const char *command)
 	return hifs_cmd_queue_push(&msg);
 }
 
-int hifs_inode_queue_push(const struct hifs_inode_user *msg)
+int hifs_inode_queue_push(const struct hifs_inode *msg)
 {
 	unsigned long flags;
 	int ret = 0;
@@ -164,7 +164,7 @@ static int hifs_cmd_in_queue_enqueue(const struct hifs_cmds *msg)
 	return ret;
 }
 
-static int hifs_inode_in_queue_enqueue(const struct hifs_inode_user *msg)
+static int hifs_inode_in_queue_enqueue(const struct hifs_inode *msg)
 {
 	unsigned long flags;
 	int ret = 0;
@@ -186,7 +186,7 @@ static int hifs_inode_in_queue_enqueue(const struct hifs_inode_user *msg)
 	return ret;
 }
 
-void hifs_prepare_inode_user(struct hifs_inode_user *dst, const struct hifs_inode *src)
+void hifs_prepare_inode_user(struct hifs_inode *dst, const struct hifs_inode *src)
 {
 	if (!dst || !src)
 		return;
@@ -213,7 +213,7 @@ void hifs_prepare_inode_user(struct hifs_inode_user *dst, const struct hifs_inod
 
 int hifs_inode_queue_push_from_inode(const struct hifs_inode *inode)
 {
-	struct hifs_inode_user msg;
+	struct hifs_inode msg;
 
 	if (!inode)
 		return -EINVAL;
@@ -253,7 +253,7 @@ static int hifs_cmd_queue_dequeue(struct hifs_cmds *msg, bool nonblock)
 	}
 }
 
-static int hifs_inode_queue_dequeue(struct hifs_inode_user *msg, bool nonblock)
+static int hifs_inode_queue_dequeue(struct hifs_inode *msg, bool nonblock)
 {
 	int ret;
 
@@ -315,7 +315,7 @@ static int hifs_cmd_in_queue_dequeue(struct hifs_cmds *msg, bool nonblock)
 	}
 }
 
-static int hifs_inode_in_queue_dequeue(struct hifs_inode_user *msg, bool nonblock)
+static int hifs_inode_in_queue_dequeue(struct hifs_inode *msg, bool nonblock)
 {
 	int ret;
 
@@ -351,7 +351,7 @@ int hifs_cmd_response_dequeue(struct hifs_cmds *msg, bool nonblock)
 	return hifs_cmd_in_queue_dequeue(msg, nonblock);
 }
 
-int hifs_inode_response_dequeue(struct hifs_inode_user *msg, bool nonblock)
+int hifs_inode_response_dequeue(struct hifs_inode *msg, bool nonblock)
 {
 	return hifs_inode_in_queue_dequeue(msg, nonblock);
 }
@@ -375,7 +375,7 @@ static long hifs_comm_ioctl(struct file *file, unsigned int cmd, unsigned long a
 		return 0;
 	}
 	case HIFS_IOCTL_INODE_DEQUEUE: {
-		struct hifs_inode_user msg;
+		struct hifs_inode msg;
 		int ret = hifs_inode_queue_dequeue(&msg, nonblock);
 
 		if (ret)
@@ -408,7 +408,7 @@ static long hifs_comm_ioctl(struct file *file, unsigned int cmd, unsigned long a
 		return hifs_cmd_in_queue_enqueue(&msg);
 	}
 	case HIFS_IOCTL_INODE_ENQUEUE: {
-		struct hifs_inode_user msg;
+		struct hifs_inode msg;
 
 		if (copy_from_user(&msg, user_ptr, sizeof(msg)))
 			return -EFAULT;

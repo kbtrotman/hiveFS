@@ -42,16 +42,16 @@
 int hifs_comm_open(bool nonblock);
 void hifs_comm_close(int fd);
 int hifs_comm_recv_cmd(int fd, struct hifs_cmds *cmd, bool nonblock);
-int hifs_comm_recv_inode(int fd, struct hifs_inode_user *inode, bool nonblock);
+int hifs_comm_recv_inode(int fd, struct hifs_inode *inode, bool nonblock);
 int hifs_comm_get_status(int fd, struct hifs_comm_status *status);
 int hifs_comm_send_cmd(int fd, const struct hifs_cmds *cmd);
 int hifs_comm_send_cmd_string(int fd, const char *cmd);
-int hifs_comm_send_inode(int fd, const struct hifs_inode_user *inode);
+int hifs_comm_send_inode(int fd, const struct hifs_inode *inode);
 void hi_comm_safe_cleanup(void);
 
 /* hi_command_prot.c */
 int hifs_handle_command(int fd, const struct hifs_cmds *cmd);
-void hifs_print_inode(const struct hifs_inode_user *inode);
+void hifs_print_inode(const struct hifs_inode *inode);
 
 /* Utility */
 const char *hifs_link_state_string(enum hifs_link_state state);
