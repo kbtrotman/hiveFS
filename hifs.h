@@ -60,6 +60,7 @@ int hifs_stop_queue_thread(void);
 int hifs_create_test_inode(void);
 void hifs_comm_link_notify_online(void);
 void hifs_comm_link_notify_offline(void);
+void hicom_process_link_handshake(void);
 
 
 /*hicom_kern_mm.c*/
@@ -92,7 +93,7 @@ int hifs_add_ondir(struct inode *inode, struct inode *dir, struct dentry *dentry
 int hifs_create(struct mnt_idmap *idmap, struct inode *dir, struct dentry *dentry, umode_t mode, bool excl);
 int hifs_mkdir(struct mnt_idmap *idmap, struct inode *dir, struct dentry *dentry, umode_t mode);
 int hifs_rmdir(struct inode *dir, struct dentry *dentry);
-void hifs_put_inode(struct hifs_inode *inode);
+void hifs_put_inode(struct inode *inode);
 int isave_intable(struct super_block *sb, struct hifs_inode *hii, u32 i_block);
 struct hifs_inode *hifs_iget(struct super_block *sb, ino_t ino);
 void hifs_fill_inode(struct super_block *sb, struct inode *des, struct hifs_inode *src);
@@ -141,8 +142,9 @@ extern const struct super_operations hifs_sb_operations;
 extern struct kmem_cache *hifs_inode_cache;
 
 
-struct hifs_superblock 
+struct hifs_sb_info 
 {
+	struct hifs_disk_superblock disk;
 	uint32_t	s_magic;    	/* magic number */
 	uint32_t	s_version;    	/* fs version */
 	uint32_t	s_blocksize;	/* fs block size */

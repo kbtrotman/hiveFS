@@ -20,6 +20,7 @@ int hifs_thread_fn(void *data)
 	hifs_comm_link_notify_online();
 
 	while (!kthread_should_stop()) {
+		hicom_process_link_handshake();
 		ret = hifs_create_test_inode();
 		if (ret) {
 			hifs_warning("Failed to enqueue test inode: %d\n", ret);

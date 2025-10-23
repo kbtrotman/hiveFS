@@ -79,7 +79,7 @@ ssize_t hifs_read(struct kiocb *iocb, struct iov_iter *to)
 	return nbytes;
 }
 /*
-ssize_t hifs_alloc_if_necessary(struct hifs_superblock *sb, struct hifs_inode *di, loff_t off, size_t cnt)
+ssize_t hifs_alloc_if_necessary(struct hifs_sb_info *sb, struct hifs_inode *di, loff_t off, size_t cnt)
 {
 	// Mock it until using bitmap
 	return 0;
@@ -91,7 +91,7 @@ ssize_t hifs_write(struct kiocb *iocb, struct iov_iter *from)
 	struct inode *inode;
 	struct hifs_inode *dinode;
 	struct buffer_head *bh;
-	struct hifs_superblock *dsb;
+	struct hifs_sb_info *dsb;
 	void *buf = from->__iov->iov_base; 
 	loff_t off = iocb->ki_pos;
 	size_t count = iov_iter_count(from);

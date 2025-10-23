@@ -9,6 +9,7 @@
 
 
 #include "hifs.h"
+#include <linux/byteorder/generic.h>
 u32 _ix = 0, b = 0, e = 0;
 
 #define FOREAChi_BLK_IN_EXT(dmi, blk)	\
@@ -102,11 +103,12 @@ int hifs_add_dir_record(struct super_block *sb, struct inode *dir, struct dentry
 
 int alloc_inode(struct super_block *sb, struct hifs_inode *hii)
 {
-	struct hifs_superblock *hisb;
+struct hifs_sb_info *hisb;
 	u32 i;
 
 	hisb = sb->s_fs_info;
 	hisb->s_inode_cnt += 1;
+	hisb->disk.s_inodes_count = cpu_to_le32(hisb->s_inode_cnt);
 	hii->i_ino = hisb->s_inode_cnt;
 	hii->i_version = HIFS_LAYOUT_VER;
 	hii->i_flags = 0;
@@ -118,6 +120,7 @@ int alloc_inode(struct super_block *sb, struct hifs_inode *hii)
 	/* Then 4 block for extends: that mean dmi struct is in i_addrb[0]-1 */
 	hii->i_addrb[0] = hisb->s_last_blk + 1;
 	hii->i_addre[0] = hisb->s_last_blk += 4;
+	hisb->disk.s_first_data_block = cpu_to_le32(hisb->s_last_blk);
 	for (i = 1; i < HIFS_INODE_TSIZE; ++i) {
 		hii->i_addre[i] = 0;
 		hii->i_addrb[i] = 0;
@@ -133,7 +136,7 @@ int alloc_inode(struct super_block *sb, struct hifs_inode *hii)
 struct inode *hifs_new_inode(struct inode *dir, struct dentry *dentry, umode_t mode)
 {
 	struct super_block *sb;
-	struct hifs_superblock *hisb;
+struct hifs_sb_info *hisb;
 	struct hifs_inode *hii;
 	struct inode *inode;
 	int ret;
@@ -223,7 +226,7 @@ int hifs_rmdir(struct inode *dir, struct dentry *dentry)
 	return 0;
 }
 
-void hifs_put_inode(struct hifs_inode *inode)
+void hifs_put_inode(struct inode *inode)
 {
 	struct hifs_inode *ip = inode->i_private;
 

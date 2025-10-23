@@ -9,6 +9,7 @@
 
 #include "hifs.h"
 
+#include <linux/byteorder/generic.h>
 #include <linux/math64.h>
 #include <linux/mount.h>
 #include <linux/time64.h>
@@ -28,8 +29,8 @@ static struct buffer_head *hifs_bread_at(struct super_block *sb, u64 byte_offset
 
 int hifs_fill_super(struct super_block *sb, void *data, int silent)
 {
-	struct hifs_superblock *disk_sb;
-	struct hifs_superblock *h_sb = NULL;
+	struct hifs_disk_superblock *disk_sb;
+	struct hifs_sb_info *sb_info = NULL;
 	struct buffer_head *bh = NULL;
 	struct inode *root_inode = NULL;
 	struct hifs_inode *root_hifsinode = NULL;
@@ -43,24 +44,46 @@ int hifs_fill_super(struct super_block *sb, void *data, int silent)
 		goto out;
 	}
 
-	disk_sb = (struct hifs_superblock *)(bh->b_data + offset);
-	h_sb = kmemdup(disk_sb, sizeof(*h_sb), GFP_KERNEL);
-	if (!h_sb) {
+	disk_sb = (struct hifs_disk_superblock *)(bh->b_data + offset);
+	sb_info = kzalloc(sizeof(*sb_info), GFP_KERNEL);
+	if (!sb_info) {
 		ret = -ENOMEM;
 		goto out;
 	}
 
+	sb_info->s_magic = le16_to_cpu(disk_sb->s_magic);
+	sb_info->s_version = le32_to_cpu(disk_sb->s_rev_level);
+	sb_info->s_blocksize = 1024U << le32_to_cpu(disk_sb->s_log_block_size);
+	sb_info->s_block_olt = HIFS_INODE_TABLE_OFFSET / sb_info->s_blocksize;
+	sb_info->s_inode_cnt = le32_to_cpu(disk_sb->s_inodes_count);
+	sb_info->s_last_blk = HIFS_CACHE_SPACE_START / sb_info->s_blocksize;
+
+	memcpy(&sb_info->disk, disk_sb, sizeof(*disk_sb));
+	sb_info->disk.s_magic = cpu_to_le16(sb_info->s_magic);
+	sb_info->disk.s_rev_level = cpu_to_le32(sb_info->s_version);
+
+	{
+		u32 size = sb_info->s_blocksize >> 10;
+		u32 log = 0;
+		while (size > 1) {
+			size >>= 1;
+			log++;
+		}
+		sb_info->disk.s_log_block_size = cpu_to_le32(log);
+	}
+	sb_info->disk.s_inodes_count = cpu_to_le32(sb_info->s_inode_cnt);
+
 	brelse(bh);
 	bh = NULL;
 
-	if (!sb_set_blocksize(sb, h_sb->s_blocksize)) {
+	if (!sb_set_blocksize(sb, sb_info->s_blocksize)) {
 		ret = -EINVAL;
 		goto out;
 	}
 
-	sb->s_magic = h_sb->s_magic;
+	sb->s_magic = sb_info->s_magic;
 	sb->s_op = &hifs_sb_operations;
-	sb->s_fs_info = h_sb;
+	sb->s_fs_info = sb_info;
 
 	bh = hifs_bread_at(sb, HIFS_ROOT_DENTRY_OFFSET, &offset);
 	if (!bh) {
@@ -112,7 +135,7 @@ out:
 			iput(root_inode);
 		else if (root_hifsinode)
 			cache_put_inode(&root_hifsinode);
-		kfree(h_sb);
+		kfree(sb_info);
 		sb->s_fs_info = NULL;
 	}
 	return ret;
@@ -142,17 +165,17 @@ void hifs_kill_superblock(struct super_block *sb)
 void hifs_save_sb(struct super_block *sb)
 {
 	struct buffer_head *bh;
-	struct hifs_superblock *d_sb = sb->s_fs_info;
+	struct hifs_sb_info *info = sb->s_fs_info;
 	unsigned int offset;
 
-	if (!d_sb)
+	if (!info)
 		return;
 
 	bh = hifs_bread_at(sb, HIFS_SUPER_OFFSET, &offset);
 	if (!bh)
 		return;
 
-	memcpy(bh->b_data + offset, d_sb, sizeof(*d_sb));
+	memcpy(bh->b_data + offset, &info->disk, sizeof(info->disk));
 	mark_buffer_dirty(bh);
 	sync_dirty_buffer(bh);
 	brelse(bh);
