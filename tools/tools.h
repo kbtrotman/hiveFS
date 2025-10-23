@@ -17,9 +17,7 @@
 #include <string.h>
 #include <time.h>
 #include <sys/stat.h>
-#include <ext2fs/ext2fs.h>
-#include <ext2fs/ext2_fs.h>
-
+#include "../hifs_shared_defs.h"
 
 struct command_line_flags {
     char *target_drive;

@@ -18,6 +18,14 @@
 #include <time.h>
 #include <stdint.h>
 #define GET_TIME() (clock() * 1000 / CLOCKS_PER_SEC)
+typedef uint64_t __u64;
+typedef uint32_t __u32;
+typedef uint16_t __u16;
+typedef uint8_t  __u8;
+#define __bitwise
+typedef uint64_t __le64;
+typedef uint32_t __le32;
+typedef uint16_t __le16;
 #endif // __KERNEL__
 
 /******************************
@@ -46,10 +54,10 @@
 
 #define HIFS_IOCTL_MAGIC      'H'
 #define HIFS_IOCTL_CMD_DEQUEUE    _IOWR(HIFS_IOCTL_MAGIC, 0, struct hifs_cmds)
-#define HIFS_IOCTL_INODE_DEQUEUE  _IOWR(HIFS_IOCTL_MAGIC, 1, struct hifs_inode_user)
+#define HIFS_IOCTL_INODE_DEQUEUE  _IOWR(HIFS_IOCTL_MAGIC, 1, struct hifs_inode)
 #define HIFS_IOCTL_STATUS         _IOR(HIFS_IOCTL_MAGIC,  2, struct hifs_comm_status)
 #define HIFS_IOCTL_CMD_ENQUEUE    _IOW (HIFS_IOCTL_MAGIC, 3, struct hifs_cmds)
-#define HIFS_IOCTL_INODE_ENQUEUE  _IOW (HIFS_IOCTL_MAGIC, 4, struct hifs_inode_user)
+#define HIFS_IOCTL_INODE_ENQUEUE  _IOW (HIFS_IOCTL_MAGIC, 4, struct hifs_inode)
 
 /******************************
  * Queue Comms Protocol
@@ -79,6 +87,7 @@ enum hifs_queue_direction{HIFS_COMM_TO_USER, HIFS_COMM_FROM_USER};
 extern struct pollfd *cmd_pfd;
 extern struct pollfd *inode_pfd;
 extern struct pollfd *block_pfd;
+
 struct hifs_blocks {
 	int block_size;
 	int count;
@@ -171,36 +180,12 @@ extern struct
 #define HIFS_JOURNAL_INO	 8	/* Journal inode */
 #define HIFS_EXCLUDE_INO	 9	/* The "exclude" inode, for snapshots */
 #define HIFS_ROOT_INODE      11 /* Root inode nbr */
+#define HIFS_SUPER_POSITION 1024 
 
 /**
  * The on-Disk inode
  **/
 struct hifs_inode 
-{
-	struct super_block	*i_sb;      /* Superblock position */
-    uint8_t     i_version;	/* inode version */
-	uint8_t		i_flags;	/* inode flags: TYPE */
-	uint32_t	i_mode;		/* File mode */
-	uint64_t	i_ino;		/* inode number */
-	uint16_t	i_uid;		/* owner's user id */
-	uint16_t	i_gid;		/* owner's group id */
-	uint16_t	i_hrd_lnk;	/* number of hard links */
-	uint32_t    i_atime; /* Archive Time */
-	uint32_t	i_mtime; /* Modified Time */
-	uint32_t	i_ctime; /* Creation Time */
-	uint32_t	i_size;		/* Number of bytes in file */
-	char    	i_name[HIFS_MAX_NAME_SIZE]; /* File name */
-	void		*i_private;  /* Private/Unpublished filesystrem member */
-	const struct inode_operations	*i_op;       /* operation */
-	const struct file_operations	*i_fop;	      /* file operation */
-	/* address begin - end block, range exclusive: addres end (last block) does not belogs to extend! */
-	uint32_t	i_addrb[HIFS_INODE_TSIZE];	/* Start block of extend ranges */
-	uint32_t	i_addre[HIFS_INODE_TSIZE];	/* End block of extend ranges */
-	uint32_t	i_blocks;	/* Number of blocks */
-	uint32_t	i_bytes;	/* Number of bytes */
-};
-
-struct hifs_inode_user 
 {
 	//const struct super_block	i_sb;      /* Superblock position */
     uint8_t     i_version;	/* inode version */
@@ -223,6 +208,7 @@ struct hifs_inode_user
 	uint32_t	i_addre[HIFS_INODE_TSIZE];	/* End block of extend ranges */
 	uint32_t	i_blocks;	/* Number of blocks */
 	uint32_t	i_bytes;	/* Number of bytes */
+	uint8_t		i_links;    /* Number of links to an inode */
 };
 
 
@@ -243,7 +229,113 @@ struct hifs_cache_bitmap {
 	uint8_t dirty;
 };
 
+struct hifs_superblock {
+	__le32	s_inodes_count;         /* total inodes */
+	__le32	s_blocks_count;         /* total blocks */
+	__le32	s_r_blocks_count;       /* reserved blocks */
+	__le32	s_free_blocks_count;    /* free blocks */
+	__le32	s_free_inodes_count;    /* free inodes */
+	__le32	s_first_data_block;     /* first data block */
+	__le32	s_log_block_size;       /* block size = 1024<<s_log_block_size */
+	__le32	s_log_frag_size;        /* s_log_frag_size (obsolete in ext3+) */
+	__le32	s_blocks_per_group;
+	__le32	s_frags_per_group;
+	__le32	s_inodes_per_group;
+	__le32	s_mtime;                /* last mount (UNIX epoch) */
+	__le32	s_wtime;                /* last write */
+	__le16	s_mnt_count;            /* mounts since fsck */
+	__le16	s_max_mnt_count;        /* max mounts before fsck */
+	__le16	s_magic;                /* must equal EXT2_SUPER_MAGIC (0xEF53) */
+	__le16	s_state;                /* clean/dirty flags */
+	__le16	s_errors;               /* behavior on errors */
+	__le16	s_minor_rev_level;      /* minor revision */
+	__le32	s_lastcheck;            /* last fsck time */
+	__le32	s_checkinterval;        /* max interval between fscks */
+	__le32	s_creator_os;           /* creator OS */
+	__le32	s_rev_level;            /* major revision */
+	__le16	s_def_resuid;           /* default reserved UID */
+	__le16	s_def_resgid;           /* default reserved GID */
 
+	/* EXT2_DYNAMIC_REV (>=1) additions */
+	__le32	s_first_ino;            /* first non-reserved inode */
+	__le16	s_inode_size;           /* size of each inode structure */
+	__le16	s_block_group_nr;       /* block group this superblock is in */
+	__le32  s_feature_compat;       /* compatible feature flags */
+	__le32  s_feature_incompat;     /* incompatible feature flags */
+	__le32  s_feature_ro_compat;    /* read-only-compatible features */
+	__u8	s_uuid[16];             /* filesystem UUID */
+	char	s_volume_name[16];      /* volume label (not null-terminated) */
+	char	s_last_mounted[64];     /* last mount path */
+	__le32	s_algorithm_usage_bitmap; /* for compression (unused) */
+
+	/* Performance hints */
+	__u8	s_prealloc_blocks;      /* # of blocks to preallocate */
+	__u8	s_prealloc_dir_blocks;  /* # to preallocate for dirs */
+	__u16	s_reserved_gdt_blocks;  /* number of reserved GDT blocks */
+
+	/* Directory hashing */
+	__le32	s_hash_seed[4];
+	__u8	s_def_hash_version;
+	__u8	s_reserved_char_pad;
+	__le16	s_reserved_word_pad;
+
+	/* Journaling backup */
+	__le32	s_default_mount_opts;
+	__le32	s_first_meta_bg;
+	__le32	s_mkfs_time;
+	__le32	s_jnl_blocks[17];
+
+	/* EXT4 (64-bit) additions follow */
+	__le32	s_blocks_count_hi;
+	__le32	s_r_blocks_count_hi;
+	__le32	s_free_blocks_hi;
+	__le16	s_min_extra_isize;
+	__le16	s_want_extra_isize;
+	__le32	s_flags;
+	__le16	s_raid_stride;
+	__le16	s_mmp_interval;
+	__le64	s_mmp_block;
+	__le32	s_raid_stripe_width;
+	__u8	s_log_groups_per_flex;
+	__u8	s_checksum_type;
+	__u8	s_encryption_level;
+	__u8	s_reserved_pad;
+	__le64	s_kbytes_written;
+	__le32	s_snapshot_inum;
+	__le32	s_snapshot_id;
+	__le64	s_snapshot_r_blocks_count;
+	__le32	s_snapshot_list;
+	__le32	s_error_count;
+	__le32	s_first_error_time;
+	__le32	s_first_error_ino;
+	__le64	s_first_error_block;
+	char	s_first_error_func[32];
+	__le32	s_first_error_line;
+	__le32	s_last_error_time;
+	__le32	s_last_error_ino;
+	__le64	s_last_error_block;
+	char	s_last_error_func[32];
+	__le32	s_last_error_line;
+	__le32	s_mount_opts;
+	__le32	s_usr_quota_inum;
+	__le32	s_grp_quota_inum;
+	__le32	s_overhead_blocks;
+	__le32	s_backup_bgs[2];
+	__le32	s_encrypt_algos[4];
+	__le32	s_encrypt_pw_salt[4];
+	__le32	s_lpf_ino;
+	__le32	s_prj_quota_inum;
+	__le32  s_checksum_seed;
+	__u8	s_wtime_hi;
+	__u8	s_mtime_hi;
+	__u8	s_mkfs_time_hi;
+	__u8	s_lastcheck_hi;
+	__u8	s_first_error_time_hi;
+	__u8	s_last_error_time_hi;
+	__u8	s_padding1[2];
+	__le32	s_reserved[96];         /* must fill superblock to 1024 bytes */
+	__le32	s_checksum;             /* superblock checksum */
+};
 
 /***********************
  * END Hive FS Structures

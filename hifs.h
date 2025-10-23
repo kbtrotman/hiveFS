@@ -67,11 +67,11 @@ int hifs_comm_init(void);
 void hifs_comm_exit(void);
 int hifs_cmd_queue_push(const struct hifs_cmds *msg);
 int hifs_cmd_queue_push_cstr(const char *command);
-int hifs_inode_queue_push(const struct hifs_inode_user *msg);
+int hifs_inode_queue_push(const struct hifs_inode *msg);
 int hifs_inode_queue_push_from_inode(const struct hifs_inode *inode);
-void hifs_prepare_inode_user(struct hifs_inode_user *dst, const struct hifs_inode *src);
+void hifs_prepare_inode_user(struct hifs_inode *dst, const struct hifs_inode *src);
 int hifs_cmd_response_dequeue(struct hifs_cmds *msg, bool nonblock);
-int hifs_inode_response_dequeue(struct hifs_inode_user *msg, bool nonblock);
+int hifs_inode_response_dequeue(struct hifs_inode *msg, bool nonblock);
 
 /* hifs_superblock.c */
 void hifs_save_sb(struct super_block *sb);
