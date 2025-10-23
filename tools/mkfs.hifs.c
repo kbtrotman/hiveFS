@@ -167,7 +167,7 @@ static uint32_t log_block_size(uint32_t block_size)
 	return log;
 }
 
-static void init_superblock(struct hifs_superblock *sb,
+static void init_superblock(struct hifs_disk_superblock *sb,
 			    uint64_t blocks,
 			    uint32_t block_size,
 			    const char *label,
@@ -350,7 +350,7 @@ static int create_filesystem(const char *path,
 		bitmap_mark(dirty_bmp, reserved_blocks[i]);
 	}
 
-	struct hifs_superblock sb;
+	struct hifs_disk_superblock sb;
 	init_superblock(&sb, blocks, block_size, label, mount_point);
 
 	struct hifs_inode root_inode;

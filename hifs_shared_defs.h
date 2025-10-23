@@ -22,7 +22,6 @@ typedef uint64_t __u64;
 typedef uint32_t __u32;
 typedef uint16_t __u16;
 typedef uint8_t  __u8;
-#define __bitwise
 typedef uint64_t __le64;
 typedef uint32_t __le32;
 typedef uint16_t __le16;
@@ -80,6 +79,10 @@ typedef uint16_t __le16;
 #define HIFS_Q_PROTO_CMD_FILE_SEND   "file_send"
 #define HIFS_Q_PROTO_CMD_ENGINE_VERS "engine_version"
 #define HIFS_Q_PROTO_CMD_TEST        "test_cmd"
+#define HIFS_Q_PROTO_CMD_LINK_UP     "link_up"
+#define HIFS_Q_PROTO_CMD_LINK_INIT   "link_init"
+#define HIFS_Q_PROTO_CMD_LINK_READY  "link_ready"
+#define HIFS_Q_PROTO_CMD_LINK_DOWN   "link_down"
 
 enum hifs_module{HIFS_COMM_PROGRAM_KERN_MOD, HIFS_COMM_PROGRAM_USER_HICOMM};
 enum hifs_queue_direction{HIFS_COMM_TO_USER, HIFS_COMM_FROM_USER};
@@ -112,7 +115,7 @@ struct hifs_comm_status {
 #endif
 };
 
-enum hifs_link_state{HIFS_COMM_LINK_DOWN, HIFS_COMM_LINK_UP};
+enum hifs_link_state { HIFS_COMM_LINK_DOWN, HIFS_COMM_LINK_PARTIAL, HIFS_COMM_LINK_UP };
 struct hifs_link {
     enum hifs_link_state state;
     int last_check;
@@ -229,7 +232,7 @@ struct hifs_cache_bitmap {
 	uint8_t dirty;
 };
 
-struct hifs_superblock {
+struct hifs_disk_superblock {
 	__le32	s_inodes_count;         /* total inodes */
 	__le32	s_blocks_count;         /* total blocks */
 	__le32	s_r_blocks_count;       /* reserved blocks */

@@ -8,6 +8,7 @@
  */
 
 #include "hi_command.h"
+#include "sql/hi_command_sql.h"
 
 static bool hifs_command_equals(const struct hifs_cmds *cmd, const char *name)
 {
@@ -28,6 +29,23 @@ int hifs_handle_command(int fd, const struct hifs_cmds *cmd)
 		return -EINVAL;
 
 	hifs_info("Command received: \"%s\" (%d bytes)", cmd->cmd, cmd->count);
+
+	if (hifs_command_equals(cmd, HIFS_Q_PROTO_CMD_LINK_INIT)) {
+		init_hive_link();
+		if (sqldb.sql_init) {
+			if (hifs_comm_send_cmd_string(fd, HIFS_Q_PROTO_CMD_LINK_READY) != 0)
+				hifs_err("Failed to notify kernel that link is ready");
+		} else {
+			if (hifs_comm_send_cmd_string(fd, HIFS_Q_PROTO_CMD_LINK_DOWN) != 0)
+				hifs_err("Failed to notify kernel that link is down");
+		}
+		return 0;
+	}
+
+	if (hifs_command_equals(cmd, HIFS_Q_PROTO_CMD_LINK_DOWN)) {
+		close_hive_link();
+		return 0;
+	}
 
 	if (hifs_command_equals(cmd, HIFS_Q_PROTO_CMD_TEST)) {
 		struct hifs_inode inode;
@@ -78,6 +96,8 @@ const char *hifs_link_state_string(enum hifs_link_state state)
 	switch (state) {
 	case HIFS_COMM_LINK_UP:
 		return "up";
+	case HIFS_COMM_LINK_PARTIAL:
+		return "partial";
 	case HIFS_COMM_LINK_DOWN:
 	default:
 		return "down";

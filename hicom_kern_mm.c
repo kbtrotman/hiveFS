@@ -471,6 +471,7 @@ int hifs_comm_init(void)
 	if (ret)
 		hifs_err("Failed to register comm device\n");
 
+
 	return ret;
 }
 

@@ -8,6 +8,7 @@
  */
 
 #include "hi_command.h"
+#include "sql/hi_command_sql.h"
 
 static int comm_fd = -1;
 
@@ -27,6 +28,9 @@ int main(int argc, char *argv[])
 	}
 
 	hifs_notice("Listening for commands via %s", HIFS_COMM_DEVICE_PATH);
+
+	if (hifs_comm_send_cmd_string(comm_fd, HIFS_Q_PROTO_CMD_LINK_UP) != 0)
+		hifs_warning("Failed to notify kernel that user link is up");
 
 	for (;;) {
 		ret = hifs_comm_recv_cmd(comm_fd, &cmd, false);
@@ -51,6 +55,9 @@ int main(int argc, char *argv[])
 	}
 
 out:
+	if (comm_fd >= 0)
+		hifs_comm_send_cmd_string(comm_fd, HIFS_Q_PROTO_CMD_LINK_DOWN);
+	close_hive_link();
 	hi_comm_safe_cleanup();
 	return exit_code;
 }
