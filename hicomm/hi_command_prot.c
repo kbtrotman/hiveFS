@@ -21,7 +21,7 @@ static bool hifs_command_equals(const struct hifs_cmds *cmd, const char *name)
 	return len == strlen(name) && strncmp(cmd->cmd, name, HIFS_MAX_CMD_SIZE) == 0;
 }
 
-int hifs_handle_command(int fd, const struct hifs_cmds *cmd)
+int hicomm_handle_command(int fd, const struct hifs_cmds *cmd)
 {
 	int ret = 0;
 
@@ -33,10 +33,10 @@ int hifs_handle_command(int fd, const struct hifs_cmds *cmd)
 	if (hifs_command_equals(cmd, HIFS_Q_PROTO_CMD_LINK_INIT)) {
 		init_hive_link();
 		if (sqldb.sql_init) {
-			if (hifs_comm_send_cmd_string(fd, HIFS_Q_PROTO_CMD_LINK_READY) != 0)
+			if (hicomm_send_cmd_str(fd, HIFS_Q_PROTO_CMD_LINK_READY) != 0)
 				hifs_err("Failed to notify kernel that link is ready");
 		} else {
-			if (hifs_comm_send_cmd_string(fd, HIFS_Q_PROTO_CMD_LINK_DOWN) != 0)
+			if (hicomm_send_cmd_str(fd, HIFS_Q_PROTO_CMD_LINK_DOWN) != 0)
 				hifs_err("Failed to notify kernel that link is down");
 		}
 		return 0;
@@ -51,7 +51,7 @@ int hifs_handle_command(int fd, const struct hifs_cmds *cmd)
 		struct hifs_inode inode;
 		int err;
 
-		ret = hifs_comm_recv_inode(fd, &inode, false);
+		ret = hicomm_comm_recv_inode(fd, &inode, false);
 		if (ret) {
 			if (ret == -EAGAIN)
 				return 0;
@@ -59,15 +59,15 @@ int hifs_handle_command(int fd, const struct hifs_cmds *cmd)
 			return ret;
 		}
 
-		hifs_print_inode(&inode);
+		hicomm_print_inode(&inode);
 
-		err = hifs_comm_send_inode(fd, &inode);
+		err = hicomm_comm_send_inode(fd, &inode);
 		if (err) {
 			hifs_err("Failed to send inode response: %d", err);
 			ret = err;
 		}
 
-		err = hifs_comm_send_cmd_string(fd, "test_ack");
+		err = hicomm_send_cmd_str(fd, "test_ack");
 		if (err) {
 			hifs_err("Failed to send command response: %d", err);
 			if (!ret)
@@ -78,7 +78,7 @@ int hifs_handle_command(int fd, const struct hifs_cmds *cmd)
 	return ret;
 }
 
-void hifs_print_inode(const struct hifs_inode *inode)
+void hicomm_print_inode(const struct hifs_inode *inode)
 {
 	if (!inode)
 		return;
