@@ -20,7 +20,7 @@ int hifs_thread_fn(void *data)
 	hifs_comm_link_notify_online();
 
 	while (!kthread_should_stop()) {
-		hicom_process_link_handshake();
+
 		ret = hifs_create_test_inode();
 		if (ret) {
 			hifs_warning("Failed to enqueue test inode: %d\n", ret);
@@ -28,11 +28,11 @@ int hifs_thread_fn(void *data)
 			struct hifs_cmds rsp;
 			struct hifs_inode inode_rsp;
 
-			ret = hifs_cmd_response_dequeue(&rsp, true);
+			ret = hifs_pop_cmd_inbound(&rsp, true);
 			if (!ret)
 				hifs_info("Received response \"%s\" from user space\n", rsp.cmd);
 
-			ret = hifs_inode_response_dequeue(&inode_rsp, true);
+			ret = hifs_pop_inode_inbound(&inode_rsp, true);
 			if (!ret)
 				hifs_info("Received inode response %llu \"%s\"\n",
 					  (unsigned long long)inode_rsp.i_ino,

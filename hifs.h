@@ -51,6 +51,36 @@
 
 */
 
+#define hifs_fifo_len_locked(fifo, lock)                     \
+({                                                           \
+    unsigned long __flags;                                   \
+    unsigned int __len;                                      \
+    spin_lock_irqsave((lock), __flags);                      \
+    __len = kfifo_len((fifo));                               \
+    spin_unlock_irqrestore((lock), __flags);                 \
+    __len;                                                   \
+})
+
+#define hifs_fifo_push_locked(fifo, lock, wq, msg)           \
+({                                                           \
+    unsigned long __flags;                                   \
+    int __ret = 0;                                           \
+    if (!(msg)) {                                            \
+        __ret = -EINVAL;                                     \
+    } else {                                                 \
+        spin_lock_irqsave((lock), __flags);                  \
+        if (!kfifo_is_full((fifo)))                          \
+            kfifo_in((fifo), (msg), 1);                      \
+        else                                                 \
+            __ret = -ENOSPC;                                 \
+        spin_unlock_irqrestore((lock), __flags);             \
+        if (!__ret)                                          \
+            wake_up_interruptible((wq));                     \
+    }                                                        \
+    __ret;                                                   \
+})
+
+// Prototypes Here:
 /*hifs_kern.c*/
 int hifs_thread_fn(void *data);
 int hifs_start_queue_thread(void);
@@ -66,13 +96,15 @@ void hicom_process_link_handshake(void);
 /*hicom_kern_mm.c*/
 int hifs_comm_init(void);
 void hifs_comm_exit(void);
-int hifs_cmd_queue_push(const struct hifs_cmds *msg);
-int hifs_cmd_queue_push_cstr(const char *command);
-int hifs_inode_queue_push(const struct hifs_inode *msg);
-int hifs_inode_queue_push_from_inode(const struct hifs_inode *inode);
+int hifs_cmd_fifo_out_push(const struct hifs_cmds *msg);
+int hifs_cmd_fifo_out_push_cstr(const char *command);
+int hifs_inode_fifo_out_push(const struct hifs_inode *msg);
+int hifs_inode_fifo_out_push_from_inode(const struct hifs_inode *inode);
 void hifs_prepare_inode_user(struct hifs_inode *dst, const struct hifs_inode *src);
-int hifs_cmd_response_dequeue(struct hifs_cmds *msg, bool nonblock);
-int hifs_inode_response_dequeue(struct hifs_inode *msg, bool nonblock);
+int hifs_cmd_fifo_in_push(const struct hifs_cmds *msg);
+int hifs_inode_fifo_in_push(const struct hifs_inode *msg);
+int hifs_pop_cmd_inbound(struct hifs_cmds *msg, bool nonblock);
+int hifs_pop_inode_inbound(struct hifs_inode *msg, bool nonblock);
 
 /* hifs_superblock.c */
 void hifs_save_sb(struct super_block *sb);
@@ -169,35 +201,5 @@ struct hifs_olt
 /***********************
  * Hive FS Log Functions
  ***********************/
-
-#define hifs_emerg(f, a...)						\
-		printk(KERN_EMERG "hive-fs: EMERGENCY (file: %s, line: %d): funct: %s:\n", __FILE__, __LINE__, __func__); 	    \
-		printk( KERN_EMERG"hive-fs: EMERGENCY " f "\n", ## a);
-
-#define hifs_alert(f, a...)	                    \
-		printk(KERN_ALERT "hive-fs: ALERT (file: %s, line: %d): funct: %s:\n", __FILE__, __LINE__, __func__);		    \
-		printk(KERN_ALERT "hive-fs: ALERT " f "\n", ## a);
-
-#define hifs_crit(f, a...)	                    \
-		printk(KERN_CRIT "hive-fs: CRITICAL (file: %s, line: %d): funct: %s:\n",	__FILE__, __LINE__, __func__);		\
-		printk(KERN_CRIT "hive-fs: CRITICAL " f "\n", ##  a);
-
-#define hifs_err(f, a...)	                    \
-		printk(KERN_ERR "hive-fs: ERROR (file: %s, line: %d): funct: %s:\n",	__FILE__, __LINE__, __func__);			\
-		printk(KERN_ERR "hive-fs: ERROR " f "\n", ## a);
-
-#define hifs_warning(f, a...)	                \
-		printk(KERN_WARNING "hive-fs: WARNING (file: %s, line: %d): funct: %s:\n", __FILE__, __LINE__, __func__);	    \
-		printk(KERN_WARNING "hive-fs: WARNING " f "\n", ## a);
-
-#define hifs_notice(f, a...)	                \
-		printk(KERN_NOTICE "hive-fs: NOTICE (file: %s, line: %d): funct: %s:\n",	__FILE__, __LINE__, __func__);		\
-		printk(KERN_NOTICE "hive-fs: NOTICE " f "\n", ## a);
-
-#define hifs_info(f, a...)	                    \
-		printk(KERN_INFO "hive-fs: INFO (file: %s, line: %d): funct: %s:\n",	__FILE__, __LINE__, __func__);			\
-		printk(KERN_INFO "hive-fs: INFO " f "\n", ## a);
-
-#define hifs_debug(f, a...)		                \
-		printk(KERN_DEBUG "hive-fs: DEBUG (file: %s, line: %d): funct: %s:\n", __FILE__, __LINE__, __func__);		    \
-		printk(KERN_DEBUG "hive-fs: DEBUG " f "\n", ## a)
+#define HIFS_LOG_FMT(fmt) "%s:%d:%s: " fmt
+#define HIFS_LOG_ARGS      __FILE__, __LINE__, __func__
