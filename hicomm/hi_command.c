@@ -13,7 +13,7 @@
 static int comm_fd = -1;
 
 
-void hifs_log_user(int level, const char *fmt, ...)
+void hicomm_log(int level, const char *fmt, ...)
 {
     va_list ap;
     va_start(ap, fmt);
@@ -41,21 +41,21 @@ int main(int argc, char *argv[])
 	(void)argc;
 	(void)argv;
     
-    openlog("hivefs", LOG_PID | LOG_NDELAY, LOG_USER); 
+    openlog("hi_command", LOG_PID | LOG_NDELAY, LOG_USER); 
 
-	comm_fd = hifs_comm_open(false);
+	comm_fd = hicomm_comm_open(false);
 	if (comm_fd < 0) {
-		hifs_err("Unable to open communication device");
+		hifs_err("Unable to open communication device. Is the kernel module loaded first?");
 		return EXIT_FAILURE;
 	}
 
 	hifs_notice("Listening for commands via %s", HIFS_COMM_DEVICE_PATH);
 
-	if (hifs_comm_send_cmd_string(comm_fd, HIFS_Q_PROTO_CMD_LINK_UP) != 0)
+	if (hicomm_send_cmd_str(comm_fd, HIFS_Q_PROTO_CMD_LINK_UP) != 0)
 		hifs_warning("Failed to notify kernel that user link is up");
 
 	for (;;) {
-		ret = hifs_comm_recv_cmd(comm_fd, &cmd, false);
+		ret = hicomm_recv_cmd(comm_fd, &cmd, false);
 		if (ret == -EINTR)
 			continue;
 		if (ret) {
@@ -68,7 +68,7 @@ int main(int argc, char *argv[])
 			goto out;
 		}
 
-		ret = hifs_handle_command(comm_fd, &cmd);
+		ret = hicomm_handle_command(comm_fd, &cmd);
 		if (ret && ret != -EAGAIN) {
 			hifs_err("Command handling failed: %d", ret);
 			exit_code = EXIT_FAILURE;
@@ -78,9 +78,9 @@ int main(int argc, char *argv[])
 
 out:
 	if (comm_fd >= 0)
-		hifs_comm_send_cmd_string(comm_fd, HIFS_Q_PROTO_CMD_LINK_DOWN);
+		hicomm_send_cmd_str(comm_fd, HIFS_Q_PROTO_CMD_LINK_DOWN);
 	close_hive_link();
-	hi_comm_safe_cleanup();
+	hicomm_safe_cleanup();
     closelog();
 	return exit_code;
 }

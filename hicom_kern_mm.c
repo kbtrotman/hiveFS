@@ -235,7 +235,7 @@ static const struct file_operations hifs_comm_fops = {
 	.unlocked_ioctl = hifs_comm_ioctl,
 	.compat_ioctl = hifs_comm_ioctl,
 	.poll = hifs_fifo_poll,
-	.llseek = no_llseek,
+	.llseek = noop_llseek,
 };
 
 static struct miscdevice hifs_comm_device = {

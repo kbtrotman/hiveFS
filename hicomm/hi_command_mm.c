@@ -19,7 +19,7 @@ static int resolve_fd(int fd)
 	return comm_fd;
 }
 
-int hifs_comm_open(bool nonblock)
+int hicomm_comm_open(bool nonblock)
 {
 	int flags = O_RDWR;
 
@@ -35,7 +35,7 @@ int hifs_comm_open(bool nonblock)
 	return comm_fd;
 }
 
-void hifs_comm_close(int fd)
+void hicomm_comm_close(int fd)
 {
 	int target = resolve_fd(fd);
 
@@ -61,7 +61,7 @@ static int hifs_comm_ioctl_common(int fd, unsigned long request, void *arg)
 	return 0;
 }
 
-int hifs_comm_recv_cmd(int fd, struct hifs_cmds *cmd, bool nonblock)
+int hicomm_recv_cmd(int fd, struct hifs_cmds *cmd, bool nonblock)
 {
 	int target = resolve_fd(fd);
 
@@ -81,7 +81,7 @@ int hifs_comm_recv_cmd(int fd, struct hifs_cmds *cmd, bool nonblock)
 	return hifs_comm_ioctl_common(target, HIFS_IOCTL_CMD_DEQUEUE, cmd);
 }
 
-int hifs_comm_recv_inode(int fd, struct hifs_inode *inode, bool nonblock)
+int hicomm_comm_recv_inode(int fd, struct hifs_inode *inode, bool nonblock)
 {
 	int target = resolve_fd(fd);
 
@@ -101,7 +101,7 @@ int hifs_comm_recv_inode(int fd, struct hifs_inode *inode, bool nonblock)
 	return hifs_comm_ioctl_common(target, HIFS_IOCTL_INODE_DEQUEUE, inode);
 }
 
-int hifs_comm_get_status(int fd, struct hifs_comm_status *status)
+int hicomm_comm_get_status(int fd, struct hifs_comm_status *status)
 {
 	if (!status)
 		return -EINVAL;
@@ -110,7 +110,7 @@ int hifs_comm_get_status(int fd, struct hifs_comm_status *status)
 	return hifs_comm_ioctl_common(fd, HIFS_IOCTL_STATUS, status);
 }
 
-int hifs_comm_send_cmd(int fd, const struct hifs_cmds *cmd)
+int hicomm_comm_send_cmd(int fd, const struct hifs_cmds *cmd)
 {
 	if (!cmd)
 		return -EINVAL;
@@ -119,7 +119,7 @@ int hifs_comm_send_cmd(int fd, const struct hifs_cmds *cmd)
 				      (void *)cmd);
 }
 
-int hifs_comm_send_cmd_string(int fd, const char *cmd)
+int hicomm_send_cmd_str(int fd, const char *cmd)
 {
 	struct hifs_cmds msg;
 	size_t len;
@@ -132,10 +132,10 @@ int hifs_comm_send_cmd_string(int fd, const char *cmd)
 	msg.count = len;
 	strncpy(msg.cmd, cmd, sizeof(msg.cmd) - 1);
 
-	return hifs_comm_send_cmd(fd, &msg);
+	return hicomm_comm_send_cmd(fd, &msg);
 }
 
-int hifs_comm_send_inode(int fd, const struct hifs_inode *inode)
+int hicomm_comm_send_inode(int fd, const struct hifs_inode *inode)
 {
 	if (!inode)
 		return -EINVAL;
@@ -144,7 +144,7 @@ int hifs_comm_send_inode(int fd, const struct hifs_inode *inode)
 				      (void *)inode);
 }
 
-void hi_comm_safe_cleanup(void)
+void hicomm_safe_cleanup(void)
 {
-	hifs_comm_close(-1);
+	hicomm_comm_close(-1);
 }
