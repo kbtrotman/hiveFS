@@ -68,7 +68,7 @@ static int __init hifs_init(void)
         hifs_info("Filesystem registered to kernel\n");
     }
 
-    ret = hifs_comm_init();
+    ret = hifs_fifo_init();
     if (ret != 0) {
         hifs_err("Failed to initialise communications interface\n");
         goto failure;
@@ -94,7 +94,7 @@ static void __exit hifs_exit(void)
     int ret;
 
     hifs_stop_queue_thread();
-    hifs_comm_exit();
+    hifs_fifo_exit();
 
     ret = unregister_filesystem(&hifs_type);
     if (ret != 0) {

@@ -80,6 +80,44 @@
     __ret;                                                   \
 })
 
+/* Pop one element from a typed KFIFO with locking and optional blocking.
+ * fifo:   &kfifo_var
+ * lock:   &spinlock_var
+ * wq:     wait_queue_head_t variable (not a pointer)
+ * msg:    pointer to destination element (typed)
+ * nonblock: boolean; if true, do not sleep and return -EAGAIN when empty
+ * Returns 0 on success, or a negative errno.
+ */
+#define hifs_fifo_pop_locked(fifo, lock, wq, msg, nonblock)   \
+({                                                           \
+    int __ret;                                               \
+    if (!(msg)) {                                            \
+        __ret = -EINVAL;                                     \
+    } else {                                                 \
+        for (;;) {                                           \
+            unsigned long __flags;                           \
+            unsigned int __copied;                           \
+            spin_lock_irqsave((lock), __flags);              \
+            if (!kfifo_is_empty((fifo))) {                   \
+                __copied = kfifo_out((fifo), (msg), 1);      \
+                spin_unlock_irqrestore((lock), __flags);     \
+                __ret = (__copied == 1) ? 0 : -EFAULT;       \
+                break;                                       \
+            }                                                \
+            spin_unlock_irqrestore((lock), __flags);         \
+            if ((nonblock)) {                                \
+                __ret = -EAGAIN;                             \
+                break;                                       \
+            }                                                \
+            __ret = wait_event_interruptible((wq),           \
+                                !kfifo_is_empty((fifo)));    \
+            if (__ret)                                       \
+                break;                                       \
+        }                                                    \
+    }                                                        \
+    __ret;                                                   \
+})
+
 // Prototypes Here:
 /*hifs_kern.c*/
 int hifs_thread_fn(void *data);
@@ -94,17 +132,17 @@ void hicom_process_link_handshake(void);
 
 
 /*hicom_kern_mm.c*/
-int hifs_comm_init(void);
-void hifs_comm_exit(void);
+int hifs_fifo_init(void);
+void hifs_fifo_exit(void);
 int hifs_cmd_fifo_out_push(const struct hifs_cmds *msg);
 int hifs_cmd_fifo_out_push_cstr(const char *command);
 int hifs_inode_fifo_out_push(const struct hifs_inode *msg);
 int hifs_inode_fifo_out_push_from_inode(const struct hifs_inode *inode);
-void hifs_prepare_inode_user(struct hifs_inode *dst, const struct hifs_inode *src);
+void hifs_prepare_inode_4user(struct hifs_inode *dst, const struct hifs_inode *src);
 int hifs_cmd_fifo_in_push(const struct hifs_cmds *msg);
 int hifs_inode_fifo_in_push(const struct hifs_inode *msg);
-int hifs_pop_cmd_inbound(struct hifs_cmds *msg, bool nonblock);
-int hifs_pop_inode_inbound(struct hifs_inode *msg, bool nonblock);
+int hifs_cmd_fifo_in_pop(struct hifs_cmds *msg, bool nonblock);
+int hifs_inode_fifo_in_pop(struct hifs_inode *msg, bool nonblock);
 
 /* hifs_superblock.c */
 void hifs_save_sb(struct super_block *sb);
