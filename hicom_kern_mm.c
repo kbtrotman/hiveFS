@@ -73,7 +73,7 @@ int hifs_inode_fifo_in_push(const struct hifs_inode *msg)
     return hifs_fifo_push_locked(&hifs_inode_in_fifo, &hifs_inode_in_lock, &hifs_inode_in_wait, msg);
 }
 
-// Forget the structure and just push a quick command.
+// Helper. Forget the structure and just push a quick command.Extensible protocol.
 int hifs_cmd_fifo_out_push_cstr(const char *command)
 {
 	struct hifs_cmds msg;
@@ -90,7 +90,7 @@ int hifs_cmd_fifo_out_push_cstr(const char *command)
     return hifs_cmd_fifo_out_push(&msg);
 }
 
-// Push an inode that's in the kernel's structure and wrap it, don't convert it to a hifs_inode.
+// Helper. Push an inode that's in the kernel's structure and wrap it, don't convert it to a hifs_inode.
 int hifs_inode_fifo_out_push_from_inode(const struct hifs_inode *inode)
 {
 	struct hifs_inode msg;
@@ -98,11 +98,11 @@ int hifs_inode_fifo_out_push_from_inode(const struct hifs_inode *inode)
 	if (!inode)
 		return -EINVAL;
 
-	hifs_prepare_inode_user(&msg, inode);
+	hifs_prepare_inode_4user(&msg, inode);
     return hifs_inode_fifo_out_push(&msg);
 }
 
-void hifs_prepare_inode_user(struct hifs_inode *dst, const struct hifs_inode *src)
+void hifs_prepare_inode_4user(struct hifs_inode *dst, const struct hifs_inode *src)
 {
 	if (!dst || !src)
 		return;
@@ -127,128 +127,24 @@ void hifs_prepare_inode_user(struct hifs_inode *dst, const struct hifs_inode *sr
 	memcpy(dst->i_addre, src->i_addre, sizeof(dst->i_addre));
 }
 
-static int hifs_pop_last_outbound_cmd_mesg(struct hifs_cmds *msg, bool nonblock)
+static int hifs_cmd_fifo_out_pop(struct hifs_cmds *msg, bool nonblock)
 {
-	int ret;
-
-	if (!msg)
-		return -EINVAL;
-
-	for (;;) {
-		unsigned long flags;
-		unsigned int copied;
-
-		spin_lock_irqsave(&hifs_cmd_lock, flags);
-		if (!kfifo_is_empty(&hifs_cmd_fifo)) {
-			copied = kfifo_out(&hifs_cmd_fifo, msg, 1);
-			spin_unlock_irqrestore(&hifs_cmd_lock, flags);
-			if (copied == 1)
-				return 0;
-			return -EFAULT;
-		}
-		spin_unlock_irqrestore(&hifs_cmd_lock, flags);
-
-		if (nonblock)
-			return -EAGAIN;
-
-		ret = wait_event_interruptible(hifs_cmd_wait,
-					       !kfifo_is_empty(&hifs_cmd_fifo));
-		if (ret)
-			return ret;
-	}
+    return hifs_fifo_pop_locked(&hifs_cmd_fifo, &hifs_cmd_lock, hifs_cmd_wait, msg, nonblock);
 }
 
-static int hifs_pop_last_outbound_inode_mesg(struct hifs_inode *msg, bool nonblock)
+static int hifs_inode_fifo_out_pop(struct hifs_inode *msg, bool nonblock)
 {
-	int ret;
-
-	if (!msg)
-		return -EINVAL;
-
-	for (;;) {
-		unsigned long flags;
-		unsigned int copied;
-
-		spin_lock_irqsave(&hifs_inode_lock, flags);
-		if (!kfifo_is_empty(&hifs_inode_fifo)) {
-			copied = kfifo_out(&hifs_inode_fifo, msg, 1);
-			spin_unlock_irqrestore(&hifs_inode_lock, flags);
-			if (copied == 1)
-				return 0;
-			return -EFAULT;
-		}
-		spin_unlock_irqrestore(&hifs_inode_lock, flags);
-
-		if (nonblock)
-			return -EAGAIN;
-
-		ret = wait_event_interruptible(hifs_inode_wait,
-					       !kfifo_is_empty(&hifs_inode_fifo));
-		if (ret)
-			return ret;
-	}
+    return hifs_fifo_pop_locked(&hifs_inode_fifo, &hifs_inode_lock, hifs_inode_wait, msg, nonblock);
 }
 
-int hifs_pop_cmd_inbound(struct hifs_cmds *msg, bool nonblock)
+int hifs_cmd_fifo_in_pop(struct hifs_cmds *msg, bool nonblock)
 {
-	int ret;
-
-	if (!msg)
-		return -EINVAL;
-
-	for (;;) {
-		unsigned long flags;
-		unsigned int copied;
-
-		spin_lock_irqsave(&hifs_cmd_in_lock, flags);
-		if (!kfifo_is_empty(&hifs_cmd_in_fifo)) {
-			copied = kfifo_out(&hifs_cmd_in_fifo, msg, 1);
-			spin_unlock_irqrestore(&hifs_cmd_in_lock, flags);
-			if (copied == 1)
-				return 0;
-			return -EFAULT;
-		}
-		spin_unlock_irqrestore(&hifs_cmd_in_lock, flags);
-
-		if (nonblock)
-			return -EAGAIN;
-
-		ret = wait_event_interruptible(hifs_cmd_in_wait,
-					       !kfifo_is_empty(&hifs_cmd_in_fifo));
-		if (ret)
-			return ret;
-	}
+    return hifs_fifo_pop_locked(&hifs_cmd_in_fifo, &hifs_cmd_in_lock, hifs_cmd_in_wait, msg, nonblock);
 }
 
-int hifs_pop_inode_inbound(struct hifs_inode *msg, bool nonblock)
+int hifs_inode_fifo_in_pop(struct hifs_inode *msg, bool nonblock)
 {
-	int ret;
-
-	if (!msg)
-		return -EINVAL;
-
-	for (;;) {
-		unsigned long flags;
-		unsigned int copied;
-
-		spin_lock_irqsave(&hifs_inode_in_lock, flags);
-		if (!kfifo_is_empty(&hifs_inode_in_fifo)) {
-			copied = kfifo_out(&hifs_inode_in_fifo, msg, 1);
-			spin_unlock_irqrestore(&hifs_inode_in_lock, flags);
-			if (copied == 1)
-				return 0;
-			return -EFAULT;
-		}
-		spin_unlock_irqrestore(&hifs_inode_in_lock, flags);
-
-		if (nonblock)
-			return -EAGAIN;
-
-		ret = wait_event_interruptible(hifs_inode_in_wait,
-					       !kfifo_is_empty(&hifs_inode_in_fifo));
-		if (ret)
-			return ret;
-	}
+    return hifs_fifo_pop_locked(&hifs_inode_in_fifo, &hifs_inode_in_lock, hifs_inode_in_wait, msg, nonblock);
 }
 
 static long hifs_comm_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
@@ -259,7 +155,7 @@ static long hifs_comm_ioctl(struct file *file, unsigned int cmd, unsigned long a
 	switch (cmd) {
 	case HIFS_IOCTL_CMD_DEQUEUE: {
 		struct hifs_cmds msg;
-		int ret = hifs_pop_last_outbound_cmd_mesg(&msg, nonblock);
+		int ret = hifs_cmd_fifo_out_pop(&msg, nonblock);
 
 		if (ret)
 			return ret;
@@ -271,7 +167,7 @@ static long hifs_comm_ioctl(struct file *file, unsigned int cmd, unsigned long a
 	}
 	case HIFS_IOCTL_INODE_DEQUEUE: {
 		struct hifs_inode msg;
-		int ret = hifs_pop_last_outbound_inode_mesg(&msg, nonblock);
+		int ret = hifs_inode_fifo_out_pop(&msg, nonblock);
 
 		if (ret)
 			return ret;
@@ -315,7 +211,7 @@ static long hifs_comm_ioctl(struct file *file, unsigned int cmd, unsigned long a
 	}
 }
 
-static __poll_t hifs_comm_poll(struct file *file, poll_table *wait)
+static __poll_t hifs_fifo_poll(struct file *file, poll_table *wait)
 {
 	__poll_t mask = 0;
 
@@ -334,17 +230,12 @@ static __poll_t hifs_comm_poll(struct file *file, poll_table *wait)
 	return mask;
 }
 
-static loff_t hifs_comm_no_llseek(struct file *file, loff_t offset, int whence)
-{
-	return -ESPIPE;
-}
-
 static const struct file_operations hifs_comm_fops = {
 	.owner = THIS_MODULE,
 	.unlocked_ioctl = hifs_comm_ioctl,
 	.compat_ioctl = hifs_comm_ioctl,
-	.poll = hifs_comm_poll,
-	.llseek = hifs_comm_no_llseek,
+	.poll = hifs_fifo_poll,
+	.llseek = no_llseek,
 };
 
 static struct miscdevice hifs_comm_device = {
@@ -353,7 +244,7 @@ static struct miscdevice hifs_comm_device = {
 	.fops = &hifs_comm_fops,
 };
 
-int hifs_comm_init(void)
+int hifs_fifo_init(void)
 {
 	int ret;
 
@@ -369,7 +260,7 @@ int hifs_comm_init(void)
     return ret;
 }
 
-void hifs_comm_exit(void)
+void hifs_fifo_exit(void)
 {
 	unsigned long flags;
 

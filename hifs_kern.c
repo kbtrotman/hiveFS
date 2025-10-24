@@ -28,11 +28,11 @@ int hifs_thread_fn(void *data)
 			struct hifs_cmds rsp;
 			struct hifs_inode inode_rsp;
 
-			ret = hifs_pop_cmd_inbound(&rsp, true);
+			ret = hifs_cmd_fifo_in_pop(&rsp, true);
 			if (!ret)
 				hifs_info("Received response \"%s\" from user space\n", rsp.cmd);
 
-			ret = hifs_pop_inode_inbound(&inode_rsp, true);
+			ret = hifs_inode_fifo_in_pop(&inode_rsp, true);
 			if (!ret)
 				hifs_info("Received inode response %llu \"%s\"\n",
 					  (unsigned long long)inode_rsp.i_ino,
