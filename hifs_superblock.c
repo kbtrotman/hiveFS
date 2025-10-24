@@ -170,6 +170,7 @@ void hifs_save_sb(struct super_block *sb)
 
 	if (!info)
 		return;
+		
 
 	bh = hifs_bread_at(sb, HIFS_SUPER_OFFSET, &offset);
 	if (!bh)

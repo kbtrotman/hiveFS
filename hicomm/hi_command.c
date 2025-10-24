@@ -12,6 +12,26 @@
 
 static int comm_fd = -1;
 
+
+void hifs_log_user(int level, const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+
+    /* print to stderr/stdout */
+    FILE *stream = (level <= LOG_ERR) ? stderr : stdout;
+    vfprintf(stream, fmt, ap);
+    fputc('\n', stream);
+    fflush(stream);
+
+    /* send to syslog as well */
+    va_end(ap);
+    va_start(ap, fmt);
+    vsyslog(level, fmt, ap);
+    va_end(ap);
+}
+
+
 int main(int argc, char *argv[])
 {
 	struct hifs_cmds cmd;
@@ -20,6 +40,8 @@ int main(int argc, char *argv[])
 
 	(void)argc;
 	(void)argv;
+    
+    openlog("hivefs", LOG_PID | LOG_NDELAY, LOG_USER); 
 
 	comm_fd = hifs_comm_open(false);
 	if (comm_fd < 0) {
@@ -59,5 +81,6 @@ out:
 		hifs_comm_send_cmd_string(comm_fd, HIFS_Q_PROTO_CMD_LINK_DOWN);
 	close_hive_link();
 	hi_comm_safe_cleanup();
+    closelog();
 	return exit_code;
 }

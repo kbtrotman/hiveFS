@@ -18,13 +18,21 @@
 #include <time.h>
 #include <stdint.h>
 #define GET_TIME() (clock() * 1000 / CLOCKS_PER_SEC)
-typedef uint64_t __u64;
-typedef uint32_t __u32;
-typedef uint16_t __u16;
-typedef uint8_t  __u8;
-typedef uint64_t __le64;
-typedef uint32_t __le32;
-typedef uint16_t __le16;
+#endif
+
+
+#ifdef __KERNEL__
+#define HIFS_LOG(level, fmt, ...) printk(level "hivefs: " fmt "\n", ##__VA_ARGS__)
+#define HIFS_LOG_FMT(fmt) "%s:%d:%s: " fmt
+#define HIFS_LOG_ARGS __FILE__, __LINE__, __func__
+#define hifs_emerg(fmt, ...)   HIFS_LOG(KERN_EMERG,   HIFS_LOG_FMT(fmt), HIFS_LOG_ARGS, ##__VA_ARGS__)
+#define hifs_alert(fmt, ...)   HIFS_LOG(KERN_ALERT,   HIFS_LOG_FMT(fmt), HIFS_LOG_ARGS, ##__VA_ARGS__)
+#define hifs_crit(fmt, ...)    HIFS_LOG(KERN_CRIT,    HIFS_LOG_FMT(fmt), HIFS_LOG_ARGS, ##__VA_ARGS__)
+#define hifs_err(fmt, ...)     HIFS_LOG(KERN_ERR,     HIFS_LOG_FMT(fmt), HIFS_LOG_ARGS, ##__VA_ARGS__)
+#define hifs_warning(fmt, ...) HIFS_LOG(KERN_WARNING, HIFS_LOG_FMT(fmt), HIFS_LOG_ARGS, ##__VA_ARGS__)
+#define hifs_notice(fmt, ...)  HIFS_LOG(KERN_NOTICE,  HIFS_LOG_FMT(fmt), HIFS_LOG_ARGS, ##__VA_ARGS__)
+#define hifs_info(fmt, ...)    HIFS_LOG(KERN_INFO,    HIFS_LOG_FMT(fmt), HIFS_LOG_ARGS, ##__VA_ARGS__)
+#define hifs_debug(fmt, ...)   HIFS_LOG(KERN_DEBUG,   HIFS_LOG_FMT(fmt), HIFS_LOG_ARGS, ##__VA_ARGS__)
 #endif // __KERNEL__
 
 /******************************

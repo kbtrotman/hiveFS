@@ -16,6 +16,8 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdarg.h>
+#include <syslog.h>
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/poll.h>
@@ -29,14 +31,17 @@
 
 #define HIFS_COMM_DEVICE_PATH "/dev/" HIFS_COMM_DEVICE_NAME
 
-#define hifs_emerg(fmt, ...) fprintf(stderr, "hi_command: EMERG: " fmt "\n", ##__VA_ARGS__)
-#define hifs_alert(fmt, ...) fprintf(stderr, "hi_command: ALERT: " fmt "\n", ##__VA_ARGS__)
-#define hifs_crit(fmt, ...) fprintf(stderr, "hi_command: CRIT: " fmt "\n", ##__VA_ARGS__)
-#define hifs_err(fmt, ...) fprintf(stderr, "hi_command: ERROR: " fmt "\n", ##__VA_ARGS__)
-#define hifs_warning(fmt, ...) fprintf(stderr, "hi_command: WARN: " fmt "\n", ##__VA_ARGS__)
-#define hifs_notice(fmt, ...) fprintf(stdout, "hi_command: NOTICE: " fmt "\n", ##__VA_ARGS__)
-#define hifs_info(fmt, ...) fprintf(stdout, "hi_command: INFO: " fmt "\n", ##__VA_ARGS__)
-#define hifs_debug(fmt, ...) fprintf(stdout, "hi_command: DEBUG: " fmt "\n", ##__VA_ARGS__)
+void hifs_log_user(int level, const char *fmt, ...);
+
+/* Convenience macros mirroring the kernel names */
+#define hifs_emerg(fmt, ...)   hifs_log_user(LOG_EMERG,   "hivefs: " fmt, ##__VA_ARGS__)
+#define hifs_alert(fmt, ...)   hifs_log_user(LOG_ALERT,   "hivefs: " fmt, ##__VA_ARGS__)
+#define hifs_crit(fmt, ...)    hifs_log_user(LOG_CRIT,    "hivefs: " fmt, ##__VA_ARGS__)
+#define hifs_err(fmt, ...)     hifs_log_user(LOG_ERR,     "hivefs: " fmt, ##__VA_ARGS__)
+#define hifs_warning(fmt, ...) hifs_log_user(LOG_WARNING, "hivefs: " fmt, ##__VA_ARGS__)
+#define hifs_notice(fmt, ...)  hifs_log_user(LOG_NOTICE,  "hivefs: " fmt, ##__VA_ARGS__)
+#define hifs_info(fmt, ...)    hifs_log_user(LOG_INFO,    "hivefs: " fmt, ##__VA_ARGS__)
+#define hifs_debug(fmt, ...)   hifs_log_user(LOG_DEBUG,   "hivefs: " fmt, ##__VA_ARGS__)
 
 /* hi_command_mm.c */
 int hifs_comm_open(bool nonblock);
