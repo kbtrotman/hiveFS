@@ -78,19 +78,20 @@
 #define HIFS_Q_PROTO_USER_UP 1           // User connection is UP.
 
 #define HIFS_Q_PROTO_NUM_CMDS        9 //Max ENUM value of any command (same as max number of commands that exist).
-#define HIFS_Q_PROTO_CMD_FLUSH       "cache_flush_all"
-#define HIFS_Q_PROTO_CMD_BLOCK_RECV  "block_recv"
-#define HIFS_Q_PROTO_CMD_BLOCK_SEND  "block_send"
-#define HIFS_Q_PROTO_CMD_INODE_RECV  "inode_recv"
-#define HIFS_Q_PROTO_CMD_INODE_SEND  "inode_send"
-#define HIFS_Q_PROTO_CMD_FILE_RECV   "file_recv"
-#define HIFS_Q_PROTO_CMD_FILE_SEND   "file_send"
-#define HIFS_Q_PROTO_CMD_ENGINE_VERS "engine_version"
-#define HIFS_Q_PROTO_CMD_TEST        "test_cmd"
-#define HIFS_Q_PROTO_CMD_LINK_UP     "link_up"
-#define HIFS_Q_PROTO_CMD_LINK_INIT   "link_init"
-#define HIFS_Q_PROTO_CMD_LINK_READY  "link_ready"
-#define HIFS_Q_PROTO_CMD_LINK_DOWN   "link_down"
+#define HIFS_Q_PROTO_CMD_FLUSH          "cache_flush_all"
+#define HIFS_Q_PROTO_CMD_BLOCK_RECV     "block_recv"
+#define HIFS_Q_PROTO_CMD_BLOCK_SEND     "block_send"
+#define HIFS_Q_PROTO_CMD_INODE_RECV     "inode_recv"
+#define HIFS_Q_PROTO_CMD_INODE_SEND     "inode_send"
+#define HIFS_Q_PROTO_CMD_FILE_RECV      "file_recv"
+#define HIFS_Q_PROTO_CMD_FILE_SEND      "file_send"
+#define HIFS_Q_PROTO_CMD_ENGINE_VERS    "engine_version"
+#define HIFS_Q_PROTO_CMD_TEST           "test_cmd"
+#define HIFS_Q_PROTO_CMD_LINK_UP        "link_up"
+#define HIFS_Q_PROTO_CMD_LINK_INIT      "link_init"
+#define HIFS_Q_PROTO_CMD_LINK_READY     "link_ready"
+#define HIFS_Q_PROTO_CMD_LINK_DOWN      "link_down"
+#define HIFS_Q_PROTO_CMD_CACHELESS_MODE "cacheless_mode"
 
 enum hifs_module{HIFS_COMM_PROGRAM_KERN_MOD, HIFS_COMM_PROGRAM_USER_HICOMM};
 enum hifs_queue_direction{HIFS_COMM_TO_USER, HIFS_COMM_FROM_USER};

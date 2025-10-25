@@ -11,26 +11,19 @@
 /***********************
  * Database  Definitions
  ***********************/
-#ifndef HIFS_HAVE_MARIADB
-#define HIFS_HAVE_MARIADB 0
-#endif
 
-#if HIFS_HAVE_MARIADB
-#  if defined(__has_include)
-#    if __has_include(<mysql/mysql.h>)
-#      include <mysql/mysql.h>
-#    elif __has_include(<mariadb/mysql.h>)
-#      include <mariadb/mysql.h>
-#    else
-#      error "MariaDB client headers not found"
-#    endif
-#  else
+#if defined(__has_include)
+#  if __has_include(<mysql/mysql.h>)
 #    include <mysql/mysql.h>
+#  elif __has_include(<mariadb/mysql.h>)
+#    include <mariadb/mysql.h>
+#  else
+#    error "MariaDB client headers not found"
 #  endif
 #else
-typedef struct MYSQL MYSQL;
-typedef struct MYSQL_RES MYSQL_RES;
+#  include <mysql/mysql.h>
 #endif
+
 #include <stdbool.h>
 
 #define DB_HOST     "127.0.0.1"
@@ -43,7 +36,7 @@ typedef struct MYSQL_RES MYSQL_RES;
 
 #define NO_RECORDS 0x099
 
-#define MAX_QUERY_SIZE 512
+#define MAX_QUERY_SIZE 4096
 #define MAX_INSERT_SIZE 512
 
 /***********************
@@ -51,8 +44,12 @@ typedef struct MYSQL_RES MYSQL_RES;
  ***********************/
 #define MACHINE_INSERT(buffer, a, b, c, d, e, f, g, h) \
     snprintf(buffer, MAX_QUERY_SIZE, \
-             "INSERT INTO machines (name, machine_id, host_id, ip_address, os_name, os_version, os_release, machine_type) " \
-             "VALUES ('%s', '%s', %ld, '%s', '%s', '%s', '%s', '%s');", a, b, (long)(c), d, e, f, g, h)
+        "INSERT INTO machines (name, machine_id, host_id, ip_address, os_name, os_version, os_release, machine_type) " \
+        "VALUES ('%.*s', '%.*s', %ld, '%.*s', '%.*s', '%.*s', '%.*s', '%.*s') " \
+        "ON DUPLICATE KEY UPDATE name=VALUES(name), host_id=VALUES(host_id), ip_address=VALUES(ip_address), " \
+        "os_name=VALUES(os_name), os_version=VALUES(os_version), os_release=VALUES(os_release), machine_type=VALUES(machine_type);", \
+        255, safe_str(a), 255, safe_str(b), (long)(c), 255, safe_str(d), 255, safe_str(e), \
+        255, safe_str(f), 255, safe_str(g), 255, safe_str(h))
 
 #define MACHINE_GETINFO(buffer, a) \
     snprintf(buffer, MAX_QUERY_SIZE, \

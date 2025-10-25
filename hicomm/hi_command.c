@@ -31,6 +31,14 @@ void hicomm_log(int level, const char *fmt, ...)
     va_end(ap);
 }
 
+int hicomm_go_cacheless(void)
+{
+	char response = ' ';
+	hifs_notice("No superblocks registered for this host;\nI will proceed in cacheless mode or cntrl-C to exit and run mkfs.hifs to create a local cache.\nmkfs will submit a superblock to the hive.");
+	hifs_notice("Hit any key to continue in cache-less mode.");
+	scanf("%c", &response);
+	return hicomm_send_cmd_str(comm_fd, HIFS_Q_PROTO_CMD_CACHELESS_MODE);
+}	
 
 int main(int argc, char *argv[])
 {
@@ -53,6 +61,11 @@ int main(int argc, char *argv[])
 
 	if (hicomm_send_cmd_str(comm_fd, HIFS_Q_PROTO_CMD_LINK_UP) != 0)
 		hifs_warning("Failed to notify kernel that user link is up");
+
+	register_hive_host();
+	if (!hifs_get_hive_host_sbs()) {
+		hicomm_go_cacheless();
+	}
 
 	for (;;) {
 		ret = hicomm_recv_cmd(comm_fd, &cmd, false);
