@@ -260,6 +260,8 @@ struct hifs_cache_bitmap {
 	uint8_t dirty;
 };
 
+/* Cache-level superblock (local cache metadata). This is NOT sent
+ * to the cluster; it describes the cache layout on local storage. */
 struct hifs_disk_superblock {
 	__le32	s_generational_epoch;   /* epoch counter to control who made the last change in the sb, tie goes to latest s_wtime */
 	__le32	s_inodes_count;         /* total inodes */
@@ -367,6 +369,48 @@ struct hifs_disk_superblock {
 	__u8	s_padding1[2];
 	__le32	s_reserved[96];         /* must fill superblock to 1024 bytes */
 	__le32	s_checksum;             /* superblock checksum */
+};
+
+/* Remote-facing per-volume logical superblock (minimal fields used for
+ * reconciliation with the cluster). This is exchanged over the comm link.
+ * Do not confuse with the cache super above. */
+struct hifs_superblock {
+#ifdef __KERNEL__
+    __le32 s_rev_level;   /* epoch/generation */
+    __le32 s_wtime;       /* last write time (epoch) */
+    __le32 s_flags;       /* optional flags */
+#else
+    uint32_t s_rev_level;
+    uint32_t s_wtime;
+    uint32_t s_flags;
+#endif
+    char     s_volume_name[16]; /* optional label */
+};
+
+/* SB message wrapper carried over data FIFO for SB_SEND/SB_RECV. */
+struct hifs_sb_msg {
+#ifdef __KERNEL__
+    __u64 volume_id;              /* identifies the mount/volume */
+#else
+    uint64_t volume_id;
+#endif
+    struct hifs_superblock vsb;   /* logical super */
+};
+
+/* Volume table lives after the block bitmap by default. Each entry maps a
+ * volume_id to its logical superblock used for reconciliation between the
+ * cluster and with the local kernel VFS layer.
+ * */
+#define HIFS_VOLUME_TABLE_OFFSET   (HIFS_BLOCK_BITMAP_OFFSET + HIFS_DEFAULT_BLOCK_SIZE)
+#define HIFS_VOLUME_TABLE_MAX      1024
+
+struct hifs_volume_entry {
+#ifdef __KERNEL__
+    __le64 volume_id;            /* 0 means free */
+#else
+    uint64_t volume_id;
+#endif
+    struct hifs_superblock vsb;  /* minimal remote-facing super */
 };
 
 /***********************
