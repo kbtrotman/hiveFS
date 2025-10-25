@@ -18,7 +18,6 @@
 
 struct SQLDB sqldb;
 
-#if HIFS_HAVE_MARIADB
 
 static char *hifs_get_machine_id(void)
 {
@@ -412,61 +411,3 @@ int save_binary_data(char *data_block, char *hash)
 	return 0;
 }
 
-#else /* !HIFS_HAVE_MARIADB */
-
-void init_hive_link(void)
-{
-	hifs_err("MariaDB support not available at build time\n");
-}
-
-void close_hive_link(void)
-{
-	sqldb.sql_init = false;
-	sqldb.conn = NULL;
-}
-
-int get_hive_vers(void) { return 0; }
-
-MYSQL_RES *hifs_get_hive_host_data(char *machine_id)
-{
-	(void)machine_id;
-	return NULL;
-}
-
-int register_hive_host(void)
-{
-	hifs_err("MariaDB support not available; cannot register host\n");
-	return 0;
-}
-
-char *hifs_get_quoted_value(const char *in_str)
-{
-	return in_str ? strdup(in_str) : NULL;
-}
-
-char *hifs_get_unquoted_value(const char *in_str)
-{
-	return in_str ? strdup(in_str) : NULL;
-}
-
-void hifs_release_query(void) { }
-
-bool hifs_insert_data(const char *q_string)
-{
-	(void)q_string;
-	return false;
-}
-
-int hifs_get_hive_host_sbs(void)
-{
-	return 0;
-}
-
-int save_binary_data(char *data_block, char *hash)
-{
-	(void)data_block;
-	(void)hash;
-	return 0;
-}
-
-#endif /* HIFS_HAVE_MARIADB */

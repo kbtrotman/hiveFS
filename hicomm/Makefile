@@ -4,7 +4,7 @@ CC = gcc
 INCS = -I../
 
 # Libraries
-LIBS =
+LIBS = -L/usr/lib -L/usr/lib/x86_64-linux-gnu
 
 # Define any compile-time flags
 CFLAGS = -std=gnu11 -Wall -Wextra -g $(INCS)
@@ -13,11 +13,11 @@ LDFLAGS = $(LIBS)
 MYSQL_CONFIG := $(shell command -v mysql_config 2>/dev/null)
 
 ifeq ($(MYSQL_CONFIG),)
-CFLAGS += -DHIFS_HAVE_MARIADB=0
+$(error "mysql_config not found. Please install the MariaDB/MySQL development lib packages.")
 else
 MYSQL_CFLAGS := $(shell $(MYSQL_CONFIG) --cflags)
 MYSQL_LIBS := $(shell $(MYSQL_CONFIG) --libs)
-CFLAGS += $(MYSQL_CFLAGS) -DHIFS_HAVE_MARIADB=1
+CFLAGS += $(MYSQL_CFLAGS)
 LDFLAGS += $(MYSQL_LIBS)
 endif
 
