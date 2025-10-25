@@ -47,25 +47,50 @@ int hicomm_handle_command(int fd, const struct hifs_cmds *cmd)
 		return 0;
 	}
 
-	if (hifs_command_equals(cmd, HIFS_Q_PROTO_CMD_TEST)) {
-		struct hifs_inode inode;
-		int err;
+    if (hifs_command_equals(cmd, HIFS_Q_PROTO_CMD_TEST)) {
+        struct hifs_data_frame frame;
+        int err;
 
-		ret = hicomm_comm_recv_inode(fd, &inode, false);
-		if (ret) {
-			if (ret == -EAGAIN)
-				return 0;
-			hifs_err("Failed to fetch inode payload: %d", ret);
-			return ret;
-		}
+        ret = hicomm_comm_recv_data(fd, &frame, false);
+        if (ret) {
+            if (ret == -EAGAIN)
+                return 0;
+            hifs_err("Failed to fetch data payload: %d", ret);
+            return ret;
+    }
 
-		hicomm_print_inode(&inode);
+    if (hifs_command_equals(cmd, HIFS_Q_PROTO_CMD_SB_SEND)) {
+        /* Receive kernel's superblock bytes */
+        struct hifs_data_frame frame;
+        int err;
+        ret = hicomm_comm_recv_data(fd, &frame, false);
+        if (ret) {
+            if (ret == -EAGAIN)
+                return 0;
+            hifs_err("Failed to fetch superblock payload: %d", ret);
+            return ret;
+        }
+        /* TODO: fetch DB copy, compare generation (s_rev_level) then s_wtime, choose winner */
+        /* For now, echo back what we received to complete handshake skeleton */
+        err = hicomm_comm_send_data(fd, &frame);
+        if (err) {
+            hifs_err("Failed to send superblock response data: %d", err);
+            ret = err;
+        }
+        err = hicomm_send_cmd_str(fd, HIFS_Q_PROTO_CMD_SB_RECV);
+        if (err && !ret)
+            ret = err;
+        return ret;
+    }
 
-		err = hicomm_comm_send_inode(fd, &inode);
-		if (err) {
-			hifs_err("Failed to send inode response: %d", err);
-			ret = err;
-		}
+        if (frame.len == sizeof(struct hifs_inode))
+            hicomm_print_inode((const struct hifs_inode *)frame.data);
+
+        err = hicomm_comm_send_data(fd, &frame);
+        if (err) {
+            hifs_err("Failed to send data response: %d", err);
+            ret = err;
+        }
 
 		err = hicomm_send_cmd_str(fd, "test_ack");
 		if (err) {

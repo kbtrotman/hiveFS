@@ -81,12 +81,12 @@ int hicomm_recv_cmd(int fd, struct hifs_cmds *cmd, bool nonblock)
 	return hifs_comm_ioctl_common(target, HIFS_IOCTL_CMD_DEQUEUE, cmd);
 }
 
-int hicomm_comm_recv_inode(int fd, struct hifs_inode *inode, bool nonblock)
+int hicomm_comm_recv_data(int fd, struct hifs_data_frame *frame, bool nonblock)
 {
-	int target = resolve_fd(fd);
+    int target = resolve_fd(fd);
 
-	if (target < 0 || !inode)
-		return -EINVAL;
+    if (target < 0 || !frame)
+        return -EINVAL;
 
 	if (nonblock) {
 		int flags = fcntl(target, F_GETFL, 0);
@@ -98,7 +98,7 @@ int hicomm_comm_recv_inode(int fd, struct hifs_inode *inode, bool nonblock)
 		}
 	}
 
-	return hifs_comm_ioctl_common(target, HIFS_IOCTL_INODE_DEQUEUE, inode);
+    return hifs_comm_ioctl_common(target, HIFS_IOCTL_DATA_DEQUEUE, frame);
 }
 
 int hicomm_comm_get_status(int fd, struct hifs_comm_status *status)
@@ -107,7 +107,7 @@ int hicomm_comm_get_status(int fd, struct hifs_comm_status *status)
 		return -EINVAL;
 
 	memset(status, 0, sizeof(*status));
-	return hifs_comm_ioctl_common(fd, HIFS_IOCTL_STATUS, status);
+    return hifs_comm_ioctl_common(fd, HIFS_IOCTL_STATUS, status);
 }
 
 int hicomm_comm_send_cmd(int fd, const struct hifs_cmds *cmd)
@@ -115,8 +115,8 @@ int hicomm_comm_send_cmd(int fd, const struct hifs_cmds *cmd)
 	if (!cmd)
 		return -EINVAL;
 
-	return hifs_comm_ioctl_common(fd, HIFS_IOCTL_CMD_ENQUEUE,
-				      (void *)cmd);
+    return hifs_comm_ioctl_common(fd, HIFS_IOCTL_CMD_ENQUEUE,
+                          (void *)cmd);
 }
 
 int hicomm_send_cmd_str(int fd, const char *cmd)
@@ -135,13 +135,13 @@ int hicomm_send_cmd_str(int fd, const char *cmd)
 	return hicomm_comm_send_cmd(fd, &msg);
 }
 
-int hicomm_comm_send_inode(int fd, const struct hifs_inode *inode)
+int hicomm_comm_send_data(int fd, const struct hifs_data_frame *frame)
 {
-	if (!inode)
-		return -EINVAL;
+    if (!frame)
+        return -EINVAL;
 
-	return hifs_comm_ioctl_common(fd, HIFS_IOCTL_INODE_ENQUEUE,
-				      (void *)inode);
+    return hifs_comm_ioctl_common(fd, HIFS_IOCTL_DATA_ENQUEUE,
+                      (void *)frame);
 }
 
 void hicomm_safe_cleanup(void)

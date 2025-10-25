@@ -27,7 +27,7 @@ static struct buffer_head *hifs_bread_at(struct super_block *sb, u64 byte_offset
 	return sb_bread(sb, block);
 }
 
-int hifs_fill_super(struct super_block *sb, void *data, int silent)
+int hifs_get_super(struct super_block *sb, void *data, int silent)
 {
 	struct hifs_disk_superblock *disk_sb;
 	struct hifs_sb_info *sb_info = NULL;
@@ -45,11 +45,19 @@ int hifs_fill_super(struct super_block *sb, void *data, int silent)
 	}
 
 	disk_sb = (struct hifs_disk_superblock *)(bh->b_data + offset);
-	sb_info = kzalloc(sizeof(*sb_info), GFP_KERNEL);
-	if (!sb_info) {
-		ret = -ENOMEM;
-		goto out;
-	}
+    sb_info = kzalloc(sizeof(*sb_info), GFP_KERNEL);
+    if (!sb_info) {
+        ret = -ENOMEM;
+        goto out;
+    }
+    sb_info->inode_bmp = NULL;
+    sb_info->dirent_bmp = NULL;
+    sb_info->block_bmp = NULL;
+    sb_info->dirty_bmp = NULL;
+    spin_lock_init(&sb_info->inode_bmp_lock);
+    spin_lock_init(&sb_info->dirent_bmp_lock);
+    spin_lock_init(&sb_info->block_bmp_lock);
+    spin_lock_init(&sb_info->dirty_bmp_lock);
 
 	sb_info->s_magic = le16_to_cpu(disk_sb->s_magic);
 	sb_info->s_version = le32_to_cpu(disk_sb->s_rev_level);
@@ -81,11 +89,17 @@ int hifs_fill_super(struct super_block *sb, void *data, int silent)
 		goto out;
 	}
 
-	sb->s_magic = sb_info->s_magic;
-	sb->s_op = &hifs_sb_operations;
-	sb->s_fs_info = sb_info;
+    sb->s_magic = sb_info->s_magic;
+    sb->s_op = &hifs_sb_operations;
+    sb->s_fs_info = sb_info;
 
-	bh = hifs_bread_at(sb, HIFS_ROOT_DENTRY_OFFSET, &offset);
+    /* Load cache bitmaps from disk */
+    ret = hifs_cache_load(sb);
+    if (ret)
+        goto out;
+
+    /* Read the on-disk root inode from the inode table, not the root directory block. */
+    bh = hifs_bread_at(sb, HIFS_INODE_TABLE_OFFSET, &offset);
 	if (!bh) {
 		ret = -EIO;
 		goto out;
@@ -144,7 +158,7 @@ out:
 struct dentry *hifs_mount(struct file_system_type *fs_type, int flags, const char *dev_name, void *data)
 {
 	struct dentry *ret;
-	ret = mount_bdev(fs_type, flags, dev_name, data, hifs_fill_super);
+    ret = mount_bdev(fs_type, flags, dev_name, data, hifs_get_super);
 	printk(KERN_INFO "#: Mounting hifs \n");
 	
 	if (IS_ERR(ret))
@@ -155,6 +169,8 @@ struct dentry *hifs_mount(struct file_system_type *fs_type, int flags, const cha
 	
 	return ret;
 }
+
+
 
 void hifs_kill_superblock(struct super_block *sb)
 {
@@ -182,8 +198,27 @@ void hifs_save_sb(struct super_block *sb)
 	brelse(bh);
 }
 
+
+
 void hifs_put_super(struct super_block *sb) 
 {
-	kfree(sb->s_fs_info);
-	sb->s_fs_info = NULL;
+    /* Persist latest metadata before teardown. */
+    if (sb && sb->s_fs_info) {
+        hifs_save_sb(sb);
+        hifs_cache_save(sb);
+    }
+
+    /* Ensure any dirty buffers hit the device. */
+    if (sb && sb->s_bdev) {
+        sync_blockdev(sb->s_bdev);
+    }
+
+	/* Then flush the dirty cache items to user space */
+	hifs_flush_dirty_cache_items();
+
+	/* Finally, free the superblock info structure. */
+
+    hifs_cache_free(sb);
+    kfree(sb->s_fs_info);
+    sb->s_fs_info = NULL;
 }

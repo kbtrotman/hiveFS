@@ -47,11 +47,11 @@ void hicomm_log(int level, const char *fmt, ...);
 int hicomm_comm_open(bool nonblock);
 void hicomm_comm_close(int fd);
 int hicomm_recv_cmd(int fd, struct hifs_cmds *cmd, bool nonblock);
-int hicomm_comm_recv_inode(int fd, struct hifs_inode *inode, bool nonblock);
+int hicomm_comm_recv_data(int fd, struct hifs_data_frame *frame, bool nonblock);
 int hicomm_comm_get_status(int fd, struct hifs_comm_status *status);
 int hicomm_comm_send_cmd(int fd, const struct hifs_cmds *cmd);
 int hicomm_send_cmd_str(int fd, const char *cmd);
-int hicomm_comm_send_inode(int fd, const struct hifs_inode *inode);
+int hicomm_comm_send_data(int fd, const struct hifs_data_frame *frame);
 void hicomm_safe_cleanup(void);
 
 /* hi_command_prot.c */

@@ -329,21 +329,38 @@ static int create_filesystem(const char *path,
 		return -EINVAL;
 	}
 
-	struct hifs_cache_bitmap *cache_bmp = bitmap_create(blocks, block_size);
-	struct hifs_cache_bitmap *dirty_bmp = bitmap_create(blocks, block_size);
-	if (!cache_bmp || !dirty_bmp) {
-		ret = -ENOMEM;
-		goto out_close;
-	}
+    struct hifs_cache_bitmap *block_bmp = bitmap_create(blocks, block_size);
+    struct hifs_cache_bitmap *dirty_bmp = bitmap_create(blocks, block_size);
+    /* inode/direntry bitmaps sized by HIFS_MAX_CACHE_INODES */
+    struct hifs_cache_bitmap *inode_bmp = calloc(1, sizeof(*inode_bmp));
+    struct hifs_cache_bitmap *dir_bmp = calloc(1, sizeof(*dir_bmp));
+    if (!block_bmp || !dirty_bmp || !inode_bmp || !dir_bmp) {
+        ret = -ENOMEM;
+        goto out_close;
+    }
+    inode_bmp->cache_block_size = block_size;
+    dir_bmp->cache_block_size = block_size;
+    inode_bmp->cache_block_count = HIFS_MAX_CACHE_INODES;
+    dir_bmp->cache_block_count = HIFS_MAX_CACHE_INODES;
+    inode_bmp->size = (HIFS_MAX_CACHE_INODES + 7) / 8;
+    dir_bmp->size = (HIFS_MAX_CACHE_INODES + 7) / 8;
+    inode_bmp->bitmap = calloc(inode_bmp->size, 1);
+    dir_bmp->bitmap = calloc(dir_bmp->size, 1);
+    if (!inode_bmp->bitmap || !dir_bmp->bitmap) {
+        ret = -ENOMEM;
+        goto out_close;
+    }
 
-	const uint64_t reserved_blocks[] = {
-		HIFS_BOOT_OFFSET / block_size,
-		HIFS_INODE_BITMAP_OFFSET / block_size,
-		HIFS_INODE_TABLE_OFFSET / block_size,
-		HIFS_INODE_TABLE2_OFFSET / block_size,
-		HIFS_DIRTY_TABLE_OFFSET / block_size,
-		HIFS_ROOT_DENTRY_OFFSET / block_size
-	};
+    const uint64_t reserved_blocks[] = {
+        HIFS_BOOT_OFFSET / block_size,
+        HIFS_INODE_BITMAP_OFFSET / block_size,
+        HIFS_INODE_TABLE_OFFSET / block_size,
+        HIFS_INODE_TABLE2_OFFSET / block_size,
+        HIFS_DIRTY_TABLE_OFFSET / block_size,
+        HIFS_ROOT_DENTRY_OFFSET / block_size,
+        HIFS_DIRENT_BITMAP_OFFSET / block_size,
+        HIFS_BLOCK_BITMAP_OFFSET / block_size
+    };
 
 	for (size_t i = 0; i < ARRAY_SIZE(reserved_blocks); ++i) {
 		bitmap_mark(cache_bmp, reserved_blocks[i]);
@@ -367,13 +384,21 @@ static int create_filesystem(const char *path,
 		if (ret)
 			goto out_close;
 
-		ret = write_bitmap_region(fd, HIFS_INODE_BITMAP_OFFSET, cache_bmp, block_size);
-		if (ret)
-			goto out_close;
+        ret = write_bitmap_region(fd, HIFS_INODE_BITMAP_OFFSET, inode_bmp, block_size);
+        if (ret)
+            goto out_close;
 
-		ret = write_bitmap_region(fd, HIFS_DIRTY_TABLE_OFFSET, dirty_bmp, block_size);
-		if (ret)
-			goto out_close;
+        ret = write_bitmap_region(fd, HIFS_DIRTY_TABLE_OFFSET, dirty_bmp, block_size);
+        if (ret)
+            goto out_close;
+
+        ret = write_bitmap_region(fd, HIFS_DIRENT_BITMAP_OFFSET, dir_bmp, block_size);
+        if (ret)
+            goto out_close;
+
+        ret = write_bitmap_region(fd, HIFS_BLOCK_BITMAP_OFFSET, block_bmp, block_size);
+        if (ret)
+            goto out_close;
 
 		ret = write_inode_table(fd, HIFS_INODE_TABLE_OFFSET, &root_inode, block_size);
 		if (ret)
@@ -392,8 +417,10 @@ static int create_filesystem(const char *path,
 		printf("HiveFS image written to %s (%" PRIu64 " blocks).\n", path, blocks);
 
 out_close:
-	bitmap_destroy(cache_bmp);
-	bitmap_destroy(dirty_bmp);
+    bitmap_destroy(block_bmp);
+    bitmap_destroy(dirty_bmp);
+    if (inode_bmp) { free(inode_bmp->bitmap); free(inode_bmp); }
+    if (dir_bmp) { free(dir_bmp->bitmap); free(dir_bmp); }
 	close(fd);
 	return ret;
 }
