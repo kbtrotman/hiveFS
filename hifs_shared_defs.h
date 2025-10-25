@@ -374,12 +374,36 @@ struct hifs_disk_superblock {
 /* Remote-facing per-volume logical superblock (minimal fields used for
  * reconciliation with the cluster). This is exchanged over the comm link.
  * Do not confuse with the cache super above. */
-struct hifs_superblock {
+struct hifs_volume_superblock {
 #ifdef __KERNEL__
+    __le32 s_magic;      /* identifies filesystem type */
+    __le32 s_blocksize;  /* fundamental block size */
+    __le32 s_blocksize_bits; /* log2(blocksize) */
+    __le64 s_blocks_count;   /* total blocks in volume */
+    __le64 s_free_blocks;    /* free blocks available */
+    __le64 s_inodes_count;   /* total inodes */
+    __le64 s_free_inodes;    /* free inodes */
+    __le64 s_maxbytes;       /* max file size supported */
+    __le32 s_feature_compat;     /* compatible feature flags */
+    __le32 s_feature_ro_compat;  /* read-only compatible features */
+    __le32 s_feature_incompat;   /* incompatible features */
+    __u8   s_uuid[16];           /* volume UUID */
     __le32 s_rev_level;   /* epoch/generation */
     __le32 s_wtime;       /* last write time (epoch) */
     __le32 s_flags;       /* optional flags */
 #else
+    uint32_t s_magic;
+    uint32_t s_blocksize;
+    uint32_t s_blocksize_bits;
+    uint64_t s_blocks_count;
+    uint64_t s_free_blocks;
+    uint64_t s_inodes_count;
+    uint64_t s_free_inodes;
+    uint64_t s_maxbytes;
+    uint32_t s_feature_compat;
+    uint32_t s_feature_ro_compat;
+    uint32_t s_feature_incompat;
+    uint8_t  s_uuid[16];
     uint32_t s_rev_level;
     uint32_t s_wtime;
     uint32_t s_flags;
@@ -394,7 +418,7 @@ struct hifs_sb_msg {
 #else
     uint64_t volume_id;
 #endif
-    struct hifs_superblock vsb;   /* logical super */
+    struct hifs_volume_superblock vsb;   /* logical super */
 };
 
 /* Volume table lives after the block bitmap by default. Each entry maps a
@@ -410,7 +434,7 @@ struct hifs_volume_entry {
 #else
     uint64_t volume_id;
 #endif
-    struct hifs_superblock vsb;  /* minimal remote-facing super */
+    struct hifs_volume_superblock vsb;  /* minimal remote-facing super */
 };
 
 /***********************

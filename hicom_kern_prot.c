@@ -81,8 +81,8 @@ static bool cmd_equals(const struct hifs_cmds *cmd, const char *name)
 }
 
 /* Return >0 if remote newer, 0 if local is up-to-date or equal, <0 on error */
-static int hifs_compare_sb_newer(const struct hifs_superblock *local,
-                                 const struct hifs_superblock *remote)
+static int hifs_compare_sb_newer(const struct hifs_volume_superblock *local,
+                                 const struct hifs_volume_superblock *remote)
 {
     u32 l_gen = le32_to_cpu(local->s_rev_level);
     u32 r_gen = le32_to_cpu(remote->s_rev_level);
@@ -121,7 +121,6 @@ int hifs_handshake_superblock(struct super_block *sb)
     memset(&msg_local, 0, sizeof(msg_local));
     msg_local.volume_id = cpu_to_le64(info->volume_id);
     msg_local.vsb = info->vol_super;
-    strscpy(msg_local.vsb.s_volume_name, "", sizeof(msg_local.vsb.s_volume_name));
 
     ret = hifs_data_fifo_out_push_buf(&msg_local, sizeof(msg_local));
     if (ret)
