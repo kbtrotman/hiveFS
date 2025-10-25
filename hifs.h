@@ -180,12 +180,16 @@ int hifs_open_file(struct inode *inode, struct file *filp);
 int hifs_release_file(struct inode *inode, struct file *filp);
 //ssize_t hifs_alloc_if_necessary(struct hifs_superblock *sb, struct hifs_inode *di, loff_t off, size_t cnt);
 
-/* hifs_cache */
+/* hifs_cache (shared cache context) */
+struct hifs_cache_ctx; /* opaque shared cache context */
 struct hifs_inode *cache_get_inode(void);
 void cache_put_inode(struct hifs_inode **hii);
-int hifs_cache_load(struct super_block *sb);
-int hifs_cache_save(struct super_block *sb);
-void hifs_cache_free(struct super_block *sb);
+int hifs_cache_attach(struct super_block *sb, struct hifs_sb_info *info);
+int hifs_cache_save_ctx(struct super_block *sb);
+void hifs_cache_detach(struct hifs_sb_info *info);
+/* Per-volume logical super helpers */
+int hifs_volume_load(struct super_block *sb, struct hifs_sb_info *info, bool create);
+int hifs_volume_save(struct super_block *sb, const struct hifs_sb_info *info);
 void hifs_cache_mark_present(struct super_block *sb, uint64_t block);
 void hifs_cache_clear_present(struct super_block *sb, uint64_t block);
 bool hifs_cache_test_present(struct super_block *sb, uint64_t block);
@@ -227,22 +231,19 @@ extern struct kmem_cache *hifs_inode_cache;
 
 struct hifs_sb_info 
 {
-	struct hifs_disk_superblock disk;
+    struct hifs_disk_superblock disk;
 	uint32_t	s_magic;    	/* magic number */
 	uint32_t	s_version;    	/* fs version */
 	uint32_t	s_blocksize;	/* fs block size */
 	uint32_t	s_block_olt;	/* Object location table block */
 	uint32_t	s_inode_cnt;	/* number of inodes in inode table */
 	uint32_t	s_last_blk;	    /* just move forward with allocation */
-	/* In-memory cache bitmaps */
-	struct hifs_cache_bitmap *inode_bmp;  /* cached inode presence */
-	struct hifs_cache_bitmap *dirent_bmp; /* cached direntry presence */
-	struct hifs_cache_bitmap *block_bmp;  /* cached block presence */
-	struct hifs_cache_bitmap *dirty_bmp;  /* dirty blocks */
-	spinlock_t inode_bmp_lock;
-	spinlock_t dirent_bmp_lock;
-	spinlock_t block_bmp_lock;
-	spinlock_t dirty_bmp_lock;
+	/* Shared cache context across mounts */
+    struct hifs_cache_ctx *cache;
+    /* Per-mount volume identifier within shared cache */
+    uint64_t volume_id;
+    /* Per-volume logical super (remote-facing minimal copy) */
+    struct hifs_superblock vol_super;
 };
 
 /* Return pointer to cached on-disk super in sb->s_fs_info (may be NULL). */

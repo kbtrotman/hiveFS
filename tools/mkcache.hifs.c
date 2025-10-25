@@ -1,5 +1,5 @@
 /**
- * HiveFS mkfs utility
+ * HiveFS mkcache utility
  *
  * Creates a basic on-disk layout for HiveFS cached local FS and pairs with remote hive.
  * The tool reserves the metadata region, initialises the superblock, cache
@@ -32,9 +32,9 @@ static const struct option long_options[] = {
 
 static void usage(void)
 {
-	printf(
-		"HiveFS mkfs - initialise a HiveFS cache image\n\n"
-		"Usage: mkfs.hifs [options]\n\n"
+    printf(
+        "HiveFS mkcache - initialise a HiveFS shared cache image\n\n"
+        "Usage: mkcache.hifs [options]\n\n"
 		"Options:\n"
 		"  -h, --help            Show this message and exit\n"
 		"  -f, --force           Skip confirmation prompts\n"
@@ -46,7 +46,7 @@ static void usage(void)
 		"  -s, --size=SIZE       Size of filesystem image (accepts K/M/G suffix)\n"
 		"  -n, --noaction        Dry-run; do not modify the target\n"
 		"\nExample:\n"
-		"  mkfs.hifs -F /dev/sdb3 -s 20G -m /mnt/hive\n"
+        "  mkcache.hifs -F /dev/sdb3 -s 20G -m /mnt/hive\n"
 	);
 }
 
@@ -408,9 +408,14 @@ static int create_filesystem(const char *path,
 		if (ret)
 			goto out_close;
 
-		ret = write_root_directory(fd, block_size);
-		if (ret)
-			goto out_close;
+        ret = write_root_directory(fd, block_size);
+        if (ret)
+            goto out_close;
+
+        /* Initialize volume table region to zero */
+        ret = zero_region(fd, HIFS_VOLUME_TABLE_OFFSET, HIFS_VOLUME_TABLE_MAX * sizeof(struct hifs_volume_entry), block_size);
+        if (ret)
+            goto out_close;
 	}
 
 	if (flags.verbose)

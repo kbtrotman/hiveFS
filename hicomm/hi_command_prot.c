@@ -60,7 +60,7 @@ int hicomm_handle_command(int fd, const struct hifs_cmds *cmd)
     }
 
     if (hifs_command_equals(cmd, HIFS_Q_PROTO_CMD_SB_SEND)) {
-        /* Receive kernel's superblock bytes */
+        /* Receive kernel's per-volume SB message */
         struct hifs_data_frame frame;
         int err;
         ret = hicomm_comm_recv_data(fd, &frame, false);
@@ -70,7 +70,8 @@ int hicomm_handle_command(int fd, const struct hifs_cmds *cmd)
             hifs_err("Failed to fetch superblock payload: %d", ret);
             return ret;
         }
-        /* TODO: fetch DB copy, compare generation (s_rev_level) then s_wtime, choose winner */
+        /* TODO: decode struct hifs_sb_msg, lookup MariaDB by volume_id,
+         * compare vsb.s_rev_level then vsb.s_wtime, prepare winning struct hifs_sb_msg. */
         /* For now, echo back what we received to complete handshake skeleton */
         err = hicomm_comm_send_data(fd, &frame);
         if (err) {

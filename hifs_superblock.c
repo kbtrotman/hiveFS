@@ -15,6 +15,7 @@
 #include <linux/time64.h>
 
 
+/* Read a block at an arbitrary byte offset from the block device. */
 static struct buffer_head *hifs_bread_at(struct super_block *sb, u64 byte_offset,
 					 unsigned int *intra_block_offset)
 {
@@ -27,6 +28,21 @@ static struct buffer_head *hifs_bread_at(struct super_block *sb, u64 byte_offset
 	return sb_bread(sb, block);
 }
 
+/* Parse volume ID from mount data (if any). */
+static uint64_t hifs_parse_volume_id(void *data)
+{
+    uint64_t id = 1; /* default volume id */
+    if (data) {
+        const char *s = (const char *)data;
+        char *end = NULL;
+        unsigned long long v = simple_strtoull(s, &end, 0);
+        if (end && end != s)
+            id = v;
+    }
+    return id;
+}
+
+/* Load the cache's superblock from disk and initialize the in-memory structures. */
 int hifs_get_super(struct super_block *sb, void *data, int silent)
 {
 	struct hifs_disk_superblock *disk_sb;
@@ -93,8 +109,14 @@ int hifs_get_super(struct super_block *sb, void *data, int silent)
     sb->s_op = &hifs_sb_operations;
     sb->s_fs_info = sb_info;
 
-    /* Load cache bitmaps from disk */
-    ret = hifs_cache_load(sb);
+    /* Attach shared cache bitmaps from disk (singleton) */
+    ret = hifs_cache_attach(sb, sb_info);
+    if (ret)
+        goto out;
+
+    /* Determine volume id (from mount data, if provided) and load/create entry */
+    sb_info->volume_id = hifs_parse_volume_id(data);
+    ret = hifs_volume_load(sb, sb_info, true);
     if (ret)
         goto out;
 
@@ -155,6 +177,9 @@ out:
 	return ret;
 }
 
+/* Mount a "virtual" filesystem. This does nothing to the cache superblock, but it relates to the VFS layer,
+ * so its put here.
+ **/
 struct dentry *hifs_mount(struct file_system_type *fs_type, int flags, const char *dev_name, void *data)
 {
 	struct dentry *ret;
@@ -171,13 +196,14 @@ struct dentry *hifs_mount(struct file_system_type *fs_type, int flags, const cha
 }
 
 
-
+/* Teardown the virtual filesystem (see above). */
 void hifs_kill_superblock(struct super_block *sb)
 {
 	printk(KERN_INFO "#: hivefs. Unmount succesful.\n");
 	kill_block_super(sb);
 }
 
+/* Save the in-memory cache superblock back to disk. */
 void hifs_save_sb(struct super_block *sb)
 {
 	struct buffer_head *bh;
@@ -199,13 +225,16 @@ void hifs_save_sb(struct super_block *sb)
 }
 
 
-
+/* VFS calls this to teardown the superblocks before dismounting a filesystem. Ours are virtual,
+ * so instead of pointing it to our cache superblock, we point it back to a table of remote
+ * superblocks, hifs_sb_info to save the virtual sb data and destroy it.
+ * */
 void hifs_put_super(struct super_block *sb) 
 {
     /* Persist latest metadata before teardown. */
     if (sb && sb->s_fs_info) {
         hifs_save_sb(sb);
-        hifs_cache_save(sb);
+        hifs_cache_save_ctx(sb);
     }
 
     /* Ensure any dirty buffers hit the device. */
@@ -213,12 +242,12 @@ void hifs_put_super(struct super_block *sb)
         sync_blockdev(sb->s_bdev);
     }
 
-	/* Then flush the dirty cache items to user space */
+	/* Then flush the dirty cache items in cache related to that virtual FS to user space */
 	hifs_flush_dirty_cache_items();
 
 	/* Finally, free the superblock info structure. */
 
-    hifs_cache_free(sb);
+    hifs_cache_detach((struct hifs_sb_info *)sb->s_fs_info);
     kfree(sb->s_fs_info);
     sb->s_fs_info = NULL;
 }

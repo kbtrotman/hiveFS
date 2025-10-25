@@ -48,7 +48,7 @@ int hifs_create_test_inode(void)
 	if (ret)
 		return ret;
 
-    /* Example: send inode as raw payload via data FIFO if desired */
+    /* Test Example: send inode as raw payload via data FIFO if desired */
     ret = hifs_data_fifo_out_push_buf(&inode, sizeof(inode));
 	if (ret)
 		return ret;
@@ -81,8 +81,8 @@ static bool cmd_equals(const struct hifs_cmds *cmd, const char *name)
 }
 
 /* Return >0 if remote newer, 0 if local is up-to-date or equal, <0 on error */
-static int hifs_compare_sb_newer(const struct hifs_disk_superblock *local,
-                                 const struct hifs_disk_superblock *remote)
+static int hifs_compare_sb_newer(const struct hifs_superblock *local,
+                                 const struct hifs_superblock *remote)
 {
     u32 l_gen = le32_to_cpu(local->s_rev_level);
     u32 r_gen = le32_to_cpu(remote->s_rev_level);
@@ -100,7 +100,8 @@ int hifs_handshake_superblock(struct super_block *sb)
 {
     struct hifs_sb_info *info;
     struct hifs_cmds cmd;
-    struct hifs_disk_superblock remote_sb;
+    struct hifs_sb_msg msg_local;
+    struct hifs_sb_msg msg_remote;
     int ret;
 
     if (!sb)
@@ -116,8 +117,13 @@ int hifs_handshake_superblock(struct super_block *sb)
     if (ret)
         return ret;
 
-    /* send local superblock bytes */
-    ret = hifs_data_fifo_out_push_buf(&info->disk, sizeof(info->disk));
+    /* Build and send local per-volume super */
+    memset(&msg_local, 0, sizeof(msg_local));
+    msg_local.volume_id = cpu_to_le64(info->volume_id);
+    msg_local.vsb = info->vol_super;
+    strscpy(msg_local.vsb.s_volume_name, "", sizeof(msg_local.vsb.s_volume_name));
+
+    ret = hifs_data_fifo_out_push_buf(&msg_local, sizeof(msg_local));
     if (ret)
         return ret;
 
@@ -131,9 +137,9 @@ int hifs_handshake_superblock(struct super_block *sb)
                     ret = hifs_data_fifo_in_pop(&frame, false);
                     if (ret)
                         return ret;
-                    if (frame.len != sizeof(remote_sb))
+                    if (frame.len != sizeof(msg_remote))
                         return -EINVAL;
-                    memcpy(&remote_sb, frame.data, sizeof(remote_sb));
+                    memcpy(&msg_remote, frame.data, sizeof(msg_remote));
                     break;
                 }
             }
@@ -144,12 +150,10 @@ int hifs_handshake_superblock(struct super_block *sb)
     }
 
     /* Compare and update if remote is newer */
-    if (hifs_compare_sb_newer(&info->disk, &remote_sb) > 0) {
-        /* Replace cached copy */
-        memcpy(&info->disk, &remote_sb, sizeof(remote_sb));
-        hifs_save_sb(sb);
-        if (sb->s_bdev)
-            sync_blockdev(sb->s_bdev);
+    if (hifs_compare_sb_newer(&msg_local.vsb, &msg_remote.vsb) > 0) {
+        /* Update per-volume logical super and persist in volume table */
+        info->vol_super = msg_remote.vsb;
+        hifs_volume_save(sb, info);
         return 1; /* updated */
     }
     return 0; /* no change */
