@@ -73,6 +73,10 @@ bool hifs_insert_data(const char *q_string);
 int hifs_get_hive_host_sbs(void);
 int save_binary_data(char *data_block, char *hash);
 
+/* Remote superblock helpers */
+bool hifs_volume_super_get(uint64_t volume_id, struct hifs_volume_superblock *out);
+bool hifs_volume_super_set(uint64_t volume_id, const struct hifs_volume_superblock *vsb);
+
 /* SQL Connect */
 
 
