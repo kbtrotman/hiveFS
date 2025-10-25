@@ -18,6 +18,52 @@
 
 struct SQLDB sqldb;
 
+static void bytes_to_hex(const uint8_t *src, size_t len, char *dst)
+{
+	static const char hexdigits[] = "0123456789abcdef";
+	size_t i;
+
+	for (i = 0; i < len; ++i) {
+		dst[i * 2] = hexdigits[(src[i] >> 4) & 0xF];
+		dst[i * 2 + 1] = hexdigits[src[i] & 0xF];
+	}
+	dst[len * 2] = '\0';
+}
+
+static int hex_nibble(char c)
+{
+	if (c >= '0' && c <= '9')
+		return c - '0';
+	if (c >= 'a' && c <= 'f')
+		return c - 'a' + 10;
+	if (c >= 'A' && c <= 'F')
+		return c - 'A' + 10;
+	return -1;
+}
+
+static bool hex_to_bytes(const char *hex, size_t hex_len, uint8_t *dst, size_t dst_len)
+{
+	size_t i;
+
+	if (!hex || !dst)
+		return false;
+	if (hex_len % 2 != 0)
+		return false;
+	if (dst_len < hex_len / 2)
+		return false;
+
+	for (i = 0; i < hex_len / 2; ++i) {
+		int hi = hex_nibble(hex[i * 2]);
+		int lo = hex_nibble(hex[i * 2 + 1]);
+		if (hi < 0 || lo < 0)
+			return false;
+		dst[i] = (uint8_t)((hi << 4) | lo);
+	}
+	if (dst_len > hex_len / 2)
+		memset(dst + hex_len / 2, 0, dst_len - hex_len / 2);
+	return true;
+}
+
 
 static char *hifs_get_machine_id(void)
 {
@@ -404,10 +450,120 @@ int hifs_get_hive_host_sbs(void)
 	return sqldb.rows > 0;
 }
 
+bool hifs_volume_super_get(uint64_t volume_id, struct hifs_volume_superblock *out)
+{
+	char sql_query[MAX_QUERY_SIZE];
+	MYSQL_RES *res;
+	MYSQL_ROW row;
+	unsigned long *lengths;
+	bool ok = false;
+
+	if (!sqldb.sql_init || !sqldb.conn || !out)
+		return false;
+
+	snprintf(sql_query, sizeof(sql_query),
+		 "SELECT s_magic, s_blocksize, s_blocksize_bits, s_blocks_count, "
+		 "s_free_blocks, s_inodes_count, s_free_inodes, s_maxbytes, "
+		 "s_feature_compat, s_feature_ro_compat, s_feature_incompat, "
+		 "HEX(s_uuid), s_rev_level, s_wtime, s_flags, HEX(s_volume_name) "
+		 "FROM volume_superblocks WHERE volume_id=%llu",
+		 (unsigned long long)volume_id);
+
+	res = hifs_execute_sql(sql_query);
+	if (!res)
+		return false;
+
+	if (mysql_num_rows(res) == 0)
+		goto out;
+
+	row = mysql_fetch_row(res);
+	lengths = mysql_fetch_lengths(res);
+	if (!row || !lengths)
+		goto out;
+
+	memset(out, 0, sizeof(*out));
+	out->s_magic = row[0] ? (uint32_t)strtoul(row[0], NULL, 10) : 0;
+	out->s_blocksize = row[1] ? (uint32_t)strtoul(row[1], NULL, 10) : 0;
+	out->s_blocksize_bits = row[2] ? (uint32_t)strtoul(row[2], NULL, 10) : 0;
+	out->s_blocks_count = row[3] ? strtoull(row[3], NULL, 10) : 0;
+	out->s_free_blocks = row[4] ? strtoull(row[4], NULL, 10) : 0;
+	out->s_inodes_count = row[5] ? strtoull(row[5], NULL, 10) : 0;
+	out->s_free_inodes = row[6] ? strtoull(row[6], NULL, 10) : 0;
+	out->s_maxbytes = row[7] ? strtoull(row[7], NULL, 10) : 0;
+	out->s_feature_compat = row[8] ? (uint32_t)strtoul(row[8], NULL, 10) : 0;
+	out->s_feature_ro_compat = row[9] ? (uint32_t)strtoul(row[9], NULL, 10) : 0;
+	out->s_feature_incompat = row[10] ? (uint32_t)strtoul(row[10], NULL, 10) : 0;
+	out->s_rev_level = row[12] ? (uint32_t)strtoul(row[12], NULL, 10) : 0;
+	out->s_wtime = row[13] ? (uint32_t)strtoul(row[13], NULL, 10) : 0;
+	out->s_flags = row[14] ? (uint32_t)strtoul(row[14], NULL, 10) : 0;
+
+	if (!row[11] || !hex_to_bytes(row[11], lengths[11], out->s_uuid,
+				     sizeof(out->s_uuid)))
+		goto out;
+	if (row[15] && lengths[15] > 0) {
+		if (!hex_to_bytes(row[15], lengths[15],
+				 (uint8_t *)out->s_volume_name,
+				 sizeof(out->s_volume_name)))
+			goto out;
+	} else {
+		memset(out->s_volume_name, 0, sizeof(out->s_volume_name));
+	}
+
+	ok = true;
+
+out:
+	mysql_free_result(res);
+	sqldb.last_query = NULL;
+	return ok;
+}
+
+bool hifs_volume_super_set(uint64_t volume_id, const struct hifs_volume_superblock *vsb)
+{
+	char sql_query[MAX_QUERY_SIZE];
+	char uuid_hex[sizeof(vsb->s_uuid) * 2 + 1];
+	char name_hex[sizeof(vsb->s_volume_name) * 2 + 1];
+
+	if (!sqldb.sql_init || !sqldb.conn || !vsb)
+		return false;
+
+	bytes_to_hex(vsb->s_uuid, sizeof(vsb->s_uuid), uuid_hex);
+	bytes_to_hex((const uint8_t *)vsb->s_volume_name,
+		     sizeof(vsb->s_volume_name), name_hex);
+
+	snprintf(sql_query, sizeof(sql_query),
+		 "INSERT INTO volume_superblocks "
+		 "(volume_id, s_magic, s_blocksize, s_blocksize_bits, s_blocks_count, "
+		 "s_free_blocks, s_inodes_count, s_free_inodes, s_maxbytes, "
+		 "s_feature_compat, s_feature_ro_compat, s_feature_incompat, s_uuid, "
+		 "s_rev_level, s_wtime, s_flags, s_volume_name) "
+		 "VALUES (%llu, %u, %u, %u, %llu, %llu, %llu, %llu, %llu, %u, %u, %u, "
+		 "UNHEX('%s'), %u, %u, %u, UNHEX('%s')) "
+		 "ON DUPLICATE KEY UPDATE "
+		 "s_magic=VALUES(s_magic), s_blocksize=VALUES(s_blocksize), "
+		 "s_blocksize_bits=VALUES(s_blocksize_bits), s_blocks_count=VALUES(s_blocks_count), "
+		 "s_free_blocks=VALUES(s_free_blocks), s_inodes_count=VALUES(s_inodes_count), "
+		 "s_free_inodes=VALUES(s_free_inodes), s_maxbytes=VALUES(s_maxbytes), "
+		 "s_feature_compat=VALUES(s_feature_compat), "
+		 "s_feature_ro_compat=VALUES(s_feature_ro_compat), "
+		 "s_feature_incompat=VALUES(s_feature_incompat), s_uuid=VALUES(s_uuid), "
+		 "s_rev_level=VALUES(s_rev_level), s_wtime=VALUES(s_wtime), "
+		 "s_flags=VALUES(s_flags), s_volume_name=VALUES(s_volume_name)",
+		 (unsigned long long)volume_id,
+		 vsb->s_magic, vsb->s_blocksize, vsb->s_blocksize_bits,
+		 (unsigned long long)vsb->s_blocks_count,
+		 (unsigned long long)vsb->s_free_blocks,
+		 (unsigned long long)vsb->s_inodes_count,
+		 (unsigned long long)vsb->s_free_inodes,
+		 (unsigned long long)vsb->s_maxbytes,
+		 vsb->s_feature_compat, vsb->s_feature_ro_compat, vsb->s_feature_incompat,
+		 uuid_hex, vsb->s_rev_level, vsb->s_wtime, vsb->s_flags, name_hex);
+
+	return hifs_insert_sql(sql_query);
+}
+
 int save_binary_data(char *data_block, char *hash)
 {
 	(void)data_block;
 	(void)hash;
 	return 0;
 }
-
