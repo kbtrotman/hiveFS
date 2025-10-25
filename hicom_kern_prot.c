@@ -48,7 +48,8 @@ int hifs_create_test_inode(void)
 	if (ret)
 		return ret;
 
-    ret = hifs_inode_fifo_out_push_from_inode(&inode);
+    /* Example: send inode as raw payload via data FIFO if desired */
+    ret = hifs_data_fifo_out_push_buf(&inode, sizeof(inode));
 	if (ret)
 		return ret;
 
@@ -67,4 +68,95 @@ void hifs_comm_link_notify_offline(void)
 {
 	hifs_link_set_state(&hifs_kern_link, HIFS_COMM_LINK_DOWN);
 	hifs_info("Kernel communication link marked offline\n");
+}
+
+/* Superblock comparison/handshake. */
+static bool cmd_equals(const struct hifs_cmds *cmd, const char *name)
+{
+    size_t len;
+    if (!cmd || !name)
+        return false;
+    len = strnlen(cmd->cmd, HIFS_MAX_CMD_SIZE);
+    return len == strlen(name) && strncmp(cmd->cmd, name, HIFS_MAX_CMD_SIZE) == 0;
+}
+
+/* Return >0 if remote newer, 0 if local is up-to-date or equal, <0 on error */
+static int hifs_compare_sb_newer(const struct hifs_disk_superblock *local,
+                                 const struct hifs_disk_superblock *remote)
+{
+    u32 l_gen = le32_to_cpu(local->s_rev_level);
+    u32 r_gen = le32_to_cpu(remote->s_rev_level);
+    if (r_gen != l_gen)
+        return (r_gen > l_gen) ? 1 : 0;
+
+    u32 l_wtime = le32_to_cpu(local->s_wtime);
+    u32 r_wtime = le32_to_cpu(remote->s_wtime);
+    if (r_wtime != l_wtime)
+        return (r_wtime > l_wtime) ? 1 : 0;
+    return 0;
+}
+
+int hifs_handshake_superblock(struct super_block *sb)
+{
+    struct hifs_sb_info *info;
+    struct hifs_cmds cmd;
+    struct hifs_disk_superblock remote_sb;
+    int ret;
+
+    if (!sb)
+        return -EINVAL;
+    info = (struct hifs_sb_info *)sb->s_fs_info;
+    if (!info)
+        return -EINVAL;
+
+    memset(&cmd, 0, sizeof(cmd));
+    strscpy(cmd.cmd, HIFS_Q_PROTO_CMD_SB_SEND, sizeof(cmd.cmd));
+    cmd.count = strlen(cmd.cmd);
+    ret = hifs_cmd_fifo_out_push(&cmd);
+    if (ret)
+        return ret;
+
+    /* send local superblock bytes */
+    ret = hifs_data_fifo_out_push_buf(&info->disk, sizeof(info->disk));
+    if (ret)
+        return ret;
+
+    /* Wait for an optional response: SB_RECV + payload of superblock */
+    {
+        int tries;
+        for (tries = 0; tries < 20; tries++) {
+            if (!hifs_cmd_fifo_in_pop(&cmd, true)) {
+                if (cmd_equals(&cmd, HIFS_Q_PROTO_CMD_SB_RECV)) {
+                    struct hifs_data_frame frame;
+                    ret = hifs_data_fifo_in_pop(&frame, false);
+                    if (ret)
+                        return ret;
+                    if (frame.len != sizeof(remote_sb))
+                        return -EINVAL;
+                    memcpy(&remote_sb, frame.data, sizeof(remote_sb));
+                    break;
+                }
+            }
+            schedule_timeout_interruptible(msecs_to_jiffies(50));
+        }
+        if (tries == 20)
+            return 0; /* No response; assume local is fine */
+    }
+
+    /* Compare and update if remote is newer */
+    if (hifs_compare_sb_newer(&info->disk, &remote_sb) > 0) {
+        /* Replace cached copy */
+        memcpy(&info->disk, &remote_sb, sizeof(remote_sb));
+        hifs_save_sb(sb);
+        if (sb->s_bdev)
+            sync_blockdev(sb->s_bdev);
+        return 1; /* updated */
+    }
+    return 0; /* no change */
+}
+
+int hifs_flush_dirty_cache_items(void)
+{
+
+	return 0;
 }

@@ -17,8 +17,8 @@ int hifs_thread_fn(void *data)
 {
 	int ret;
 
-	hifs_comm_link_notify_online();
-
+    hifs_comm_link_notify_online();
+	
 	while (!kthread_should_stop()) {
 
 		ret = hifs_create_test_inode();
@@ -32,11 +32,16 @@ int hifs_thread_fn(void *data)
 			if (!ret)
 				hifs_info("Received response \"%s\" from user space\n", rsp.cmd);
 
-			ret = hifs_inode_fifo_in_pop(&inode_rsp, true);
-			if (!ret)
-				hifs_info("Received inode response %llu \"%s\"\n",
+			{
+				struct hifs_data_frame frame;
+				ret = hifs_data_fifo_in_pop(&frame, true);
+				if (!ret && frame.len == sizeof(inode_rsp)) {
+					memcpy(&inode_rsp, frame.data, sizeof(inode_rsp));
+					hifs_info("Received inode response %llu \"%s\"\n",
 					  (unsigned long long)inode_rsp.i_ino,
 					  inode_rsp.i_name);
+				}
+			}
 		}
 
 		schedule_timeout_interruptible(msecs_to_jiffies(2000));

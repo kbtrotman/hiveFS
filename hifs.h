@@ -129,27 +129,27 @@ int hifs_create_test_inode(void);
 void hifs_comm_link_notify_online(void);
 void hifs_comm_link_notify_offline(void);
 void hicom_process_link_handshake(void);
-
+int hifs_handshake_superblock(struct super_block *sb);
+int hifs_flush_dirty_cache_items(void);
 
 /*hicom_kern_mm.c*/
 int hifs_fifo_init(void);
 void hifs_fifo_exit(void);
 int hifs_cmd_fifo_out_push(const struct hifs_cmds *msg);
 int hifs_cmd_fifo_out_push_cstr(const char *command);
-int hifs_inode_fifo_out_push(const struct hifs_inode *msg);
-int hifs_inode_fifo_out_push_from_inode(const struct hifs_inode *inode);
-void hifs_prepare_inode_4user(struct hifs_inode *dst, const struct hifs_inode *src);
+int hifs_data_fifo_out_push_buf(const void *buf, size_t len);
 int hifs_cmd_fifo_in_push(const struct hifs_cmds *msg);
-int hifs_inode_fifo_in_push(const struct hifs_inode *msg);
+int hifs_data_fifo_in_push_buf(const void *buf, size_t len);
 int hifs_cmd_fifo_in_pop(struct hifs_cmds *msg, bool nonblock);
-int hifs_inode_fifo_in_pop(struct hifs_inode *msg, bool nonblock);
+int hifs_data_fifo_in_pop(struct hifs_data_frame *frame, bool nonblock);
 
 /* hifs_superblock.c */
 void hifs_save_sb(struct super_block *sb);
 void hifs_put_super(struct super_block *sb);
 void hifs_kill_superblock(struct super_block *sb);
-int hifs_fill_super(struct super_block *sb, void *data, int silent);
+int hifs_get_super(struct super_block *sb, void *data, int silent);
 struct dentry *hifs_mount(struct file_system_type *fs_type, int flags, const char *dev_name, void *data);
+
 
 /* hifs_inode.c */
 void dump_hifsinode(struct hifs_inode *dmi);
@@ -183,10 +183,23 @@ int hifs_release_file(struct inode *inode, struct file *filp);
 /* hifs_cache */
 struct hifs_inode *cache_get_inode(void);
 void cache_put_inode(struct hifs_inode **hii);
+int hifs_cache_load(struct super_block *sb);
+int hifs_cache_save(struct super_block *sb);
+void hifs_cache_free(struct super_block *sb);
+void hifs_cache_mark_present(struct super_block *sb, uint64_t block);
+void hifs_cache_clear_present(struct super_block *sb, uint64_t block);
+bool hifs_cache_test_present(struct super_block *sb, uint64_t block);
+void hifs_cache_mark_dirty(struct super_block *sb, uint64_t block);
+void hifs_cache_clear_dirty(struct super_block *sb, uint64_t block);
+bool hifs_cache_test_dirty(struct super_block *sb, uint64_t block);
+void hifs_cache_mark_inode(struct super_block *sb, uint64_t ino);
+void hifs_cache_clear_inode(struct super_block *sb, uint64_t ino);
+bool hifs_cache_test_inode(struct super_block *sb, uint64_t ino);
+void hifs_cache_mark_dirent(struct super_block *sb, uint64_t dent);
+void hifs_cache_clear_dirent(struct super_block *sb, uint64_t dent);
+bool hifs_cache_test_dirent(struct super_block *sb, uint64_t dent);
 
 // END: Prototypes Here:
-
-
 
 
 
@@ -221,18 +234,23 @@ struct hifs_sb_info
 	uint32_t	s_block_olt;	/* Object location table block */
 	uint32_t	s_inode_cnt;	/* number of inodes in inode table */
 	uint32_t	s_last_blk;	    /* just move forward with allocation */
+	/* In-memory cache bitmaps */
+	struct hifs_cache_bitmap *inode_bmp;  /* cached inode presence */
+	struct hifs_cache_bitmap *dirent_bmp; /* cached direntry presence */
+	struct hifs_cache_bitmap *block_bmp;  /* cached block presence */
+	struct hifs_cache_bitmap *dirty_bmp;  /* dirty blocks */
+	spinlock_t inode_bmp_lock;
+	spinlock_t dirent_bmp_lock;
+	spinlock_t block_bmp_lock;
+	spinlock_t dirty_bmp_lock;
 };
 
-/**
- * Object Location Table
- **/
-struct hifs_olt 
+/* Return pointer to cached on-disk super in sb->s_fs_info (may be NULL). */
+static inline const struct hifs_disk_superblock *hifs_get_cached_superblock(struct super_block *sb)
 {
-	uint32_t	inode_table;		/* inode_table block location */
-	uint32_t	inode_cnt;	     	/* number of inodes */
-	uint64_t	inode_bitmap;		/* inode bitmap block */
-};
-
+    struct hifs_sb_info *info = sb ? (struct hifs_sb_info *)sb->s_fs_info : NULL;
+    return info ? &info->disk : NULL;
+}
 // END: Globals Here:
 
 

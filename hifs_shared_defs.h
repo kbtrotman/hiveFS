@@ -57,14 +57,15 @@
 
 #define HIFS_COMM_DEVICE_NAME "hivefs_ctl"
 #define HIFS_CMD_RING_CAPACITY 128
-#define HIFS_INODE_RING_CAPACITY 128
+#define HIFS_DATA_RING_CAPACITY 128
+#define HIFS_DATA_MAX 4096 // Max data size in a data frame
 
 #define HIFS_IOCTL_MAGIC      'H'
 #define HIFS_IOCTL_CMD_DEQUEUE    _IOWR(HIFS_IOCTL_MAGIC, 0, struct hifs_cmds)
-#define HIFS_IOCTL_INODE_DEQUEUE  _IOWR(HIFS_IOCTL_MAGIC, 1, struct hifs_inode)
+#define HIFS_IOCTL_DATA_DEQUEUE   _IOWR(HIFS_IOCTL_MAGIC, 1, struct hifs_data_frame)
 #define HIFS_IOCTL_STATUS         _IOR(HIFS_IOCTL_MAGIC,  2, struct hifs_comm_status)
 #define HIFS_IOCTL_CMD_ENQUEUE    _IOW (HIFS_IOCTL_MAGIC, 3, struct hifs_cmds)
-#define HIFS_IOCTL_INODE_ENQUEUE  _IOW (HIFS_IOCTL_MAGIC, 4, struct hifs_inode)
+#define HIFS_IOCTL_DATA_ENQUEUE   _IOW (HIFS_IOCTL_MAGIC, 4, struct hifs_data_frame)
 
 /******************************
  * Queue Comms Protocol
@@ -92,6 +93,11 @@
 #define HIFS_Q_PROTO_CMD_LINK_READY     "link_ready"
 #define HIFS_Q_PROTO_CMD_LINK_DOWN      "link_down"
 #define HIFS_Q_PROTO_CMD_CACHELESS_MODE "cacheless_mode"
+/* Superblock exchange */
+#define HIFS_Q_PROTO_CMD_SB_SEND        "sb_send"
+#define HIFS_Q_PROTO_CMD_SB_RECV        "sb_recv"
+#define HIFS_Q_PROTO_CMD_SB_SEND        "sb_send"
+#define HIFS_Q_PROTO_CMD_SB_RECV        "sb_recv"
 
 enum hifs_module{HIFS_COMM_PROGRAM_KERN_MOD, HIFS_COMM_PROGRAM_USER_HICOMM};
 enum hifs_queue_direction{HIFS_COMM_TO_USER, HIFS_COMM_FROM_USER};
@@ -108,7 +114,18 @@ struct hifs_blocks {
 
 struct hifs_cmds {
     int count;
-	char cmd[HIFS_MAX_CMD_SIZE];
+    char cmd[HIFS_MAX_CMD_SIZE];
+};
+
+/* Generic data frame for variable-length payloads (up to HIFS_DATA_MAX). */
+struct hifs_data_frame {
+#ifdef __KERNEL__
+    __u32 len;
+    __u8  data[HIFS_DATA_MAX];
+#else
+    uint32_t len;
+    uint8_t  data[HIFS_DATA_MAX];
+#endif
 };
 struct hifs_comm_status {
 #ifdef __KERNEL__
@@ -170,8 +187,11 @@ extern struct
 #define HIFS_INODE_TABLE2_OFFSET (HIFS_DEFAULT_BLOCK_SIZE * 3)
 #define HIFS_DIRTY_TABLE_OFFSET (HIFS_DEFAULT_BLOCK_SIZE * 4)
 #define HIFS_ROOT_DENTRY_OFFSET	 (HIFS_DIRTY_TABLE_OFFSET + HIFS_DEFAULT_BLOCK_SIZE)
+/* Additional cache bitmaps placed after root direntry block */
+#define HIFS_DIRENT_BITMAP_OFFSET (HIFS_ROOT_DENTRY_OFFSET + HIFS_DEFAULT_BLOCK_SIZE)
+#define HIFS_BLOCK_BITMAP_OFFSET  (HIFS_DIRENT_BITMAP_OFFSET + HIFS_DEFAULT_BLOCK_SIZE)
 /* Default place where FS will start using after mkfs (all above are used for mkfs) */
-#define HIFS_CACHE_SPACE_START	 (HIFS_INODE_TABLE2_OFFSET + (HIFS_DEFAULT_BLOCK_SIZE * 5))
+#define HIFS_CACHE_SPACE_START	 (HIFS_BLOCK_BITMAP_OFFSET + HIFS_DEFAULT_BLOCK_SIZE)
 
 #define HIFS_INODE_SIZE		128
 #define HIFS_INODE_NUMBER_TABLE	128
@@ -242,6 +262,7 @@ struct hifs_cache_bitmap {
 };
 
 struct hifs_disk_superblock {
+	__le32	s_generational_epoch;   /* epoch counter to control who made the last change in the sb, tie goes to latest s_wtime */
 	__le32	s_inodes_count;         /* total inodes */
 	__le32	s_blocks_count;         /* total blocks */
 	__le32	s_r_blocks_count;       /* reserved blocks */

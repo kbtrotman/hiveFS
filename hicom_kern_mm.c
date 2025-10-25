@@ -19,28 +19,28 @@
 #include <linux/wait.h>
 
 static DEFINE_KFIFO(hifs_cmd_fifo, struct hifs_cmds, HIFS_CMD_RING_CAPACITY);
-static DEFINE_KFIFO(hifs_inode_fifo, struct hifs_inode, HIFS_INODE_RING_CAPACITY);
+static DEFINE_KFIFO(hifs_data_fifo, struct hifs_data_frame, HIFS_DATA_RING_CAPACITY);
 static DEFINE_KFIFO(hifs_cmd_in_fifo, struct hifs_cmds, HIFS_CMD_RING_CAPACITY);
-static DEFINE_KFIFO(hifs_inode_in_fifo, struct hifs_inode, HIFS_INODE_RING_CAPACITY);
+static DEFINE_KFIFO(hifs_data_in_fifo, struct hifs_data_frame, HIFS_DATA_RING_CAPACITY);
 
 static DEFINE_SPINLOCK(hifs_cmd_lock);
-static DEFINE_SPINLOCK(hifs_inode_lock);
+static DEFINE_SPINLOCK(hifs_data_lock);
 static DEFINE_SPINLOCK(hifs_cmd_in_lock);
-static DEFINE_SPINLOCK(hifs_inode_in_lock);
+static DEFINE_SPINLOCK(hifs_data_in_lock);
 
 static DECLARE_WAIT_QUEUE_HEAD(hifs_cmd_wait);
-static DECLARE_WAIT_QUEUE_HEAD(hifs_inode_wait);
+static DECLARE_WAIT_QUEUE_HEAD(hifs_data_wait);
 static DECLARE_WAIT_QUEUE_HEAD(hifs_cmd_in_wait);
-static DECLARE_WAIT_QUEUE_HEAD(hifs_inode_in_wait);
+static DECLARE_WAIT_QUEUE_HEAD(hifs_data_in_wait);
 
 static unsigned int hifs_cmd_fifo_in_len(void)
 {
     return hifs_fifo_len_locked(&hifs_cmd_in_fifo, &hifs_cmd_in_lock);
 }
 
-static unsigned int hifs_inode_fifo_in_len(void)
+static unsigned int hifs_data_fifo_in_len(void)
 {
-    return hifs_fifo_len_locked(&hifs_inode_in_fifo, &hifs_inode_in_lock);
+    return hifs_fifo_len_locked(&hifs_data_in_fifo, &hifs_data_in_lock);
 }
 
 static unsigned int hifs_cmd_fifo_out_len(void)
@@ -48,9 +48,9 @@ static unsigned int hifs_cmd_fifo_out_len(void)
     return hifs_fifo_len_locked(&hifs_cmd_fifo, &hifs_cmd_lock);
 }
 
-static unsigned int hifs_inode_fifo_out_len(void)
+static unsigned int hifs_data_fifo_out_len(void)
 {
-    return hifs_fifo_len_locked(&hifs_inode_fifo, &hifs_inode_lock);
+    return hifs_fifo_len_locked(&hifs_data_fifo, &hifs_data_lock);
 }
 
 int hifs_cmd_fifo_out_push(const struct hifs_cmds *msg)
@@ -58,9 +58,21 @@ int hifs_cmd_fifo_out_push(const struct hifs_cmds *msg)
     return hifs_fifo_push_locked(&hifs_cmd_fifo, &hifs_cmd_lock, &hifs_cmd_wait, msg);
 }
 
-int hifs_inode_fifo_out_push(const struct hifs_inode *msg)
+int hifs_data_fifo_out_push_buf(const void *buf, size_t len)
 {
-    return hifs_fifo_push_locked(&hifs_inode_fifo, &hifs_inode_lock, &hifs_inode_wait, msg);
+    struct hifs_data_frame *frame;
+    int ret;
+    if (!buf || len == 0 || len > HIFS_DATA_MAX)
+        return -EINVAL;
+    frame = kmalloc(sizeof(*frame), GFP_KERNEL);
+    if (!frame)
+        return -ENOMEM;
+    memset(frame, 0, sizeof(*frame));
+    frame->len = len;
+    memcpy(frame->data, buf, len);
+    ret = hifs_fifo_push_locked(&hifs_data_fifo, &hifs_data_lock, &hifs_data_wait, frame);
+    kfree(frame);
+    return ret;
 }
 
 int hifs_cmd_fifo_in_push(const struct hifs_cmds *msg)
@@ -68,9 +80,21 @@ int hifs_cmd_fifo_in_push(const struct hifs_cmds *msg)
     return hifs_fifo_push_locked(&hifs_cmd_in_fifo, &hifs_cmd_in_lock, &hifs_cmd_in_wait, msg);
 }
 
-int hifs_inode_fifo_in_push(const struct hifs_inode *msg)
+int hifs_data_fifo_in_push_buf(const void *buf, size_t len)
 {
-    return hifs_fifo_push_locked(&hifs_inode_in_fifo, &hifs_inode_in_lock, &hifs_inode_in_wait, msg);
+    struct hifs_data_frame *frame;
+    int ret;
+    if (!buf || len == 0 || len > HIFS_DATA_MAX)
+        return -EINVAL;
+    frame = kmalloc(sizeof(*frame), GFP_KERNEL);
+    if (!frame)
+        return -ENOMEM;
+    memset(frame, 0, sizeof(*frame));
+    frame->len = len;
+    memcpy(frame->data, buf, len);
+    ret = hifs_fifo_push_locked(&hifs_data_in_fifo, &hifs_data_in_lock, &hifs_data_in_wait, frame);
+    kfree(frame);
+    return ret;
 }
 
 // Helper. Forget the structure and just push a quick command.Extensible protocol.
@@ -90,51 +114,16 @@ int hifs_cmd_fifo_out_push_cstr(const char *command)
     return hifs_cmd_fifo_out_push(&msg);
 }
 
-// Helper. Push an inode that's in the kernel's structure and wrap it, don't convert it to a hifs_inode.
-int hifs_inode_fifo_out_push_from_inode(const struct hifs_inode *inode)
-{
-	struct hifs_inode msg;
-
-	if (!inode)
-		return -EINVAL;
-
-	hifs_prepare_inode_4user(&msg, inode);
-    return hifs_inode_fifo_out_push(&msg);
-}
-
-void hifs_prepare_inode_4user(struct hifs_inode *dst, const struct hifs_inode *src)
-{
-	if (!dst || !src)
-		return;
-
-	memset(dst, 0, sizeof(*dst));
-
-	dst->i_version = src->i_version;
-	dst->i_flags = src->i_flags;
-	dst->i_mode = src->i_mode;
-	dst->i_ino = src->i_ino;
-	dst->i_uid = src->i_uid;
-	dst->i_gid = src->i_gid;
-	dst->i_hrd_lnk = src->i_hrd_lnk;
-	dst->i_atime = src->i_atime;
-	dst->i_mtime = src->i_mtime;
-	dst->i_ctime = src->i_ctime;
-	dst->i_size = src->i_size;
-	dst->i_blocks = src->i_blocks;
-	dst->i_bytes = src->i_bytes;
-	strscpy(dst->i_name, src->i_name, sizeof(dst->i_name));
-	memcpy(dst->i_addrb, src->i_addrb, sizeof(dst->i_addrb));
-	memcpy(dst->i_addre, src->i_addre, sizeof(dst->i_addre));
-}
+/* Helper removed: variable-length data FIFO supersedes inode-specific path. */
 
 static int hifs_cmd_fifo_out_pop(struct hifs_cmds *msg, bool nonblock)
 {
     return hifs_fifo_pop_locked(&hifs_cmd_fifo, &hifs_cmd_lock, hifs_cmd_wait, msg, nonblock);
 }
 
-static int hifs_inode_fifo_out_pop(struct hifs_inode *msg, bool nonblock)
+static int hifs_data_fifo_out_pop(struct hifs_data_frame *frame, bool nonblock)
 {
-    return hifs_fifo_pop_locked(&hifs_inode_fifo, &hifs_inode_lock, hifs_inode_wait, msg, nonblock);
+    return hifs_fifo_pop_locked(&hifs_data_fifo, &hifs_data_lock, hifs_data_wait, frame, nonblock);
 }
 
 int hifs_cmd_fifo_in_pop(struct hifs_cmds *msg, bool nonblock)
@@ -142,9 +131,9 @@ int hifs_cmd_fifo_in_pop(struct hifs_cmds *msg, bool nonblock)
     return hifs_fifo_pop_locked(&hifs_cmd_in_fifo, &hifs_cmd_in_lock, hifs_cmd_in_wait, msg, nonblock);
 }
 
-int hifs_inode_fifo_in_pop(struct hifs_inode *msg, bool nonblock)
+int hifs_data_fifo_in_pop(struct hifs_data_frame *frame, bool nonblock)
 {
-    return hifs_fifo_pop_locked(&hifs_inode_in_fifo, &hifs_inode_in_lock, hifs_inode_in_wait, msg, nonblock);
+    return hifs_fifo_pop_locked(&hifs_data_in_fifo, &hifs_data_in_lock, hifs_data_in_wait, frame, nonblock);
 }
 
 static long hifs_comm_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
@@ -165,14 +154,14 @@ static long hifs_comm_ioctl(struct file *file, unsigned int cmd, unsigned long a
 
 		return 0;
 	}
-	case HIFS_IOCTL_INODE_DEQUEUE: {
-		struct hifs_inode msg;
-		int ret = hifs_inode_fifo_out_pop(&msg, nonblock);
+	case HIFS_IOCTL_DATA_DEQUEUE: {
+		struct hifs_data_frame frame;
+		int ret = hifs_data_fifo_out_pop(&frame, nonblock);
 
 		if (ret)
 			return ret;
 
-		if (copy_to_user(user_ptr, &msg, sizeof(msg)))
+		if (copy_to_user(user_ptr, &frame, sizeof(frame)))
 			return -EFAULT;
 
 		return 0;
@@ -180,9 +169,9 @@ static long hifs_comm_ioctl(struct file *file, unsigned int cmd, unsigned long a
 	case HIFS_IOCTL_STATUS: {
 	struct hifs_comm_status status = {
 		.cmd_available = hifs_cmd_fifo_out_len(),
-		.inode_available = hifs_inode_fifo_out_len(),
+		.inode_available = hifs_data_fifo_out_len(),
 		.cmd_pending = hifs_cmd_fifo_in_len(),
-		.inode_pending = hifs_inode_fifo_in_len(),
+		.inode_pending = hifs_data_fifo_in_len(),
 		};
 
 		if (copy_to_user(user_ptr, &status, sizeof(status)))
@@ -198,13 +187,13 @@ static long hifs_comm_ioctl(struct file *file, unsigned int cmd, unsigned long a
 
         return hifs_cmd_fifo_in_push(&msg);
 	}
-	case HIFS_IOCTL_INODE_ENQUEUE: {
-		struct hifs_inode msg;
+	case HIFS_IOCTL_DATA_ENQUEUE: {
+		struct hifs_data_frame frame;
 
-		if (copy_from_user(&msg, user_ptr, sizeof(msg)))
+		if (copy_from_user(&frame, user_ptr, sizeof(frame)))
 			return -EFAULT;
 
-        return hifs_inode_fifo_in_push(&msg);
+        return hifs_data_fifo_in_push_buf(frame.data, frame.len);
 	}
 	default:
 		return -ENOTTY;
@@ -213,19 +202,19 @@ static long hifs_comm_ioctl(struct file *file, unsigned int cmd, unsigned long a
 
 static __poll_t hifs_fifo_poll(struct file *file, poll_table *wait)
 {
-	__poll_t mask = 0;
+    __poll_t mask = 0;
 
-	poll_wait(file, &hifs_cmd_wait, wait);
-	poll_wait(file, &hifs_inode_wait, wait);
+    poll_wait(file, &hifs_cmd_wait, wait);
+    poll_wait(file, &hifs_data_wait, wait);
 
 	if (hifs_cmd_fifo_out_len())
 		mask |= POLLIN | POLLRDNORM;
 
-	if (hifs_inode_fifo_out_len())
-		mask |= POLLIN | POLLRDBAND;
+    if (hifs_data_fifo_out_len())
+        mask |= POLLIN | POLLRDBAND;
 
-	if (!kfifo_is_full(&hifs_cmd_in_fifo) || !kfifo_is_full(&hifs_inode_in_fifo))
-		mask |= POLLOUT | POLLWRNORM;
+    if (!kfifo_is_full(&hifs_cmd_in_fifo) || !kfifo_is_full(&hifs_data_in_fifo))
+        mask |= POLLOUT | POLLWRNORM;
 
 	return mask;
 }
@@ -249,9 +238,9 @@ int hifs_fifo_init(void)
 	int ret;
 
 	INIT_KFIFO(hifs_cmd_fifo);
-	INIT_KFIFO(hifs_inode_fifo);
+    INIT_KFIFO(hifs_data_fifo);
 	INIT_KFIFO(hifs_cmd_in_fifo);
-	INIT_KFIFO(hifs_inode_in_fifo);
+    INIT_KFIFO(hifs_data_in_fifo);
 
     ret = misc_register(&hifs_comm_device);
     if (ret)
@@ -270,15 +259,15 @@ void hifs_fifo_exit(void)
 	kfifo_reset(&hifs_cmd_fifo);
 	spin_unlock_irqrestore(&hifs_cmd_lock, flags);
 
-	spin_lock_irqsave(&hifs_inode_lock, flags);
-	kfifo_reset(&hifs_inode_fifo);
-	spin_unlock_irqrestore(&hifs_inode_lock, flags);
+    spin_lock_irqsave(&hifs_data_lock, flags);
+    kfifo_reset(&hifs_data_fifo);
+    spin_unlock_irqrestore(&hifs_data_lock, flags);
 
 	spin_lock_irqsave(&hifs_cmd_in_lock, flags);
 	kfifo_reset(&hifs_cmd_in_fifo);
 	spin_unlock_irqrestore(&hifs_cmd_in_lock, flags);
 
-	spin_lock_irqsave(&hifs_inode_in_lock, flags);
-	kfifo_reset(&hifs_inode_in_fifo);
-	spin_unlock_irqrestore(&hifs_inode_in_lock, flags);
+    spin_lock_irqsave(&hifs_data_in_lock, flags);
+    kfifo_reset(&hifs_data_in_fifo);
+    spin_unlock_irqrestore(&hifs_data_in_lock, flags);
 }
