@@ -42,6 +42,8 @@
 
 /* Definitions past this point should be specific only to the kernel-space module! */
 
+struct hifs_sb_info;
+
 /*
 
  Naming convension used:
@@ -143,7 +145,7 @@ int hifs_data_fifo_in_push_buf(const void *buf, size_t len);
 int hifs_cmd_fifo_in_pop(struct hifs_cmds *msg, bool nonblock);
 int hifs_data_fifo_in_pop(struct hifs_data_frame *frame, bool nonblock);
 
-/* hifs_superblock.c */
+/* hifs_volume_superblock.c */
 void hifs_save_sb(struct super_block *sb);
 void hifs_put_super(struct super_block *sb);
 void hifs_kill_superblock(struct super_block *sb);
@@ -178,7 +180,7 @@ ssize_t hifs_read(struct kiocb *iocb, struct iov_iter *to);
 ssize_t hifs_write(struct kiocb *iocb, struct iov_iter *from);
 int hifs_open_file(struct inode *inode, struct file *filp);
 int hifs_release_file(struct inode *inode, struct file *filp);
-//ssize_t hifs_alloc_if_necessary(struct hifs_superblock *sb, struct hifs_inode *di, loff_t off, size_t cnt);
+//ssize_t hifs_alloc_if_necessary(struct hifs_volume_superblock *sb, struct hifs_inode *di, loff_t off, size_t cnt);
 
 /* hifs_cache (shared cache context) */
 struct hifs_cache_ctx; /* opaque shared cache context */
@@ -243,7 +245,7 @@ struct hifs_sb_info
     /* Per-mount volume identifier within shared cache */
     uint64_t volume_id;
     /* Per-volume logical super (remote-facing minimal copy) */
-    struct hifs_superblock vol_super;
+    struct hifs_volume_superblock vol_super;
 };
 
 /* Return pointer to cached on-disk super in sb->s_fs_info (may be NULL). */

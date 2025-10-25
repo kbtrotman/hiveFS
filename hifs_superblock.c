@@ -14,6 +14,58 @@
 #include <linux/mount.h>
 #include <linux/time64.h>
 
+static u64 hifs_merge_lohi(__le32 lo, __le32 hi)
+{
+	return (u64)le32_to_cpu(lo) |
+	       ((u64)le32_to_cpu(hi) << 32);
+}
+
+/* Prepare the per-volume logical superblock for exchange with the cluster. */
+static void hifs_prepare_volume_super(struct super_block *sb,
+				      struct hifs_sb_info *info)
+{
+	u64 blocks, free_blocks;
+	u64 maxbytes = (u64)MAX_LFS_FILESIZE;
+	char label[sizeof(info->disk.s_volume_name)];
+
+	if (!sb || !info)
+		return;
+
+	blocks = hifs_merge_lohi(info->disk.s_blocks_count,
+				 info->disk.s_blocks_count_hi);
+	free_blocks = hifs_merge_lohi(info->disk.s_free_blocks_count,
+				      info->disk.s_free_blocks_hi);
+
+	info->vol_super.s_magic = cpu_to_le32(info->s_magic);
+	info->vol_super.s_blocksize = cpu_to_le32(info->s_blocksize);
+	info->vol_super.s_blocksize_bits = cpu_to_le32(sb->s_blocksize_bits);
+	info->vol_super.s_blocks_count = cpu_to_le64(blocks);
+	info->vol_super.s_free_blocks = cpu_to_le64(free_blocks);
+	info->vol_super.s_inodes_count =
+		cpu_to_le64(le32_to_cpu(info->disk.s_inodes_count));
+	info->vol_super.s_free_inodes =
+		cpu_to_le64(le32_to_cpu(info->disk.s_free_inodes_count));
+	info->vol_super.s_maxbytes = cpu_to_le64(maxbytes);
+
+	info->vol_super.s_feature_compat = info->disk.s_feature_compat;
+	info->vol_super.s_feature_ro_compat = info->disk.s_feature_ro_compat;
+	info->vol_super.s_feature_incompat = info->disk.s_feature_incompat;
+	memcpy(info->vol_super.s_uuid, info->disk.s_uuid,
+	       sizeof(info->vol_super.s_uuid));
+
+	if (!info->vol_super.s_rev_level)
+		info->vol_super.s_rev_level = info->disk.s_rev_level;
+	if (!info->vol_super.s_wtime)
+		info->vol_super.s_wtime = info->disk.s_wtime;
+	if (!info->vol_super.s_flags)
+		info->vol_super.s_flags = info->disk.s_flags;
+
+	memset(label, 0, sizeof(label));
+	memcpy(label, info->disk.s_volume_name, sizeof(label));
+	if (!info->vol_super.s_volume_name[0])
+		strscpy(info->vol_super.s_volume_name, label,
+			sizeof(info->vol_super.s_volume_name));
+}
 
 /* Read a block at an arbitrary byte offset from the block device. */
 static struct buffer_head *hifs_bread_at(struct super_block *sb, u64 byte_offset,
@@ -119,6 +171,14 @@ int hifs_get_super(struct super_block *sb, void *data, int silent)
     ret = hifs_volume_load(sb, sb_info, true);
     if (ret)
         goto out;
+
+	hifs_prepare_volume_super(sb, sb_info);
+	{
+		int vsb_ret = hifs_volume_save(sb, sb_info);
+		if (vsb_ret)
+			hifs_warning("Failed to persist per-volume super metadata: %d",
+				     vsb_ret);
+	}
 
     /* Read the on-disk root inode from the inode table, not the root directory block. */
     bh = hifs_bread_at(sb, HIFS_INODE_TABLE_OFFSET, &offset);

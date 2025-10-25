@@ -69,6 +69,31 @@ CREATE TABLE host_tokens (
       ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
+-- Remote-facing per-volume superblocks mirrored from the cache disk table.
+-- Values correspond to struct hifs_volume_superblock (little-endian on disk;
+-- stored here as native MySQL unsigned integers for easy comparison).
+CREATE TABLE volume_superblocks (
+  volume_id              BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+  s_magic                INT UNSIGNED NOT NULL,
+  s_blocksize            INT UNSIGNED NOT NULL,
+  s_blocksize_bits       INT UNSIGNED NOT NULL,
+  s_blocks_count         BIGINT UNSIGNED NOT NULL,
+  s_free_blocks          BIGINT UNSIGNED NOT NULL,
+  s_inodes_count         BIGINT UNSIGNED NOT NULL,
+  s_free_inodes          BIGINT UNSIGNED NOT NULL,
+  s_maxbytes             BIGINT UNSIGNED NOT NULL,
+  s_feature_compat       INT UNSIGNED NOT NULL,
+  s_feature_ro_compat    INT UNSIGNED NOT NULL,
+  s_feature_incompat     INT UNSIGNED NOT NULL,
+  s_uuid                 BINARY(16) NOT NULL,
+  s_rev_level            INT UNSIGNED NOT NULL,
+  s_wtime                INT UNSIGNED NOT NULL,
+  s_flags                INT UNSIGNED NOT NULL,
+  s_volume_name          VARBINARY(16) NOT NULL,
+  updated_at             TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                          ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB;
+
 -- 3) CSR mailbox (client writes CSR here; controller writes back cert)
 CREATE TABLE csr_queue (
   id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
