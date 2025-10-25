@@ -96,8 +96,7 @@
 /* Superblock exchange */
 #define HIFS_Q_PROTO_CMD_SB_SEND        "sb_send"
 #define HIFS_Q_PROTO_CMD_SB_RECV        "sb_recv"
-#define HIFS_Q_PROTO_CMD_SB_SEND        "sb_send"
-#define HIFS_Q_PROTO_CMD_SB_RECV        "sb_recv"
+
 
 enum hifs_module{HIFS_COMM_PROGRAM_KERN_MOD, HIFS_COMM_PROGRAM_USER_HICOMM};
 enum hifs_queue_direction{HIFS_COMM_TO_USER, HIFS_COMM_FROM_USER};
