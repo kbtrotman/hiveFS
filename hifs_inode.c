@@ -156,6 +156,7 @@ struct hifs_sb_info *hisb;
 	hifs_store_inode(sb, hii);
 	isave_intable(sb, hii, (hii->i_addrb[0] - 1));
 	/* TODO: update inode block bitmap */
+	hifs_publish_inode(sb, hii);
 
 	return 0;
 }

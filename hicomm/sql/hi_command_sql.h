@@ -82,6 +82,10 @@ bool hifs_volume_dentry_load(uint64_t volume_id, uint64_t inode,
                              struct hifs_volume_dentry *out);
 bool hifs_volume_dentry_store(uint64_t volume_id,
                               const struct hifs_volume_dentry *dent);
+bool hifs_volume_inode_load(uint64_t volume_id, uint64_t inode,
+                            struct hifs_inode_wire *out);
+bool hifs_volume_inode_store(uint64_t volume_id,
+                             const struct hifs_inode_wire *inode);
 
 /* SQL Connect */
 

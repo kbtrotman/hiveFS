@@ -11,6 +11,7 @@
 #include "sql/hi_command_sql.h"
 
 #include <arpa/inet.h>
+#include <endian.h>
 #include <netdb.h>
 #include <sys/utsname.h>
 
@@ -756,6 +757,73 @@ bool hifs_volume_dentry_store(uint64_t volume_id,
 		 dent->de_type,
 		 dent->de_name_len,
 		 name_hex);
+
+	return hifs_insert_sql(sql_query);
+}
+
+bool hifs_volume_inode_load(uint64_t volume_id, uint64_t inode,
+				 struct hifs_inode_wire *out)
+{
+	char sql_query[MAX_QUERY_SIZE];
+	MYSQL_RES *res;
+	MYSQL_ROW row;
+	unsigned long *lengths;
+	bool ok = false;
+
+	if (!sqldb.sql_init || !sqldb.conn || !out)
+		return false;
+
+	snprintf(sql_query, sizeof(sql_query),
+		 "SELECT HEX(inode_blob) FROM volume_inodes WHERE volume_id=%llu AND inode=%llu",
+		 (unsigned long long)volume_id, (unsigned long long)inode);
+
+	res = hifs_execute_sql(sql_query);
+	if (!res)
+		return false;
+
+	if (mysql_num_rows(res) == 0)
+		goto out;
+
+	row = mysql_fetch_row(res);
+	lengths = mysql_fetch_lengths(res);
+	if (!row || !lengths)
+		goto out;
+
+	if (!row[0] || !hex_to_bytes(row[0], lengths[0],
+				      (uint8_t *)out, sizeof(*out)))
+		goto out;
+
+	ok = true;
+
+out:
+	mysql_free_result(res);
+	sqldb.last_query = NULL;
+	return ok;
+}
+
+bool hifs_volume_inode_store(uint64_t volume_id,
+				 const struct hifs_inode_wire *inode)
+{
+	char sql_query[MAX_QUERY_SIZE];
+	char blob_hex[sizeof(*inode) * 2 + 1];
+	uint32_t epoch;
+	uint64_t ino_host;
+
+	if (!sqldb.sql_init || !sqldb.conn || !inode)
+		return false;
+
+	bytes_to_hex((const uint8_t *)inode, sizeof(*inode), blob_hex);
+	ino_host = le64toh(inode->i_ino);
+	epoch = le32toh(inode->i_ctime);
+
+	snprintf(sql_query, sizeof(sql_query),
+		 "INSERT INTO volume_inodes (volume_id, inode, inode_blob, epoch) "
+		 "VALUES (%llu, %llu, UNHEX('%s'), %u) "
+		 "ON DUPLICATE KEY UPDATE inode_blob=VALUES(inode_blob), epoch=VALUES(epoch)",
+		 (unsigned long long)volume_id,
+		 (unsigned long long)ino_host,
+		 blob_hex,
+		 epoch);
 
 	return hifs_insert_sql(sql_query);
 }

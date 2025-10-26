@@ -135,6 +135,7 @@ int hifs_handshake_superblock(struct super_block *sb);
 int hifs_handshake_rootdentry(struct super_block *sb);
 int hifs_publish_dentry(struct super_block *sb, uint64_t parent_ino, uint64_t child_ino,
 			const char *name, u32 name_len, u32 type);
+int hifs_publish_inode(struct super_block *sb, const struct hifs_inode *hii);
 int hifs_flush_dirty_cache_items(void);
 
 /*hicom_kern_mm.c*/
