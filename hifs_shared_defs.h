@@ -101,6 +101,8 @@
 #define HIFS_Q_PROTO_CMD_DENTRY_SEND    "dentry_send"
 #define HIFS_Q_PROTO_CMD_DENTRY_RECV    "dentry_recv"
 
+#define HIFS_DENTRY_MSGF_REQUEST  0x00000001
+
 
 enum hifs_module{HIFS_COMM_PROGRAM_KERN_MOD, HIFS_COMM_PROGRAM_USER_HICOMM};
 enum hifs_queue_direction{HIFS_COMM_TO_USER, HIFS_COMM_FROM_USER};
@@ -193,7 +195,7 @@ extern struct
 /* Additional cache bitmaps placed after root direntry block */
 #define HIFS_DIRENT_BITMAP_OFFSET (HIFS_ROOT_DENTRY_OFFSET + HIFS_DEFAULT_BLOCK_SIZE)
 #define HIFS_BLOCK_BITMAP_OFFSET  (HIFS_DIRENT_BITMAP_OFFSET + HIFS_DEFAULT_BLOCK_SIZE)
-/* Default place where FS will start using after mkfs (all above are used for mkfs) */
+/* Default place where FS will start using after mkcache (all above are used for mkcache tables) */
 #define HIFS_CACHE_SPACE_START	 (HIFS_BLOCK_BITMAP_OFFSET + HIFS_DEFAULT_BLOCK_SIZE)
 
 #define HIFS_INODE_SIZE		128
@@ -470,12 +472,14 @@ struct hifs_root_msg {
 /* Generic directory entry metadata shared with the cluster. */
 struct hifs_volume_dentry {
 #ifdef __KERNEL__
+    __le32 de_flags;
     __le64 de_parent;     /* parent inode */
     __le64 de_inode;      /* child inode */
     __le32 de_epoch;      /* update timestamp (ms) */
     __le32 de_type;       /* DT_* style file type */
     __le32 de_name_len;   /* name length */
 #else
+    uint32_t de_flags;
     uint64_t de_parent;
     uint64_t de_inode;
     uint32_t de_epoch;
@@ -494,9 +498,24 @@ struct hifs_dentry_msg {
     struct hifs_volume_dentry dentry;
 };
 
+struct hifs_block_msg {
+#ifdef __KERNEL__
+    __u64 volume_id;
+    __le64 block_no;
+    __le32 flags;
+    __le32 data_len;
+#else
+    uint64_t volume_id;
+    uint64_t block_no;
+    uint32_t flags;
+    uint32_t data_len;
+#endif
+};
+
 /* Wire format for hifs_inode exchanged with cluster. */
 struct hifs_inode_wire {
 #ifdef __KERNEL__
+    __le32 i_msg_flags;
     __u8  i_version;
     __u8  i_flags;
     __le32 i_mode;
@@ -516,6 +535,7 @@ struct hifs_inode_wire {
     __u8  i_links;
     __u8  __pad[3];
 #else
+    uint32_t i_msg_flags;
     uint8_t  i_version;
     uint8_t  i_flags;
     uint32_t i_mode;
@@ -566,3 +586,5 @@ struct hifs_volume_entry {
 /***********************
  * END Hive FS Structures
  ***********************/
+#define HIFS_INODE_MSGF_REQUEST  0x00000001
+#define HIFS_BLOCK_MSGF_REQUEST   0x00000001

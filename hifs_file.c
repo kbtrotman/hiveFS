@@ -8,6 +8,7 @@
  */
 
 #include "hifs.h"
+#include <linux/uaccess.h>
 
 
 ssize_t hifs_get_loffset(struct hifs_inode *hii, loff_t off)
@@ -57,6 +58,8 @@ ssize_t hifs_read(struct kiocb *iocb, struct iov_iter *to)
 
 	/* calculate datablock number here */
 	blk = hifs_get_loffset(hiinode, off);
+	if (hifs_fetch_block(sb, blk) < 0)
+		return 0;
 	bh = sb_bread(sb, blk);
 	if (!bh) {
         printk(KERN_ERR "Failed to read data block %lu\n", blk);
@@ -115,7 +118,14 @@ ssize_t hifs_write(struct kiocb *iocb, struct iov_iter *from)
 	//blk = hifs_alloc_if_necessary(dsb, dinode, off, count);
 	/* files are contigous so offset can be easly calculated */
 	boff = hifs_get_loffset(dinode, off);
-	bh = sb_bread(sb, boff);
+	if (hifs_fetch_block(sb, boff) < 0) {
+		bh = sb_bread(sb, boff);
+		if (!bh)
+		    return -EIO;
+		memset(bh->b_data, 0, HIFS_DEFAULT_BLOCK_SIZE);
+	} else {
+		bh = sb_bread(sb, boff);
+	}
 	if (!bh) {
 	    printk(KERN_ERR "Failed to read data block %lu\n", blk);
 	    return 0;
@@ -130,16 +140,18 @@ ssize_t hifs_write(struct kiocb *iocb, struct iov_iter *from)
 	
 	iocb->ki_pos += count; 
 	
-	mark_buffer_dirty(bh);
-	sync_dirty_buffer(bh);
-	brelse(bh);
-	
-	dinode->i_size = max((size_t)(dinode->i_size), count);
+    mark_buffer_dirty(bh);
+    sync_dirty_buffer(bh);
+    hifs_cache_mark_present(sb, boff);
+    hifs_push_block(sb, boff, bh->b_data, HIFS_DEFAULT_BLOCK_SIZE);
+    brelse(bh);
 
-	hifs_store_inode(sb, dinode);
-	hifs_publish_inode(sb, dinode);
+    dinode->i_size = max((size_t)(dinode->i_size), count);
 
-	return count;
+    hifs_store_inode(sb, dinode);
+    hifs_publish_inode(sb, dinode, false);
+
+    return count;
 }
 
 int hifs_open_file(struct inode *inode, struct file *filp)

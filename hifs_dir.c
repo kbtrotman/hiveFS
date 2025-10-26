@@ -29,6 +29,8 @@ int hifs_readdir(struct file *filp, struct dir_context *ctx)
 		u32 b = dinode->i_addrb[i] , e = dinode->i_addre[i];
 		u32 blk = b;
 		while (blk < e) {
+			if (hifs_fetch_block(sb, blk))
+				return -EIO;
 
 			bh = sb_bread(sb, blk);
 			BUG_ON(!bh);

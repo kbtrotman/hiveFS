@@ -61,6 +61,8 @@ void hifs_store_inode(struct super_block *sb, struct hifs_inode *hii)
 	mark_buffer_dirty(bh);
 	sync_dirty_buffer(bh);
 	brelse(bh);
+
+	hifs_cache_mark_inode(sb, hii->i_ino);
 }
 
 /* Here introduce allocation for directory... */
@@ -109,12 +111,13 @@ int hifs_add_dir_record(struct super_block *sb, struct inode *dir, struct dentry
 						else if (S_ISLNK(mode))
 							type = DT_LNK;
 					}
-					hifs_publish_dentry(sb,
-							    dir->i_ino,
-							    dir_rec->inode_nr,
-							    dentry->d_name.name,
-							    dir_rec->name_len,
-							    type);
+						hifs_publish_dentry(sb,
+						    dir->i_ino,
+						    dir_rec->inode_nr,
+						    dentry->d_name.name,
+						    dir_rec->name_len,
+						    type,
+						    false);
 				}
 				return 0;
 			}
@@ -156,7 +159,7 @@ struct hifs_sb_info *hisb;
 	hifs_store_inode(sb, hii);
 	isave_intable(sb, hii, (hii->i_addrb[0] - 1));
 	/* TODO: update inode block bitmap */
-	hifs_publish_inode(sb, hii);
+	hifs_publish_inode(sb, hii, false);
 
 	return 0;
 }
@@ -296,6 +299,12 @@ struct hifs_inode *hifs_iget(struct super_block *sb, ino_t ino)
 	struct hifs_inode *itab;
 	u32 blk = 0;
 	u32 *ptr;
+	struct hifs_inode request = {0};
+
+	if (!hifs_cache_test_inode(sb, ino)) {
+		request.i_ino = ino;
+		hifs_publish_inode(sb, &request, true);
+	}
 
 	/* get inode table 'file' */
 	bh = sb_bread(sb, HIFS_INODE_TABLE_OFFSET);
@@ -317,6 +326,7 @@ struct hifs_inode *hifs_iget(struct super_block *sb, ino_t ino)
 		return NULL;
 	dinode = cache_get_inode();
 	memcpy(dinode, ip, sizeof(*ip));
+	hifs_cache_mark_inode(sb, ino);
 	bforget(bh);
 
 	return dinode;
@@ -355,12 +365,19 @@ struct dentry *hifs_lookup(struct inode *dir, struct dentry *child_dentry, unsig
 	struct hifs_dir_entry *dir_rec;
 	struct inode *ichild;
 	u32 j = 0, i = 0;
+	bool retried = false;
+
+retry:
 
 	/* Here we should use cache instead but dummyfs is doing stuff in dummy way.. */
 	for (i = 0; i < HIFS_INODE_TSIZE; ++i) {
 		u32 b = dparent->i_addrb[i] , e = dparent->i_addre[i];
 		u32 blk = b;
 		while (blk < e) {
+			if (hifs_fetch_block(sb, blk)) {
+				blk++;
+				continue;
+			}
 
 			bh = sb_bread(sb, blk);
 			BUG_ON(!bh);
@@ -374,13 +391,14 @@ struct dentry *hifs_lookup(struct inode *dir, struct dentry *child_dentry, unsig
 				if (0 == strcmp(dir_rec->name, child_dentry->d_name.name)) {
 					dchild = hifs_iget(sb, dir_rec->inode_nr);
 					ichild = new_inode(sb);
-					if (!dchild) {
+					if (!dchild || !ichild) {
+						bforget(bh);
 						return NULL;
 					}
 					hifs_fill_inode(sb, ichild, dchild);
-					//inode_init_owner(ichild, dir, dchild->i_mode);
-					//d_add(child_dentry, ichild);
-
+					d_add(child_dentry, ichild);
+					bforget(bh);
+					return child_dentry;
 				}
 				dir_rec++;
 			}
@@ -389,6 +407,16 @@ struct dentry *hifs_lookup(struct inode *dir, struct dentry *child_dentry, unsig
 			blk++;
 			bforget(bh);
 		}
+	}
+
+	if (!retried) {
+		retried = true;
+		hifs_publish_dentry(sb, dir->i_ino, 0,
+				 child_dentry->d_name.name,
+				 child_dentry->d_name.len,
+				 DT_UNKNOWN,
+				 true);
+		goto retry;
 	}
 	return NULL;
 }

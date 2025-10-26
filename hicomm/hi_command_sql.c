@@ -674,7 +674,7 @@ bool hifs_root_dentry_store(uint64_t volume_id, const struct hifs_volume_root_de
 	return hifs_insert_sql(sql_query);
 }
 
-bool hifs_volume_dentry_load(uint64_t volume_id, uint64_t inode,
+bool hifs_volume_dentry_load_by_inode(uint64_t volume_id, uint64_t inode,
 				 struct hifs_volume_dentry *out)
 {
 	char sql_query[MAX_QUERY_SIZE];
@@ -688,7 +688,7 @@ bool hifs_volume_dentry_load(uint64_t volume_id, uint64_t inode,
 
 	snprintf(sql_query, sizeof(sql_query),
 		 "SELECT de_parent, de_inode, de_epoch, de_type, de_name_len, HEX(de_name) "
-		 "FROM volume_dentries WHERE volume_id=%llu AND de_inode=%llu",
+		 "FROM volume_dentries WHERE volume_id=%llu AND de_inode=%llu LIMIT 1",
 		 (unsigned long long)volume_id, (unsigned long long)inode);
 
 	res = hifs_execute_sql(sql_query);
@@ -727,6 +727,62 @@ out:
 	return ok;
 }
 
+bool hifs_volume_dentry_load_by_name(uint64_t volume_id, uint64_t parent,
+				 const char *name_hex, uint32_t name_hex_len,
+				 struct hifs_volume_dentry *out)
+{
+	char sql_query[MAX_QUERY_SIZE];
+	MYSQL_RES *res;
+	MYSQL_ROW row;
+	unsigned long *lengths;
+	bool ok = false;
+
+	if (!sqldb.sql_init || !sqldb.conn || !out || !name_hex)
+		return false;
+
+	snprintf(sql_query, sizeof(sql_query),
+		 "SELECT de_parent, de_inode, de_epoch, de_type, de_name_len, HEX(de_name) "
+		 "FROM volume_dentries WHERE volume_id=%llu AND de_parent=%llu AND de_name=UNHEX('%.*s') LIMIT 1",
+		 (unsigned long long)volume_id,
+		 (unsigned long long)parent,
+		 (int)name_hex_len,
+		 name_hex);
+
+	res = hifs_execute_sql(sql_query);
+	if (!res)
+		return false;
+
+	if (mysql_num_rows(res) == 0)
+		goto out;
+
+	row = mysql_fetch_row(res);
+	lengths = mysql_fetch_lengths(res);
+	if (!row || !lengths)
+		goto out;
+
+	memset(out, 0, sizeof(*out));
+	out->de_parent = row[0] ? strtoull(row[0], NULL, 10) : 0;
+	out->de_inode = row[1] ? strtoull(row[1], NULL, 10) : 0;
+	out->de_epoch = row[2] ? (uint32_t)strtoul(row[2], NULL, 10) : 0;
+	out->de_type = row[3] ? (uint32_t)strtoul(row[3], NULL, 10) : 0;
+	out->de_name_len = row[4] ? (uint32_t)strtoul(row[4], NULL, 10) : 0;
+	if (row[5] && lengths[5] > 0) {
+		if (!hex_to_bytes(row[5], lengths[5],
+				 (uint8_t *)out->de_name,
+				 sizeof(out->de_name)))
+			goto out;
+	} else {
+		memset(out->de_name, 0, sizeof(out->de_name));
+	}
+
+	ok = true;
+
+out:
+	mysql_free_result(res);
+	sqldb.last_query = NULL;
+	return ok;
+}
+
 bool hifs_volume_dentry_store(uint64_t volume_id,
 				 const struct hifs_volume_dentry *dent)
 {
@@ -744,15 +800,15 @@ bool hifs_volume_dentry_store(uint64_t volume_id,
 
 	snprintf(sql_query, sizeof(sql_query),
 		 "INSERT INTO volume_dentries "
-		 "(volume_id, de_inode, de_parent, de_epoch, de_type, de_name_len, de_name) "
+		 "(volume_id, de_parent, de_inode, de_epoch, de_type, de_name_len, de_name) "
 		 "VALUES (%llu, %llu, %llu, %u, %u, %u, UNHEX('%s')) "
 		 "ON DUPLICATE KEY UPDATE "
-		 "de_parent=VALUES(de_parent), de_epoch=VALUES(de_epoch), "
+		 "de_inode=VALUES(de_inode), de_epoch=VALUES(de_epoch), "
 		 "de_type=VALUES(de_type), de_name_len=VALUES(de_name_len), "
 		 "de_name=VALUES(de_name)",
 		 (unsigned long long)volume_id,
-		 (unsigned long long)dent->de_inode,
 		 (unsigned long long)dent->de_parent,
+		 (unsigned long long)dent->de_inode,
 		 dent->de_epoch,
 		 dent->de_type,
 		 dent->de_name_len,
@@ -826,6 +882,80 @@ bool hifs_volume_inode_store(uint64_t volume_id,
 		 epoch);
 
 	return hifs_insert_sql(sql_query);
+}
+
+bool hifs_volume_block_load(uint64_t volume_id, uint64_t block_no,
+				 uint8_t *buf, uint32_t *len)
+{
+	char sql_query[MAX_QUERY_SIZE];
+	MYSQL_RES *res;
+	MYSQL_ROW row;
+	unsigned long *lengths;
+	bool ok = false;
+
+	if (!sqldb.sql_init || !sqldb.conn || !buf || !len)
+		return false;
+
+	snprintf(sql_query, sizeof(sql_query),
+		 "SELECT HEX(block_data) FROM volume_blocks WHERE volume_id=%llu AND block_no=%llu",
+		 (unsigned long long)volume_id, (unsigned long long)block_no);
+
+	res = hifs_execute_sql(sql_query);
+	if (!res)
+		return false;
+
+	if (mysql_num_rows(res) == 0)
+		goto out;
+
+	row = mysql_fetch_row(res);
+	lengths = mysql_fetch_lengths(res);
+	if (!row || !lengths)
+		goto out;
+
+	if (!row[0] || !hex_to_bytes(row[0], lengths[0], buf, HIFS_DEFAULT_BLOCK_SIZE))
+		goto out;
+	*len = lengths[0] / 2;
+	ok = true;
+
+out:
+	mysql_free_result(res);
+	sqldb.last_query = NULL;
+	return ok;
+}
+
+bool hifs_volume_block_store(uint64_t volume_id, uint64_t block_no,
+				 const uint8_t *buf, uint32_t len)
+{
+	char blob_hex[HIFS_DEFAULT_BLOCK_SIZE * 2 + 1];
+	char *sql_query;
+	size_t sql_len;
+
+	if (!sqldb.sql_init || !sqldb.conn || !buf || len > HIFS_DEFAULT_BLOCK_SIZE)
+		return false;
+
+	bytes_to_hex(buf, len, blob_hex);
+
+	sql_len = strlen("INSERT INTO volume_blocks (volume_id, block_no, block_data) "
+			       "VALUES (, , UNHEX('')) "
+			       "ON DUPLICATE KEY UPDATE block_data=VALUES(block_data)")
+		  + 64 + strlen(blob_hex) + 1;
+	sql_query = malloc(sql_len);
+	if (!sql_query)
+		return false;
+
+	snprintf(sql_query, sql_len,
+		 "INSERT INTO volume_blocks (volume_id, block_no, block_data) "
+		 "VALUES (%llu, %llu, UNHEX('%s')) "
+		 "ON DUPLICATE KEY UPDATE block_data=VALUES(block_data)",
+		 (unsigned long long)volume_id,
+		 (unsigned long long)block_no,
+		 blob_hex);
+
+	{
+		bool ok = hifs_insert_sql(sql_query);
+		free(sql_query);
+		return ok;
+	}
 }
 
 int save_binary_data(char *data_block, char *hash)
