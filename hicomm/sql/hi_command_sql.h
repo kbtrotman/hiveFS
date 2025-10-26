@@ -76,6 +76,12 @@ int save_binary_data(char *data_block, char *hash);
 /* Remote superblock helpers */
 bool hifs_volume_super_get(uint64_t volume_id, struct hifs_volume_superblock *out);
 bool hifs_volume_super_set(uint64_t volume_id, const struct hifs_volume_superblock *vsb);
+bool hifs_root_dentry_load(uint64_t volume_id, struct hifs_volume_root_dentry *out);
+bool hifs_root_dentry_store(uint64_t volume_id, const struct hifs_volume_root_dentry *root);
+bool hifs_volume_dentry_load(uint64_t volume_id, uint64_t inode,
+                             struct hifs_volume_dentry *out);
+bool hifs_volume_dentry_store(uint64_t volume_id,
+                              const struct hifs_volume_dentry *dent);
 
 /* SQL Connect */
 

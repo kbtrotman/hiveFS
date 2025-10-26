@@ -452,6 +452,7 @@ int hifs_volume_load(struct super_block *sb, struct hifs_sb_info *info, bool cre
     ret = hifs_find_volume_index(sb, info->volume_id, &ve, &idx, &free_idx);
     if (ret == 0) {
         info->vol_super = ve.vsb;
+        info->root_dentry = ve.root;
         return 0;
     }
     if (ret > 0 && create) {
@@ -463,10 +464,12 @@ int hifs_volume_load(struct super_block *sb, struct hifs_sb_info *info, bool cre
         ve.vsb.s_rev_level = cpu_to_le32(0);
         ve.vsb.s_wtime = cpu_to_le32(0);
         ve.vsb.s_flags = cpu_to_le32(0);
+        memset(&ve.root, 0, sizeof(ve.root));
         ret = hifs_write_volume_entry(sb, free_idx, &ve);
         if (ret)
             return ret;
         info->vol_super = ve.vsb;
+        info->root_dentry = ve.root;
         return 0;
     }
     return ret < 0 ? ret : -ENOENT;
@@ -484,5 +487,6 @@ int hifs_volume_save(struct super_block *sb, const struct hifs_sb_info *info)
         return ret < 0 ? ret : -ENOENT;
     ve.volume_id = cpu_to_le64(info->volume_id);
     ve.vsb = info->vol_super;
+    ve.root = info->root_dentry;
     return hifs_write_volume_entry(sb, idx, &ve);
 }

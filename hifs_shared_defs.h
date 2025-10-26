@@ -96,6 +96,10 @@
 /* Superblock exchange */
 #define HIFS_Q_PROTO_CMD_SB_SEND        "sb_send"
 #define HIFS_Q_PROTO_CMD_SB_RECV        "sb_recv"
+#define HIFS_Q_PROTO_CMD_ROOT_SEND      "root_send"
+#define HIFS_Q_PROTO_CMD_ROOT_RECV      "root_recv"
+#define HIFS_Q_PROTO_CMD_DENTRY_SEND    "dentry_send"
+#define HIFS_Q_PROTO_CMD_DENTRY_RECV    "dentry_recv"
 
 
 enum hifs_module{HIFS_COMM_PROGRAM_KERN_MOD, HIFS_COMM_PROGRAM_USER_HICOMM};
@@ -411,6 +415,38 @@ struct hifs_volume_superblock {
     char     s_volume_name[16]; /* optional label */
 };
 
+/* Remote-facing root dentry metadata for reconciliation with the cluster. */
+struct hifs_volume_root_dentry {
+#ifdef __KERNEL__
+    __le64 rd_inode;       /* inode number for root */
+    __le32 rd_mode;        /* permission bits */
+    __le32 rd_uid;         /* owner uid */
+    __le32 rd_gid;         /* owner gid */
+    __le32 rd_flags;       /* inode flags */
+    __le64 rd_size;        /* directory size */
+    __le64 rd_blocks;      /* blocks allocated */
+    __le32 rd_atime;       /* last access time */
+    __le32 rd_mtime;       /* last modification */
+    __le32 rd_ctime;       /* last status change */
+    __le32 rd_links;       /* hard link count */
+    __le32 rd_name_len;    /* length of rd_name */
+#else
+    uint64_t rd_inode;
+    uint32_t rd_mode;
+    uint32_t rd_uid;
+    uint32_t rd_gid;
+    uint32_t rd_flags;
+    uint64_t rd_size;
+    uint64_t rd_blocks;
+    uint32_t rd_atime;
+    uint32_t rd_mtime;
+    uint32_t rd_ctime;
+    uint32_t rd_links;
+    uint32_t rd_name_len;
+#endif
+    char     rd_name[HIFS_MAX_NAME_SIZE]; /* root entry label */
+};
+
 /* SB message wrapper carried over data FIFO for SB_SEND/SB_RECV. */
 struct hifs_sb_msg {
 #ifdef __KERNEL__
@@ -419,6 +455,43 @@ struct hifs_sb_msg {
     uint64_t volume_id;
 #endif
     struct hifs_volume_superblock vsb;   /* logical super */
+};
+
+/* Root dentry metadata exchange wrapper. */
+struct hifs_root_msg {
+#ifdef __KERNEL__
+    __u64 volume_id;
+#else
+    uint64_t volume_id;
+#endif
+    struct hifs_volume_root_dentry root;
+};
+
+/* Generic directory entry metadata shared with the cluster. */
+struct hifs_volume_dentry {
+#ifdef __KERNEL__
+    __le64 de_parent;     /* parent inode */
+    __le64 de_inode;      /* child inode */
+    __le32 de_epoch;      /* update timestamp (ms) */
+    __le32 de_type;       /* DT_* style file type */
+    __le32 de_name_len;   /* name length */
+#else
+    uint64_t de_parent;
+    uint64_t de_inode;
+    uint32_t de_epoch;
+    uint32_t de_type;
+    uint32_t de_name_len;
+#endif
+    char     de_name[HIFS_MAX_NAME_SIZE];
+};
+
+struct hifs_dentry_msg {
+#ifdef __KERNEL__
+    __u64 volume_id;
+#else
+    uint64_t volume_id;
+#endif
+    struct hifs_volume_dentry dentry;
 };
 
 /* Volume table lives after the block bitmap by default. Each entry maps a
@@ -435,6 +508,7 @@ struct hifs_volume_entry {
     uint64_t volume_id;
 #endif
     struct hifs_volume_superblock vsb;  /* minimal remote-facing super */
+    struct hifs_volume_root_dentry root; /* root dentry metadata */
 };
 
 /***********************

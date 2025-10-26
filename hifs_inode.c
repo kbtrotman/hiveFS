@@ -9,6 +9,7 @@
 
 
 #include "hifs.h"
+#include <linux/dirent.h>
 #include <linux/byteorder/generic.h>
 u32 _ix = 0, b = 0, e = 0;
 
@@ -89,6 +90,32 @@ int hifs_add_dir_record(struct super_block *sb, struct inode *dir, struct dentry
 				sync_dirty_buffer(bh);
 				brelse(bh);
 				parent->i_size += sizeof(*dir_rec);
+				{
+					struct super_block *sb = dir->i_sb;
+					u32 type = DT_UNKNOWN;
+					if (inode) {
+						if (S_ISDIR(inode->i_mode))
+							type = DT_DIR;
+						else if (S_ISREG(inode->i_mode))
+							type = DT_REG;
+						else if (S_ISLNK(inode->i_mode))
+							type = DT_LNK;
+					} else if (dentry->d_inode) {
+						umode_t mode = dentry->d_inode->i_mode;
+						if (S_ISDIR(mode))
+							type = DT_DIR;
+						else if (S_ISREG(mode))
+							type = DT_REG;
+						else if (S_ISLNK(mode))
+							type = DT_LNK;
+					}
+					hifs_publish_dentry(sb,
+							    dir->i_ino,
+							    dir_rec->inode_nr,
+							    dentry->d_name.name,
+							    dir_rec->name_len,
+							    type);
+				}
 				return 0;
 			}
 			dir_rec++;
