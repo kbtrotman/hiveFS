@@ -123,6 +123,14 @@ static int hifs_compare_root_newer(const struct hifs_volume_root_dentry *local,
 static int hifs_compare_dentry_newer(const struct hifs_volume_dentry *local,
                                      const struct hifs_volume_dentry *remote)
 {
+    u32 r_flags = le32_to_cpu(remote->de_flags);
+    u32 l_flags = le32_to_cpu(local->de_flags);
+
+    if (r_flags & HIFS_DENTRY_MSGF_REQUEST)
+        return 0;
+    if (l_flags & HIFS_DENTRY_MSGF_REQUEST)
+        return 1;
+
     u32 l_epoch = le32_to_cpu(local->de_epoch);
     u32 r_epoch = le32_to_cpu(remote->de_epoch);
     if (r_epoch != l_epoch)
@@ -131,11 +139,13 @@ static int hifs_compare_dentry_newer(const struct hifs_volume_dentry *local,
 }
 
 static void hifs_inode_host_to_wire(const struct hifs_inode *src,
-                                    struct hifs_inode_wire *dst)
+                                    struct hifs_inode_wire *dst,
+                                    u32 msg_flags)
 {
     unsigned int i;
 
     memset(dst, 0, sizeof(*dst));
+    dst->i_msg_flags = cpu_to_le32(msg_flags);
     dst->i_version = src->i_version;
     dst->i_flags = src->i_flags;
     dst->i_mode = cpu_to_le32(src->i_mode);
@@ -163,6 +173,7 @@ static void hifs_inode_wire_to_host(const struct hifs_inode_wire *src,
     unsigned int i;
 
     memset(dst, 0, sizeof(*dst));
+    /* msg_flags handled by caller */
     dst->i_version = src->i_version;
     dst->i_flags = src->i_flags;
     dst->i_mode = le32_to_cpu(src->i_mode);
@@ -187,6 +198,11 @@ static void hifs_inode_wire_to_host(const struct hifs_inode_wire *src,
 static int hifs_compare_inode_newer(const struct hifs_inode_wire *local,
                                     const struct hifs_inode_wire *remote)
 {
+    if (le32_to_cpu(remote->i_msg_flags) & HIFS_INODE_MSGF_REQUEST)
+        return 0;
+    if (le32_to_cpu(local->i_msg_flags) & HIFS_INODE_MSGF_REQUEST)
+        return 1;
+
     u32 l_ctime = le32_to_cpu(local->i_ctime);
     u32 r_ctime = le32_to_cpu(remote->i_ctime);
     if (r_ctime != l_ctime)
@@ -216,6 +232,7 @@ static void hifs_apply_remote_inode(struct super_block *sb,
 
     hifs_inode_wire_to_host(remote, &host_inode);
     hifs_store_inode(sb, &host_inode);
+    hifs_cache_mark_inode(sb, host_inode.i_ino);
 
     vfs_inode = ilookup(sb, host_inode.i_ino);
     if (vfs_inode) {
@@ -249,12 +266,40 @@ static void hifs_apply_remote_inode(struct super_block *sb,
     }
 }
 
+static int hifs_apply_remote_block(struct super_block *sb,
+                                   uint64_t block_no,
+                                   const void *data,
+                                   u32 len)
+{
+    struct buffer_head *bh;
+
+    if (!sb || !data)
+        return -EINVAL;
+
+    if (len == 0 || len > HIFS_DEFAULT_BLOCK_SIZE)
+        return -EINVAL;
+
+    bh = sb_bread(sb, block_no);
+    if (!bh)
+        return -EIO;
+
+    memcpy(bh->b_data, data, len);
+    mark_buffer_dirty(bh);
+    sync_dirty_buffer(bh);
+    brelse(bh);
+
+    hifs_cache_mark_present(sb, block_no);
+    hifs_cache_clear_dirty(sb, block_no);
+    return 0;
+}
+
 static void hifs_apply_remote_dentry(struct super_block *sb,
                                      struct hifs_sb_info *info,
                                      const struct hifs_volume_dentry *remote)
 {
     char name_buf[HIFS_MAX_NAME_SIZE + 1];
     u32 name_len;
+    u32 flags;
 
     struct inode *parent_inode = NULL;
     struct hifs_inode *parent_hifs = NULL;
@@ -268,6 +313,10 @@ static void hifs_apply_remote_dentry(struct super_block *sb,
     memset(name_buf, 0, sizeof(name_buf));
     name_len = min_t(u32, le32_to_cpu(remote->de_name_len), (u32)HIFS_MAX_NAME_SIZE);
     memcpy(name_buf, remote->de_name, name_len);
+    flags = le32_to_cpu(remote->de_flags);
+
+    if (flags & HIFS_DENTRY_MSGF_REQUEST)
+        return;
 
     hifs_notice("Remote dentry update volume %llu parent %llu inode %llu name '%s'",
                 (unsigned long long)info->volume_id,
@@ -322,8 +371,9 @@ static void hifs_apply_remote_dentry(struct super_block *sb,
                     if (new_slot) {
                         parent_hifs->i_size += sizeof(*dir_rec);
                         hifs_store_inode(sb, parent_hifs);
-                        hifs_publish_inode(sb, parent_hifs);
+                        hifs_publish_inode(sb, parent_hifs, false);
                     }
+                    hifs_cache_mark_dirent(sb, le64_to_cpu(remote->de_inode));
                     goto out;
                 }
             }
@@ -465,7 +515,7 @@ int hifs_handshake_rootdentry(struct super_block *sb)
 }
 
 int hifs_publish_dentry(struct super_block *sb, uint64_t parent_ino, uint64_t child_ino,
-			const char *name, u32 name_len, u32 type)
+			const char *name, u32 name_len, u32 type, bool request_only)
 {
     struct hifs_sb_info *info;
     struct hifs_cmds cmd;
@@ -489,6 +539,7 @@ int hifs_publish_dentry(struct super_block *sb, uint64_t parent_ino, uint64_t ch
 
     memset(&msg_local, 0, sizeof(msg_local));
     msg_local.volume_id = cpu_to_le64(info->volume_id);
+    msg_local.dentry.de_flags = cpu_to_le32(request_only ? HIFS_DENTRY_MSGF_REQUEST : 0);
     msg_local.dentry.de_parent = cpu_to_le64(parent_ino);
     msg_local.dentry.de_inode = cpu_to_le64(child_ino);
     msg_local.dentry.de_epoch = cpu_to_le32((u32)GET_TIME());
@@ -529,7 +580,8 @@ int hifs_publish_dentry(struct super_block *sb, uint64_t parent_ino, uint64_t ch
     return 0;
 }
 
-int hifs_publish_inode(struct super_block *sb, const struct hifs_inode *hii)
+int hifs_publish_inode(struct super_block *sb, const struct hifs_inode *hii,
+                       bool request_only)
 {
     struct hifs_sb_info *info;
     struct hifs_cmds cmd;
@@ -545,7 +597,8 @@ int hifs_publish_inode(struct super_block *sb, const struct hifs_inode *hii)
     if (!info)
         return -EINVAL;
 
-    hifs_inode_host_to_wire(hii, &wire_local);
+    hifs_inode_host_to_wire(hii, &wire_local,
+                            request_only ? HIFS_INODE_MSGF_REQUEST : 0);
 
     memset(&cmd, 0, sizeof(cmd));
     strscpy(cmd.cmd, HIFS_Q_PROTO_CMD_INODE_SEND, sizeof(cmd.cmd));
@@ -591,6 +644,88 @@ int hifs_publish_inode(struct super_block *sb, const struct hifs_inode *hii)
     return 0;
 }
 
+int hifs_publish_block(struct super_block *sb, uint64_t block_no,
+                       const void *data, u32 data_len, bool request_only)
+{
+    struct hifs_sb_info *info;
+    struct hifs_cmds cmd;
+    struct hifs_block_msg msg_local;
+    int ret;
+
+    if (!sb)
+        return -EINVAL;
+    if (!request_only && (!data || data_len == 0))
+        return -EINVAL;
+    if (data_len > HIFS_DEFAULT_BLOCK_SIZE)
+        return -EINVAL;
+
+    info = (struct hifs_sb_info *)sb->s_fs_info;
+    if (!info)
+        return -EINVAL;
+
+    memset(&cmd, 0, sizeof(cmd));
+    strscpy(cmd.cmd, HIFS_Q_PROTO_CMD_BLOCK_SEND, sizeof(cmd.cmd));
+    cmd.count = strlen(cmd.cmd);
+    ret = hifs_cmd_fifo_out_push(&cmd);
+    if (ret)
+        return ret;
+
+    memset(&msg_local, 0, sizeof(msg_local));
+    msg_local.volume_id = cpu_to_le64(info->volume_id);
+    msg_local.block_no = cpu_to_le64(block_no);
+    msg_local.flags = cpu_to_le32(request_only ? HIFS_BLOCK_MSGF_REQUEST : 0);
+    msg_local.data_len = cpu_to_le32(request_only ? 0 : data_len);
+
+    ret = hifs_data_fifo_out_push_buf(&msg_local, sizeof(msg_local));
+    if (ret)
+        return ret;
+
+    if (!request_only && data_len) {
+        ret = hifs_data_fifo_out_push_buf(data, data_len);
+        if (ret)
+            return ret;
+    }
+
+    {
+        int tries;
+        for (tries = 0; tries < 20; tries++) {
+            if (!hifs_cmd_fifo_in_pop(&cmd, true)) {
+                if (cmd_equals(&cmd, HIFS_Q_PROTO_CMD_BLOCK_RECV)) {
+                    struct hifs_data_frame frame;
+                    ret = hifs_data_fifo_in_pop(&frame, false);
+                    if (ret)
+                        return ret;
+                    struct hifs_block_msg msg_remote;
+                    u32 r_len;
+                    memset(&msg_remote, 0, sizeof(msg_remote));
+                    if (frame.len != sizeof(msg_remote))
+                        return -EINVAL;
+                    memcpy(&msg_remote, frame.data, sizeof(msg_remote));
+                    r_len = le32_to_cpu(msg_remote.data_len);
+                    if (r_len > 0) {
+                        struct hifs_data_frame data_frame;
+                        ret = hifs_data_fifo_in_pop(&data_frame, false);
+                        if (ret)
+                            return ret;
+                        if (data_frame.len != r_len)
+                            return -EINVAL;
+                        ret = hifs_apply_remote_block(sb, le64_to_cpu(msg_remote.block_no),
+                                                       data_frame.data, r_len);
+                        if (!ret)
+                            return 1;
+                        return ret;
+                    }
+                    break;
+                }
+            }
+            schedule_timeout_interruptible(msecs_to_jiffies(50));
+        }
+        if (tries == 20)
+            return 0;
+    }
+
+    return 0;
+}
 int hifs_flush_dirty_cache_items(void)
 {
 

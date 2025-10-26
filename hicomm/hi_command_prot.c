@@ -12,6 +12,7 @@
 
 #include <inttypes.h>
 #include <endian.h>
+#include <endian.h>
 
 /* Helper to compare command strings */
 static bool hifs_command_equals(const struct hifs_cmds *cmd, const char *name)
@@ -52,6 +53,16 @@ static int hifs_compare_dentry_newer(const struct hifs_volume_dentry *a,
 	if (a_epoch != b_epoch)
 		return (a_epoch > b_epoch) ? 1 : -1;
 	return 0;
+}
+
+static void bin_to_hex(const uint8_t *src, size_t len, char *dst)
+{
+	static const char hexdigits[] = "0123456789abcdef";
+	for (size_t i = 0; i < len; ++i) {
+		dst[i * 2] = hexdigits[(src[i] >> 4) & 0xF];
+		dst[i * 2 + 1] = hexdigits[src[i] & 0xF];
+	}
+	dst[len * 2] = '\0';
 }
 
 static int hifs_compare_inode_newer(const struct hifs_inode_wire *a,
@@ -222,6 +233,7 @@ int hicomm_handle_command(int fd, const struct hifs_cmds *cmd)
 		bool save_local = false;
 		int err;
 		uint64_t volume_id;
+		bool request_only;
 
 		ret = hicomm_comm_recv_data(fd, &frame, false);
 		if (ret) {
@@ -253,7 +265,14 @@ int hicomm_handle_command(int fd, const struct hifs_cmds *cmd)
 			save_local = true;
 		}
 
-		if (save_local) {
+		request_only = (le32toh(msg_local.root.rd_links) == 0 &&
+			       le32toh(msg_local.root.rd_inode) == 0);
+
+		if (request_only && have_db) {
+			msg_reply.root = db_root;
+		}
+
+		if (!request_only && save_local) {
 			if (!hifs_root_dentry_store(volume_id, &msg_local.root)) {
 				hifs_err("Failed to persist root dentry for volume %" PRIu64,
 					 volume_id);
@@ -285,6 +304,9 @@ int hicomm_handle_command(int fd, const struct hifs_cmds *cmd)
 		int err;
 		uint64_t volume_id;
 		uint64_t inode_no;
+		uint64_t parent_no;
+		bool request_only;
+		char name_hex[HIFS_MAX_NAME_SIZE * 2 + 1];
 
 		ret = hicomm_comm_recv_data(fd, &frame, false);
 		if (ret) {
@@ -305,8 +327,19 @@ int hicomm_handle_command(int fd, const struct hifs_cmds *cmd)
 		volume_id = le64toh(msg_local.volume_id);
 		inode_no = le64toh(msg_local.dentry.de_inode);
 
-		have_db = hifs_volume_dentry_load(volume_id,
-				 inode_no, &db_dent);
+		parent_no = le64toh(msg_local.dentry.de_parent);
+		request_only = (le32toh(msg_local.dentry.de_flags) & HIFS_DENTRY_MSGF_REQUEST) != 0;
+		if (request_only) {
+			uint32_t name_len = le32toh(msg_local.dentry.de_name_len);
+			if (name_len > HIFS_MAX_NAME_SIZE)
+				name_len = HIFS_MAX_NAME_SIZE;
+			bin_to_hex(msg_local.dentry.de_name, name_len, name_hex);
+			have_db = hifs_volume_dentry_load_by_name(volume_id, parent_no,
+				name_hex, name_len * 2, &db_dent);
+		} else {
+			have_db = hifs_volume_dentry_load_by_inode(volume_id,
+				inode_no, &db_dent);
+		}
 		if (have_db) {
 			int cmp = hifs_compare_dentry_newer(&db_dent, &msg_local.dentry);
 			if (cmp > 0) {
@@ -318,7 +351,12 @@ int hicomm_handle_command(int fd, const struct hifs_cmds *cmd)
 			save_local = true;
 		}
 
-		if (save_local) {
+		if (request_only && have_db) {
+			msg_reply.dentry = db_dent;
+		}
+
+		if (!request_only && save_local) {
+			msg_local.dentry.de_flags = htole32(0);
 			if (!hifs_volume_dentry_store(volume_id,
 					&msg_local.dentry)) {
 				hifs_err("Failed to persist dentry for volume %" PRIu64,
@@ -351,6 +389,7 @@ int hicomm_handle_command(int fd, const struct hifs_cmds *cmd)
 		int err;
 		uint64_t volume_id;
 		uint64_t inode_no;
+		bool request_only;
 
 		ret = hicomm_comm_recv_data(fd, &frame, false);
 		if (ret) {
@@ -369,6 +408,7 @@ int hicomm_handle_command(int fd, const struct hifs_cmds *cmd)
 		msg_reply = msg_local;
 		volume_id = le64toh(msg_local.volume_id);
 		inode_no = le64toh(msg_local.inode.i_ino);
+		request_only = (le32toh(msg_local.inode.i_msg_flags) & HIFS_INODE_MSGF_REQUEST) != 0;
 
 		have_db = hifs_volume_inode_load(volume_id, inode_no, &db_wire);
 		if (have_db) {
@@ -382,7 +422,12 @@ int hicomm_handle_command(int fd, const struct hifs_cmds *cmd)
 			save_local = true;
 		}
 
-		if (save_local) {
+		if (request_only && have_db) {
+			msg_reply.inode = db_wire;
+		}
+
+		if (!request_only && save_local) {
+			msg_local.inode.i_msg_flags = htole32(0);
 			if (!hifs_volume_inode_store(volume_id, &msg_local.inode)) {
 				hifs_err("Failed to persist inode %" PRIu64 " for volume %" PRIu64,
 					 inode_no, volume_id);
@@ -404,7 +449,100 @@ int hicomm_handle_command(int fd, const struct hifs_cmds *cmd)
 		return ret;
 	}
 
-	return ret;
+	if (VSB_CMD_EQUALS(HIFS_Q_PROTO_CMD_BLOCK_SEND)) {
+		struct hifs_data_frame frame;
+		struct hifs_block_msg msg_local;
+		struct hifs_block_msg msg_reply;
+		bool have_db = false;
+		bool save_local = false;
+		int err;
+		uint64_t volume_id;
+		uint64_t block_no;
+		bool request_only;
+		uint8_t block_buf[HIFS_DEFAULT_BLOCK_SIZE];
+		uint32_t block_len = 0;
+		struct hifs_data_frame data_frame;
+		const uint8_t *incoming_data = NULL;
+		uint32_t incoming_len = 0;
+
+		ret = hicomm_comm_recv_data(fd, &frame, false);
+		if (ret) {
+			if (ret == -EAGAIN)
+				return 0;
+			hifs_err("Failed to fetch block payload: %d", ret);
+			return ret;
+		}
+		if (frame.len != sizeof(struct hifs_block_msg)) {
+			hifs_err("Unexpected block payload length %u (expected %zu)",
+				 frame.len, sizeof(struct hifs_block_msg));
+			return -EINVAL;
+		}
+
+		memcpy(&msg_local, frame.data, sizeof(msg_local));
+		msg_reply = msg_local;
+		volume_id = le64toh(msg_local.volume_id);
+		block_no = le64toh(msg_local.block_no);
+		request_only = (le32toh(msg_local.flags) & HIFS_BLOCK_MSGF_REQUEST) != 0;
+
+		if (request_only) {
+			have_db = hifs_volume_block_load(volume_id, block_no,
+				block_buf, &block_len);
+			if (have_db) {
+				msg_reply.flags = htole32(0);
+				msg_reply.data_len = htole32(block_len);
+			}
+		} else {
+			save_local = true;
+			have_db = true;
+			if (le32toh(msg_local.data_len) > 0) {
+				ret = hicomm_comm_recv_data(fd, &data_frame, false);
+				if (ret)
+					return ret;
+				incoming_len = data_frame.len;
+				incoming_data = data_frame.data;
+			}
+		}
+
+		if (save_local && have_db) {
+			uint32_t store_len = incoming_len ? incoming_len : le32toh(msg_local.data_len);
+			const uint8_t *store_buf = incoming_data ? incoming_data : block_buf;
+			if (!hifs_volume_block_store(volume_id, block_no,
+				 store_buf,
+				 store_len)) {
+				hifs_err("Failed to persist block %" PRIu64 " for volume %" PRIu64,
+					 block_no, volume_id);
+			}
+		}
+		if (!request_only)
+			msg_reply.data_len = htole32(0);
+
+		struct hifs_data_frame out_frame = {0};
+		out_frame.len = sizeof(msg_reply);
+		memcpy(out_frame.data, &msg_reply, sizeof(msg_reply));
+
+		err = hicomm_comm_send_data(fd, &out_frame);
+		if (err) {
+			hifs_err("Failed to send block response data: %d", err);
+			ret = err;
+		}
+		if (block_len > 0 && have_db) {
+			struct hifs_data_frame data_out = {0};
+			data_out.len = block_len;
+			memcpy(data_out.data, block_buf, block_len);
+			err = hicomm_comm_send_data(fd, &data_out);
+			if (err) {
+				hifs_err("Failed to send block data payload: %d", err);
+				if (!ret)
+					ret = err;
+			}
+		}
+		err = hicomm_send_cmd_str(fd, HIFS_Q_PROTO_CMD_BLOCK_RECV);
+		if (err && !ret)
+			ret = err;
+		return ret;
+	}
+
+    return ret;
 }
 
 /* Print inode information */

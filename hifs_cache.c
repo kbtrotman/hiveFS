@@ -396,6 +396,39 @@ bool hifs_cache_test_dirent(struct super_block *sb, uint64_t dent)
         return false;
     return __bitmap_test_byte(ctx->dirent_bmp->bitmap, dent);
 }
+
+int hifs_fetch_block(struct super_block *sb, uint64_t block)
+{
+    int ret;
+
+    if (!sb)
+        return -EINVAL;
+
+    if (hifs_cache_test_present(sb, block))
+        hifs_debug("cache hit block %llu", (unsigned long long)block);
+        return 0;
+
+    hifs_debug("cache miss block %llu", (unsigned long long)block);
+    ret = hifs_publish_block(sb, block, NULL, 0, true);
+    if (ret < 0)
+        return ret;
+
+    if (!hifs_cache_test_present(sb, block))
+        return -ENOENT;
+
+    return 0;
+}
+
+int hifs_push_block(struct super_block *sb, uint64_t block,
+                    const void *data, u32 data_len)
+{
+    if (!sb || !data)
+        return -EINVAL;
+
+    hifs_cache_mark_dirty(sb, block);
+    hifs_cache_mark_present(sb, block);
+    return hifs_publish_block(sb, block, data, data_len, false);
+}
 /* Volume table helpers */
 static int hifs_read_volume_entry(struct super_block *sb, u32 index, struct hifs_volume_entry *ve)
 {

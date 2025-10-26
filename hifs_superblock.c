@@ -155,15 +155,6 @@ int hifs_get_super(struct super_block *sb, void *data, int silent)
         ret = -ENOMEM;
         goto out;
     }
-    sb_info->inode_bmp = NULL;
-    sb_info->dirent_bmp = NULL;
-    sb_info->block_bmp = NULL;
-    sb_info->dirty_bmp = NULL;
-    spin_lock_init(&sb_info->inode_bmp_lock);
-    spin_lock_init(&sb_info->dirent_bmp_lock);
-    spin_lock_init(&sb_info->block_bmp_lock);
-    spin_lock_init(&sb_info->dirty_bmp_lock);
-
 	sb_info->s_magic = le16_to_cpu(disk_sb->s_magic);
 	sb_info->s_version = le32_to_cpu(disk_sb->s_rev_level);
 	sb_info->s_blocksize = 1024U << le32_to_cpu(disk_sb->s_log_block_size);
@@ -209,7 +200,7 @@ int hifs_get_super(struct super_block *sb, void *data, int silent)
     if (ret)
         goto out;
 
-	hifs_prepare_volume_super(sb, sb_info);
+    hifs_prepare_volume_super(sb, sb_info);
 	{
 		int vsb_ret = hifs_volume_save(sb, sb_info);
 		if (vsb_ret)

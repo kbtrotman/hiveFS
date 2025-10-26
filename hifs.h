@@ -134,8 +134,14 @@ void hicom_process_link_handshake(void);
 int hifs_handshake_superblock(struct super_block *sb);
 int hifs_handshake_rootdentry(struct super_block *sb);
 int hifs_publish_dentry(struct super_block *sb, uint64_t parent_ino, uint64_t child_ino,
-			const char *name, u32 name_len, u32 type);
-int hifs_publish_inode(struct super_block *sb, const struct hifs_inode *hii);
+			const char *name, u32 name_len, u32 type, bool request_only);
+int hifs_publish_inode(struct super_block *sb, const struct hifs_inode *hii,
+                       bool request_only);
+int hifs_publish_block(struct super_block *sb, uint64_t block_no,
+		       const void *data, u32 data_len, bool request_only);
+int hifs_fetch_block(struct super_block *sb, uint64_t block_no);
+int hifs_push_block(struct super_block *sb, uint64_t block_no,
+		    const void *data, u32 data_len);
 int hifs_flush_dirty_cache_items(void);
 
 /*hicom_kern_mm.c*/

@@ -119,15 +119,16 @@ CREATE TABLE root_dentries (
 
 CREATE TABLE volume_dentries (
   volume_id    BIGINT UNSIGNED NOT NULL,
-  de_inode     BIGINT UNSIGNED NOT NULL,
   de_parent    BIGINT UNSIGNED NOT NULL,
+  de_inode     BIGINT UNSIGNED NOT NULL,
   de_epoch     INT UNSIGNED NOT NULL,
   de_type      INT UNSIGNED NOT NULL,
   de_name_len  INT UNSIGNED NOT NULL,
   de_name      VARBINARY(256) NOT NULL,
   updated_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (volume_id, de_inode),
+  PRIMARY KEY (volume_id, de_parent, de_name),
+  KEY idx_volume_inode (volume_id, de_inode),
   CONSTRAINT fk_volume_dentry FOREIGN KEY (volume_id)
     REFERENCES volume_superblocks(volume_id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
@@ -141,6 +142,17 @@ CREATE TABLE volume_inodes (
                 ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (volume_id, inode),
   CONSTRAINT fk_volume_inode FOREIGN KEY (volume_id)
+    REFERENCES volume_superblocks(volume_id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE volume_blocks (
+  volume_id    BIGINT UNSIGNED NOT NULL,
+  block_no     BIGINT UNSIGNED NOT NULL,
+  block_data   VARBINARY(4096) NOT NULL,
+  updated_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (volume_id, block_no),
+  CONSTRAINT fk_volume_block FOREIGN KEY (volume_id)
     REFERENCES volume_superblocks(volume_id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 

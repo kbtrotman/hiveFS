@@ -78,14 +78,21 @@ bool hifs_volume_super_get(uint64_t volume_id, struct hifs_volume_superblock *ou
 bool hifs_volume_super_set(uint64_t volume_id, const struct hifs_volume_superblock *vsb);
 bool hifs_root_dentry_load(uint64_t volume_id, struct hifs_volume_root_dentry *out);
 bool hifs_root_dentry_store(uint64_t volume_id, const struct hifs_volume_root_dentry *root);
-bool hifs_volume_dentry_load(uint64_t volume_id, uint64_t inode,
-                             struct hifs_volume_dentry *out);
+bool hifs_volume_dentry_load_by_inode(uint64_t volume_id, uint64_t inode,
+                                      struct hifs_volume_dentry *out);
+bool hifs_volume_dentry_load_by_name(uint64_t volume_id, uint64_t parent,
+                                     const char *name_hex, uint32_t name_hex_len,
+                                     struct hifs_volume_dentry *out);
 bool hifs_volume_dentry_store(uint64_t volume_id,
                               const struct hifs_volume_dentry *dent);
 bool hifs_volume_inode_load(uint64_t volume_id, uint64_t inode,
                             struct hifs_inode_wire *out);
 bool hifs_volume_inode_store(uint64_t volume_id,
                              const struct hifs_inode_wire *inode);
+bool hifs_volume_block_load(uint64_t volume_id, uint64_t block_no,
+                            uint8_t *buf, uint32_t *len);
+bool hifs_volume_block_store(uint64_t volume_id, uint64_t block_no,
+                             const uint8_t *buf, uint32_t len);
 
 /* SQL Connect */
 
