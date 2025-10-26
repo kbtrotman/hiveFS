@@ -132,6 +132,9 @@ void hifs_comm_link_notify_online(void);
 void hifs_comm_link_notify_offline(void);
 void hicom_process_link_handshake(void);
 int hifs_handshake_superblock(struct super_block *sb);
+int hifs_handshake_rootdentry(struct super_block *sb);
+int hifs_publish_dentry(struct super_block *sb, uint64_t parent_ino, uint64_t child_ino,
+			const char *name, u32 name_len, u32 type);
 int hifs_flush_dirty_cache_items(void);
 
 /*hicom_kern_mm.c*/
@@ -246,6 +249,8 @@ struct hifs_sb_info
     uint64_t volume_id;
     /* Per-volume logical super (remote-facing minimal copy) */
     struct hifs_volume_superblock vol_super;
+    /* Per-volume root dentry metadata */
+    struct hifs_volume_root_dentry root_dentry;
 };
 
 /* Return pointer to cached on-disk super in sb->s_fs_info (may be NULL). */

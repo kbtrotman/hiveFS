@@ -67,6 +67,43 @@ static void hifs_prepare_volume_super(struct super_block *sb,
 			sizeof(info->vol_super.s_volume_name));
 }
 
+/* Capture root dentry metadata for remote reconciliation. */
+static void hifs_prepare_root_dentry(struct hifs_sb_info *info,
+				     const struct hifs_inode *root_inode)
+{
+	size_t len;
+
+	if (!info || !root_inode)
+		return;
+
+	info->root_dentry.rd_inode = cpu_to_le64(root_inode->i_ino);
+	info->root_dentry.rd_mode = cpu_to_le32(root_inode->i_mode);
+	info->root_dentry.rd_uid = cpu_to_le32(root_inode->i_uid);
+	info->root_dentry.rd_gid = cpu_to_le32(root_inode->i_gid);
+	info->root_dentry.rd_flags = cpu_to_le32(root_inode->i_flags);
+	info->root_dentry.rd_size = cpu_to_le64(root_inode->i_size);
+	info->root_dentry.rd_blocks = cpu_to_le64(root_inode->i_blocks);
+	info->root_dentry.rd_atime = cpu_to_le32(root_inode->i_atime);
+	info->root_dentry.rd_mtime = cpu_to_le32(root_inode->i_mtime);
+	info->root_dentry.rd_ctime = cpu_to_le32(root_inode->i_ctime);
+	info->root_dentry.rd_links = cpu_to_le32(root_inode->i_hrd_lnk);
+
+	len = strnlen(root_inode->i_name, sizeof(root_inode->i_name));
+	if (len == 0) {
+		info->root_dentry.rd_name[0] = '/';
+		memset(info->root_dentry.rd_name + 1, 0,
+		       sizeof(info->root_dentry.rd_name) - 1);
+		info->root_dentry.rd_name_len = cpu_to_le32(1);
+	} else {
+		size_t copy_len = len;
+		if (copy_len > sizeof(info->root_dentry.rd_name))
+			copy_len = sizeof(info->root_dentry.rd_name);
+		memset(info->root_dentry.rd_name, 0,
+		       sizeof(info->root_dentry.rd_name));
+		memcpy(info->root_dentry.rd_name, root_inode->i_name, copy_len);
+		info->root_dentry.rd_name_len = cpu_to_le32((u32)copy_len);
+	}
+}
 /* Read a block at an arbitrary byte offset from the block device. */
 static struct buffer_head *hifs_bread_at(struct super_block *sb, u64 byte_offset,
 					 unsigned int *intra_block_offset)
@@ -194,6 +231,13 @@ int hifs_get_super(struct super_block *sb, void *data, int silent)
 	}
 
 	memcpy(root_hifsinode, bh->b_data + offset, sizeof(*root_hifsinode));
+	hifs_prepare_root_dentry(sb_info, root_hifsinode);
+	{
+		int root_ret = hifs_volume_save(sb, sb_info);
+		if (root_ret)
+			hifs_warning("Failed to persist root dentry metadata: %d",
+				     root_ret);
+	}
 
 	root_inode = new_inode(sb);
 	if (!root_inode) {

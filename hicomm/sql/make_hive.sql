@@ -94,6 +94,44 @@ CREATE TABLE volume_superblocks (
                           ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
 
+CREATE TABLE root_dentries (
+  machine_uid           VARCHAR(128) NOT NULL,
+  volume_id             BIGINT UNSIGNED NOT NULL,
+  rd_inode              BIGINT UNSIGNED NOT NULL,
+  rd_mode               INT UNSIGNED NOT NULL,
+  rd_uid                INT UNSIGNED NOT NULL,
+  rd_gid                INT UNSIGNED NOT NULL,
+  rd_flags              INT UNSIGNED NOT NULL,
+  rd_size               BIGINT UNSIGNED NOT NULL,
+  rd_blocks             BIGINT UNSIGNED NOT NULL,
+  rd_atime              INT UNSIGNED NOT NULL,
+  rd_mtime              INT UNSIGNED NOT NULL,
+  rd_ctime              INT UNSIGNED NOT NULL,
+  rd_links              INT UNSIGNED NOT NULL,
+  rd_name_len           INT UNSIGNED NOT NULL,
+  rd_name               VARBINARY(256) NOT NULL,
+  updated_at            TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                         ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (machine_uid, volume_id),
+  CONSTRAINT fk_root_machine FOREIGN KEY (machine_uid)
+    REFERENCES host_auth(machine_uid) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE volume_dentries (
+  volume_id    BIGINT UNSIGNED NOT NULL,
+  de_inode     BIGINT UNSIGNED NOT NULL,
+  de_parent    BIGINT UNSIGNED NOT NULL,
+  de_epoch     INT UNSIGNED NOT NULL,
+  de_type      INT UNSIGNED NOT NULL,
+  de_name_len  INT UNSIGNED NOT NULL,
+  de_name      VARBINARY(256) NOT NULL,
+  updated_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (volume_id, de_inode),
+  CONSTRAINT fk_volume_dentry FOREIGN KEY (volume_id)
+    REFERENCES volume_superblocks(volume_id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
 -- 3) CSR mailbox (client writes CSR here; controller writes back cert)
 CREATE TABLE csr_queue (
   id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
