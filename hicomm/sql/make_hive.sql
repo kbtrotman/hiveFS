@@ -132,6 +132,18 @@ CREATE TABLE volume_dentries (
     REFERENCES volume_superblocks(volume_id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
+CREATE TABLE volume_inodes (
+  volume_id    BIGINT UNSIGNED NOT NULL,
+  inode        BIGINT UNSIGNED NOT NULL,
+  inode_blob   VARBINARY(512) NOT NULL,
+  epoch        INT UNSIGNED NOT NULL,
+  updated_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (volume_id, inode),
+  CONSTRAINT fk_volume_inode FOREIGN KEY (volume_id)
+    REFERENCES volume_superblocks(volume_id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
 -- 3) CSR mailbox (client writes CSR here; controller writes back cert)
 CREATE TABLE csr_queue (
   id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,

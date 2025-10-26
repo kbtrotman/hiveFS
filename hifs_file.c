@@ -137,7 +137,8 @@ ssize_t hifs_write(struct kiocb *iocb, struct iov_iter *from)
 	dinode->i_size = max((size_t)(dinode->i_size), count);
 
 	hifs_store_inode(sb, dinode);
-	
+	hifs_publish_inode(sb, dinode);
+
 	return count;
 }
 

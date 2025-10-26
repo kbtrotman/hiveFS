@@ -494,6 +494,58 @@ struct hifs_dentry_msg {
     struct hifs_volume_dentry dentry;
 };
 
+/* Wire format for hifs_inode exchanged with cluster. */
+struct hifs_inode_wire {
+#ifdef __KERNEL__
+    __u8  i_version;
+    __u8  i_flags;
+    __le32 i_mode;
+    __le64 i_ino;
+    __le16 i_uid;
+    __le16 i_gid;
+    __le16 i_hrd_lnk;
+    __le32 i_atime;
+    __le32 i_mtime;
+    __le32 i_ctime;
+    __le32 i_size;
+    __u8  i_name[HIFS_MAX_NAME_SIZE];
+    __le32 i_addrb[HIFS_INODE_TSIZE];
+    __le32 i_addre[HIFS_INODE_TSIZE];
+    __le32 i_blocks;
+    __le32 i_bytes;
+    __u8  i_links;
+    __u8  __pad[3];
+#else
+    uint8_t  i_version;
+    uint8_t  i_flags;
+    uint32_t i_mode;
+    uint64_t i_ino;
+    uint16_t i_uid;
+    uint16_t i_gid;
+    uint16_t i_hrd_lnk;
+    uint32_t i_atime;
+    uint32_t i_mtime;
+    uint32_t i_ctime;
+    uint32_t i_size;
+    uint8_t  i_name[HIFS_MAX_NAME_SIZE];
+    uint32_t i_addrb[HIFS_INODE_TSIZE];
+    uint32_t i_addre[HIFS_INODE_TSIZE];
+    uint32_t i_blocks;
+    uint32_t i_bytes;
+    uint8_t  i_links;
+    uint8_t  __pad[3];
+#endif
+};
+
+struct hifs_inode_msg {
+#ifdef __KERNEL__
+    __u64 volume_id;
+#else
+    uint64_t volume_id;
+#endif
+    struct hifs_inode_wire inode;
+};
+
 /* Volume table lives after the block bitmap by default. Each entry maps a
  * volume_id to its logical superblock used for reconciliation between the
  * cluster and with the local kernel VFS layer.
