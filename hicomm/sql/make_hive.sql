@@ -31,7 +31,7 @@ CREATE TABLE inode_to_blocks (
 ) ENGINE=InnoDB;
 
 CREATE TABLE host (
-    id                 BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+    serial             VARCHAR(100) NOT NULL PRIMARY KEY,
     name               VARCHAR(100),
     host_id            VARCHAR(50),
     os_name            VARCHAR(50),
