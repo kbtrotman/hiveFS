@@ -424,6 +424,12 @@ int hifs_handshake_superblock(struct super_block *sb)
     if (ret)
         return ret;
 
+    hifs_debug("publish dentry %llu/%llu name %.*s flags %#x",
+               (unsigned long long)parent_ino,
+               (unsigned long long)child_ino,
+               name_len > 16 ? 16 : name_len, name,
+               request_only ? HIFS_DENTRY_MSGF_REQUEST : 0);
+
     /* Wait for an optional response: SB_RECV + payload of superblock */
     {
         int tries;
@@ -484,6 +490,9 @@ int hifs_handshake_rootdentry(struct super_block *sb)
     ret = hifs_data_fifo_out_push_buf(&msg_local, sizeof(msg_local));
     if (ret)
         return ret;
+
+    hifs_debug("publish inode %llu flags %#x", hii->i_ino,
+               request_only ? HIFS_INODE_MSGF_REQUEST : 0);
 
     {
         int tries;
@@ -551,6 +560,10 @@ int hifs_publish_dentry(struct super_block *sb, uint64_t parent_ino, uint64_t ch
     ret = hifs_data_fifo_out_push_buf(&msg_local, sizeof(msg_local));
     if (ret)
         return ret;
+
+    hifs_debug("publish block %llu len %u flags %#x",
+               (unsigned long long)block_no, data_len,
+               request_only ? HIFS_BLOCK_MSGF_REQUEST : 0);
 
     {
         int tries;

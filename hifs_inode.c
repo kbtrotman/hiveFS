@@ -302,8 +302,10 @@ struct hifs_inode *hifs_iget(struct super_block *sb, ino_t ino)
 	struct hifs_inode request = {0};
 
 	if (!hifs_cache_test_inode(sb, ino)) {
-		request.i_ino = ino;
-		hifs_publish_inode(sb, &request, true);
+		hifs_debug("inode %lu cache miss", (unsigned long)ino);
+	request.i_ino = ino;
+		if (hifs_publish_inode(sb, &request, true) < 0)
+			return NULL;
 	}
 
 	/* get inode table 'file' */
@@ -374,10 +376,13 @@ retry:
 		u32 b = dparent->i_addrb[i] , e = dparent->i_addre[i];
 		u32 blk = b;
 		while (blk < e) {
-			if (hifs_fetch_block(sb, blk)) {
+			bool cache_hit = hifs_cache_test_present(sb, blk);
+			if (hifs_fetch_block(sb, blk) < 0) {
 				blk++;
 				continue;
 			}
+			if (!cache_hit)
+				hifs_debug("lookup fetched block %u", blk);
 
 			bh = sb_bread(sb, blk);
 			BUG_ON(!bh);
