@@ -269,6 +269,7 @@ struct hifs_cache_bitmap {
 /* Cache-level superblock (local cache metadata). This is NOT sent
  * to the cluster; it describes the cache layout on local storage. */
 struct hifs_disk_superblock {
+#ifdef __KERNEL__
 	__le32	s_generational_epoch;   /* epoch counter to control who made the last change in the sb, tie goes to latest s_wtime */
 	__le32	s_inodes_count;         /* total inodes */
 	__le32	s_blocks_count;         /* total blocks */
@@ -375,6 +376,109 @@ struct hifs_disk_superblock {
 	__u8	s_padding1[2];
 	__le32	s_reserved[96];         /* must fill superblock to 1024 bytes */
 	__le32	s_checksum;             /* superblock checksum */
+#else
+	uint32_t	s_generational_epoch;
+	uint32_t	s_inodes_count;
+	uint32_t	s_blocks_count;
+	uint32_t	s_r_blocks_count;
+	uint32_t	s_free_blocks_count;
+	uint32_t	s_free_inodes_count;
+	uint32_t	s_first_data_block;
+	uint32_t	s_log_block_size;
+	uint32_t	s_log_frag_size;
+	uint32_t	s_blocks_per_group;
+	uint32_t	s_frags_per_group;
+	uint32_t	s_inodes_per_group;
+	uint32_t	s_mtime;
+	uint32_t	s_wtime;
+	uint16_t	s_mnt_count;
+	uint16_t	s_max_mnt_count;
+	uint16_t	s_magic;
+	uint16_t	s_state;
+	uint16_t	s_errors;
+	uint16_t	s_minor_rev_level;
+	uint32_t	s_lastcheck;
+	uint32_t	s_checkinterval;
+	uint32_t	s_creator_os;
+	uint32_t	s_rev_level;
+	uint16_t	s_def_resuid;
+	uint16_t	s_def_resgid;
+	/* EXT2_DYNAMIC_REV (>=1) additions */
+	uint32_t	s_first_ino;
+	uint16_t	s_inode_size;
+	uint16_t	s_block_group_nr;
+	uint32_t  s_feature_compat;
+	uint32_t  s_feature_incompat;
+	uint32_t  s_feature_ro_compat;
+	uint8_t	s_uuid[16];
+	char	s_volume_name[16];
+	char	s_last_mounted[64];
+	uint32_t	s_algorithm_usage_bitmap;
+	/* Performance hints */
+	uint8_t	s_prealloc_blocks;
+	uint8_t	s_prealloc_dir_blocks;
+	uint16_t	s_reserved_gdt_blocks;
+	/* Directory hashing */
+	uint32_t	s_hash_seed[4];
+	uint8_t	s_def_hash_version;
+	uint8_t	s_reserved_char_pad;
+	uint16_t	s_reserved_word_pad;
+	/* Journaling backup */
+	uint32_t	s_default_mount_opts;
+	uint32_t	s_first_meta_bg;
+	uint32_t	s_mkfs_time;
+	uint32_t	s_jnl_blocks[17];
+	/* EXT4 (64-bit) additions follow */
+	uint32_t	s_blocks_count_hi;
+	uint32_t	s_r_blocks_count_hi;
+	uint32_t	s_free_blocks_hi;
+	uint16_t	s_min_extra_isize;
+	uint16_t	s_want_extra_isize;
+	uint32_t	s_flags;
+	uint16_t	s_raid_stride;
+	uint16_t	s_mmp_interval;
+	uint64_t	s_mmp_block;
+	uint32_t	s_raid_stripe_width;
+	uint8_t	s_log_groups_per_flex;
+	uint8_t	s_checksum_type;
+	uint8_t	s_encryption_level;
+	uint8_t	s_reserved_pad;
+	uint64_t	s_kbytes_written;
+	uint32_t	s_snapshot_inum;
+	uint32_t	s_snapshot_id;
+	uint64_t	s_snapshot_r_blocks_count;
+	uint32_t	s_snapshot_list;
+	uint32_t	s_error_count;
+	uint32_t	s_first_error_time;
+	uint32_t	s_first_error_ino;
+	uint64_t	s_first_error_block;
+	char	s_first_error_func[32];
+	uint32_t	s_first_error_line;
+	uint32_t	s_last_error_time;
+	uint32_t	s_last_error_ino;
+	uint64_t	s_last_error_block;
+	char	s_last_error_func[32];
+	uint32_t	s_last_error_line;
+	uint32_t	s_mount_opts;
+	uint32_t	s_usr_quota_inum;
+	uint32_t	s_grp_quota_inum;
+	uint32_t	s_overhead_blocks;
+	uint32_t	s_backup_bgs[2];
+	uint32_t	s_encrypt_algos[4];
+	uint32_t	s_encrypt_pw_salt[4];
+	uint32_t	s_lpf_ino;
+	uint32_t	s_prj_quota_inum;
+	uint32_t  s_checksum_seed;
+	uint8_t	s_wtime_hi;
+	uint8_t	s_mtime_hi;
+	uint8_t	s_mkfs_time_hi;
+	uint8_t	s_lastcheck_hi;
+	uint8_t	s_first_error_time_hi;
+	uint8_t	s_last_error_time_hi;
+	uint8_t	s_padding1[2];
+	uint32_t	s_reserved[96];
+	uint32_t	s_checksum;
+#endif
 };
 
 /* Remote-facing per-volume logical superblock (minimal fields used for

@@ -56,7 +56,7 @@ int hifs_create_test_inode(void)
 	if (ret)
 		return ret;
 
-	hifs_info("Queued test inode and command\n");
+	//hifs_info("Queued test inode and command\n");
 	return 0;
 }
 
@@ -404,7 +404,9 @@ int hifs_handshake_superblock(struct super_block *sb)
 
     if (!sb)
         return -EINVAL;
+
     info = (struct hifs_sb_info *)sb->s_fs_info;
+    
     if (!info)
         return -EINVAL;
 
@@ -423,12 +425,6 @@ int hifs_handshake_superblock(struct super_block *sb)
     ret = hifs_data_fifo_out_push_buf(&msg_local, sizeof(msg_local));
     if (ret)
         return ret;
-
-    hifs_debug("publish dentry %llu/%llu name %.*s flags %#x",
-               (unsigned long long)parent_ino,
-               (unsigned long long)child_ino,
-               name_len > 16 ? 16 : name_len, name,
-               request_only ? HIFS_DENTRY_MSGF_REQUEST : 0);
 
     /* Wait for an optional response: SB_RECV + payload of superblock */
     {
@@ -490,9 +486,6 @@ int hifs_handshake_rootdentry(struct super_block *sb)
     ret = hifs_data_fifo_out_push_buf(&msg_local, sizeof(msg_local));
     if (ret)
         return ret;
-
-    hifs_debug("publish inode %llu flags %#x", hii->i_ino,
-               request_only ? HIFS_INODE_MSGF_REQUEST : 0);
 
     {
         int tries;
@@ -561,9 +554,11 @@ int hifs_publish_dentry(struct super_block *sb, uint64_t parent_ino, uint64_t ch
     if (ret)
         return ret;
 
-    hifs_debug("publish block %llu len %u flags %#x",
-               (unsigned long long)block_no, data_len,
-               request_only ? HIFS_BLOCK_MSGF_REQUEST : 0);
+    hifs_debug("publish dentry %llu/%llu name %.*s flags %#x",
+               (unsigned long long)parent_ino,
+               (unsigned long long)child_ino,
+               name_len > 16 ? 16 : name_len, name,
+               request_only ? HIFS_DENTRY_MSGF_REQUEST : 0);
 
     {
         int tries;
@@ -623,6 +618,9 @@ int hifs_publish_inode(struct super_block *sb, const struct hifs_inode *hii,
     memset(&msg_local, 0, sizeof(msg_local));
     msg_local.volume_id = cpu_to_le64(info->volume_id);
     msg_local.inode = wire_local;
+
+    hifs_debug("publish inode %llu flags %#x", hii->i_ino,
+               request_only ? HIFS_INODE_MSGF_REQUEST : 0);
 
     ret = hifs_data_fifo_out_push_buf(&msg_local, sizeof(msg_local));
     if (ret)
@@ -688,6 +686,10 @@ int hifs_publish_block(struct super_block *sb, uint64_t block_no,
     msg_local.block_no = cpu_to_le64(block_no);
     msg_local.flags = cpu_to_le32(request_only ? HIFS_BLOCK_MSGF_REQUEST : 0);
     msg_local.data_len = cpu_to_le32(request_only ? 0 : data_len);
+
+    hifs_debug("publish block %llu len %u flags %#x",
+               (unsigned long long)block_no, data_len,
+               request_only ? HIFS_BLOCK_MSGF_REQUEST : 0);
 
     ret = hifs_data_fifo_out_push_buf(&msg_local, sizeof(msg_local));
     if (ret)
