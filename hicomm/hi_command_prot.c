@@ -351,9 +351,11 @@ int hicomm_handle_command(int fd, const struct hifs_cmds *cmd)
 			save_local = true;
 		}
 
-		if (request_only && have_db) {
-			msg_reply.dentry = db_dent;
-		}
+	hifs_info("rx dentry vol=%" PRIu64 " parent=%" PRIu64 " inode=%" PRIu64 " flags=%#x",
+		volume_id, parent_no, inode_no, le32toh(msg_local.dentry.de_flags));
+	if (request_only && have_db) {
+		msg_reply.dentry = db_dent;
+	}
 
 		if (!request_only && save_local) {
 			msg_local.dentry.de_flags = htole32(0);
@@ -422,9 +424,11 @@ int hicomm_handle_command(int fd, const struct hifs_cmds *cmd)
 			save_local = true;
 		}
 
-		if (request_only && have_db) {
-			msg_reply.inode = db_wire;
-		}
+	hifs_info("rx inode vol=%" PRIu64 " ino=%" PRIu64 " flags=%#x",
+		volume_id, inode_no, le32toh(msg_local.inode.i_msg_flags));
+	if (request_only && have_db) {
+		msg_reply.inode = db_wire;
+	}
 
 		if (!request_only && save_local) {
 			msg_local.inode.i_msg_flags = htole32(0);
