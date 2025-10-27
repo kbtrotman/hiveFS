@@ -363,7 +363,7 @@ static int create_filesystem(const char *path,
     };
 
 	for (size_t i = 0; i < ARRAY_SIZE(reserved_blocks); ++i) {
-		bitmap_mark(cache_bmp, reserved_blocks[i]);
+		bitmap_mark(block_bmp, reserved_blocks[i]);
 		bitmap_mark(dirty_bmp, reserved_blocks[i]);
 	}
 

@@ -22,7 +22,7 @@
 
 struct file_system_type hifs_type = 
 {
-    .name = "hifs",
+    .name = "hivefs",
     .mount = hifs_mount,
     .kill_sb = kill_block_super,
 };
