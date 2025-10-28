@@ -143,6 +143,9 @@ int hifs_get_super(struct super_block *sb, void *data, int silent)
 	int ret = 0;
 	struct timespec64 now;
 
+	// Whether this is a remote mount or local mount can be determined from 'data' parameter.
+	// Either way, we always load the on-disk superblock to initialize our in-memory structures.
+	// It doesn't matter to us whether it's local or remote, cache only updates on local mount.
 	bh = hifs_bread_at(sb, HIFS_SUPER_OFFSET, &offset);
 	if (!bh) {
 		ret = -EIO;
@@ -189,12 +192,14 @@ int hifs_get_super(struct super_block *sb, void *data, int silent)
     sb->s_op = &hifs_sb_operations;
     sb->s_fs_info = sb_info;
 
-    /* Attach shared cache bitmaps from disk (singleton) */
+    /* Attach shared cache bitmaps from disk (singleton) only if a local cache mount.*/
+	/* Remote mounts do not modify the cache yet, so no need to modify it for them. */
     ret = hifs_cache_attach(sb, sb_info);
     if (ret)
         goto out;
 
     /* Determine volume id (from mount data, if provided) and load/create entry */
+	/* This structure holds the local cache volume and all virtual volumes equally.*/
     sb_info->volume_id = hifs_parse_volume_id(data);
     ret = hifs_volume_load(sb, sb_info, true);
     if (ret)
@@ -272,8 +277,7 @@ out:
 	return ret;
 }
 
-/* Mount a "virtual" filesystem. This does nothing to the cache superblock, but it relates to the VFS layer,
- * so its put here.
+/* Mount a "virtual" or local cache filesystem. Everybody's treated equal now.
  **/
 struct dentry *hifs_mount(struct file_system_type *fs_type, int flags, const char *dev_name, void *data)
 {
@@ -291,7 +295,7 @@ struct dentry *hifs_mount(struct file_system_type *fs_type, int flags, const cha
 }
 
 
-/* Teardown the virtual filesystem (see above). */
+/* Teardown the virtual or cache filesystem. */
 void hifs_kill_superblock(struct super_block *sb)
 {
 	printk(KERN_INFO "#: hivefs. Unmount succesful.\n");
@@ -320,9 +324,9 @@ void hifs_save_sb(struct super_block *sb)
 }
 
 
-/* VFS calls this to teardown the superblocks before dismounting a filesystem. Ours are virtual,
- * so instead of pointing it to our cache superblock, we point it back to a table of remote
- * superblocks, hifs_sb_info to save the virtual sb data and destroy it.
+/* VFS calls this to teardown the superblocks before dismounting a filesystem. We follow the
+ * same process for both local cache mounts and remote mounts. Bu tthe remote cache must be 
+ * the last one to go down, after all local mounts are gone.
  * */
 void hifs_put_super(struct super_block *sb) 
 {

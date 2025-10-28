@@ -79,6 +79,9 @@ struct hifs_inode *cache_get_inode(void)
 {
 	struct hifs_inode *hii;
 
+	if (WARN_ON(!hifs_inode_cache))
+		return NULL;
+
 	hii = kmem_cache_alloc(hifs_inode_cache, GFP_KERNEL);
 	printk(KERN_INFO "#: hifs cache_get_inode : di=%p\n", hii);
 

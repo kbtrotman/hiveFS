@@ -21,28 +21,7 @@ int hifs_thread_fn(void *data)
 	
 	while (!kthread_should_stop()) {
 
-		ret = hifs_create_test_inode();
-		if (ret) {
-			hifs_warning("Failed to enqueue test inode: %d\n", ret);
-		} else {
-			struct hifs_cmds rsp;
-			struct hifs_inode inode_rsp;
 
-			ret = hifs_cmd_fifo_in_pop(&rsp, true);
-			if (!ret)
-				hifs_info("Received response \"%s\" from user space\n", rsp.cmd);
-
-			{
-				struct hifs_data_frame frame;
-				ret = hifs_data_fifo_in_pop(&frame, true);
-				if (!ret && frame.len == sizeof(inode_rsp)) {
-					memcpy(&inode_rsp, frame.data, sizeof(inode_rsp));
-					hifs_info("Received inode response %llu \"%s\"\n",
-					  (unsigned long long)inode_rsp.i_ino,
-					  inode_rsp.i_name);
-				}
-			}
-		}
 
 		schedule_timeout_interruptible(msecs_to_jiffies(2000));
 	}
