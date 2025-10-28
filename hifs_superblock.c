@@ -191,9 +191,10 @@ int hifs_get_super(struct super_block *sb, void *data, int silent)
     sb->s_magic = sb_info->s_magic;
     sb->s_op = &hifs_sb_operations;
     sb->s_fs_info = sb_info;
+    hifs_cache_sync_init(sb, sb_info);
 
     /* Attach shared cache bitmaps from disk (singleton) only if a local cache mount.*/
-	/* Remote mounts do not modify the cache yet, so no need to modify it for them. */
+        /* Remote mounts do not modify the cache yet, so no need to modify it for them. */
     ret = hifs_cache_attach(sb, sb_info);
     if (ret)
         goto out;
@@ -245,8 +246,8 @@ int hifs_get_super(struct super_block *sb, void *data, int silent)
 			 root_hifsinode->i_mode);
 	root_inode->i_flags = root_hifsinode->i_flags;
 	root_inode->i_ino = HIFS_ROOT_INODE;
-	root_inode->i_op = &hifs_inode_operations;
-	root_inode->i_fop = &hifs_dir_operations;
+	root_inode->i_op = &hifs_cache_root_inode_ops;
+	root_inode->i_fop = &hifs_cache_dir_operations;
 	root_inode->i_private = root_hifsinode;
 	root_inode->i_blocks = root_hifsinode->i_blocks;
 	root_inode->i_size = root_hifsinode->i_size;
@@ -264,14 +265,17 @@ int hifs_get_super(struct super_block *sb, void *data, int silent)
 	}
 
 out:
-	if (bh)
-		brelse(bh);
-	if (ret) {
-		if (root_inode)
-			iput(root_inode);
-		else if (root_hifsinode)
-			cache_put_inode(&root_hifsinode);
-		kfree(sb_info);
+    if (bh)
+        brelse(bh);
+    if (ret) {
+        hifs_cache_sync_shutdown(sb_info);
+        if (sb_info)
+            sb_info->sb = NULL;
+        if (root_inode)
+            iput(root_inode);
+        else if (root_hifsinode)
+            cache_put_inode(&root_hifsinode);
+        kfree(sb_info);
 		sb->s_fs_info = NULL;
 	}
 	return ret;
@@ -330,6 +334,11 @@ void hifs_save_sb(struct super_block *sb)
  * */
 void hifs_put_super(struct super_block *sb) 
 {
+    struct hifs_sb_info *info = sb ? (struct hifs_sb_info *)sb->s_fs_info : NULL;
+
+    if (info)
+        hifs_cache_sync_shutdown(info);
+
     /* Persist latest metadata before teardown. */
     if (sb && sb->s_fs_info) {
         hifs_save_sb(sb);
@@ -346,7 +355,7 @@ void hifs_put_super(struct super_block *sb)
 
 	/* Finally, free the superblock info structure. */
 
-    hifs_cache_detach((struct hifs_sb_info *)sb->s_fs_info);
-    kfree(sb->s_fs_info);
+    hifs_cache_detach(info);
+    kfree(info);
     sb->s_fs_info = NULL;
 }

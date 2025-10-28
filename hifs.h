@@ -32,6 +32,7 @@
 #include <linux/blkdev.h>
 #include <linux/magic.h>
 #include <linux/debugfs.h>
+#include <linux/workqueue.h>
 //#include <asm/uaccess.h>
 #include <linux/fs_struct.h>
 #include <linux/list.h>
@@ -199,6 +200,9 @@ void cache_put_inode(struct hifs_inode **hii);
 int hifs_cache_attach(struct super_block *sb, struct hifs_sb_info *info);
 int hifs_cache_save_ctx(struct super_block *sb);
 void hifs_cache_detach(struct hifs_sb_info *info);
+void hifs_cache_sync_init(struct super_block *sb, struct hifs_sb_info *info);
+void hifs_cache_sync_shutdown(struct hifs_sb_info *info);
+void hifs_cache_request_flush(struct super_block *sb, bool immediate);
 /* Per-volume logical super helpers */
 int hifs_volume_load(struct super_block *sb, struct hifs_sb_info *info, bool create);
 int hifs_volume_save(struct super_block *sb, const struct hifs_sb_info *info);
@@ -232,6 +236,8 @@ extern struct file_system_type hifs_type;
 extern const struct file_operations hifs_file_operations;
 extern const struct inode_operations hifs_inode_operations;
 extern const struct file_operations hifs_dir_operations;
+extern const struct inode_operations hifs_cache_root_inode_ops;
+extern const struct file_operations hifs_cache_dir_operations;
 extern const struct super_operations hifs_sb_operations;
 
 
@@ -239,6 +245,8 @@ extern const struct super_operations hifs_sb_operations;
  * Kernel Inode Cache
  **/
 extern struct kmem_cache *hifs_inode_cache;
+
+#define HIFS_CACHE_FLUSH_INTERVAL_DEFAULT (5 * HZ)
 
 
 struct hifs_sb_info 
@@ -258,6 +266,11 @@ struct hifs_sb_info
     struct hifs_volume_superblock vol_super;
     /* Per-volume root dentry metadata */
     struct hifs_volume_root_dentry root_dentry;
+    /* Periodic cache flush orchestration */
+    struct super_block *sb;
+    struct delayed_work cache_sync_work;
+    unsigned long cache_flush_interval;
+    atomic_t cache_dirty;
 };
 
 /* Return pointer to cached on-disk super in sb->s_fs_info (may be NULL). */
