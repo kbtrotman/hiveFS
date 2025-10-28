@@ -58,7 +58,7 @@
 #define HIFS_COMM_DEVICE_NAME "hivefs_ctl"
 #define HIFS_CMD_RING_CAPACITY 128
 #define HIFS_DATA_RING_CAPACITY 128
-#define HIFS_DATA_MAX 4096 // Max data size in a data frame
+#define HIFS_DATA_MAX  5120 // Max data size in a data frame
 
 #define HIFS_IOCTL_MAGIC      'H'
 #define HIFS_IOCTL_CMD_DEQUEUE    _IOWR(HIFS_IOCTL_MAGIC, 0, struct hifs_cmds)

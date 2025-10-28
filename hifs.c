@@ -48,10 +48,93 @@ const struct file_operations hifs_dir_operations =
     .iterate_shared = hifs_readdir,
 };
 
+/* Cache-only mounts should not be traversed directly by users or tools. */
+#define HIFS_CACHE_ACCESS_MSG \
+    "This is a cache filesystem. Use hiveFS commands to access it for printing cache data and statistics."
+
+static void hifs_cache_emit_notice(const char *op)
+{
+    if (op)
+        hifs_info("%s: %s\n", op, HIFS_CACHE_ACCESS_MSG);
+    else
+        hifs_info("%s\n", HIFS_CACHE_ACCESS_MSG);
+}
+
+static int hifs_cache_open(struct inode *inode, struct file *file)
+{
+    hifs_cache_emit_notice("open");
+    return -EOPNOTSUPP;
+}
+
+static int hifs_cache_readdir(struct file *file, struct dir_context *ctx)
+{
+    hifs_cache_emit_notice("readdir");
+    return -EOPNOTSUPP;
+}
+
+static struct dentry *hifs_cache_lookup(struct inode *dir, struct dentry *dentry,
+                                        unsigned int flags)
+{
+    hifs_cache_emit_notice("lookup");
+    return ERR_PTR(-EOPNOTSUPP);
+}
+
+static int hifs_cache_permission(struct mnt_idmap *idmap, struct inode *inode, int mask)
+{
+    hifs_cache_emit_notice("permission");
+    return -EOPNOTSUPP;
+}
+
+static int hifs_cache_getattr(struct mnt_idmap *idmap, const struct path *path,
+                              struct kstat *stat, u32 request_mask, unsigned int flags)
+{
+    hifs_cache_emit_notice("getattr");
+    return -EOPNOTSUPP;
+}
+
+const struct file_operations hifs_cache_dir_operations =
+{
+    .owner = THIS_MODULE,
+    .open = hifs_cache_open,
+    .iterate_shared = hifs_cache_readdir,
+};
+
+const struct inode_operations hifs_cache_root_inode_ops =
+{
+    .lookup = hifs_cache_lookup,
+    .permission = hifs_cache_permission,
+    .getattr = hifs_cache_getattr,
+};
+
+static int hifs_sync_fs(struct super_block *sb, int wait)
+{
+    struct hifs_sb_info *info = sb ? (struct hifs_sb_info *)sb->s_fs_info : NULL;
+    int ret = 0;
+
+    (void)wait;
+
+    if (!info)
+        return 0;
+
+    cancel_delayed_work_sync(&info->cache_sync_work);
+
+    ret = hifs_cache_save_ctx(sb);
+    if (!ret)
+        atomic_set(&info->cache_dirty, 0);
+
+    hifs_flush_dirty_cache_items();
+
+    if (atomic_read(&info->cache_dirty))
+        hifs_cache_request_flush(sb, false);
+
+    return ret;
+}
+
 const struct super_operations hifs_sb_operations = 
 {
 	.destroy_inode = hifs_destroy_inode,
 	.put_super = hifs_put_super,
+	.sync_fs = hifs_sync_fs,
 };
 // *******************      HiveFS Entry     *******************
 

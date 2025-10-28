@@ -117,6 +117,91 @@ struct hifs_cache_ctx {
 
 static struct hifs_cache_ctx *g_cache_ctx;
 
+static void hifs_cache_sync_workfn(struct work_struct *work)
+{
+    struct hifs_sb_info *info = container_of(to_delayed_work(work),
+                                             struct hifs_sb_info,
+                                             cache_sync_work);
+    struct super_block *sb = READ_ONCE(info->sb);
+    int dirty;
+
+    if (!sb)
+        return;
+
+    dirty = atomic_xchg(&info->cache_dirty, 0);
+    if (!dirty)
+        return;
+
+    if (hifs_cache_save_ctx(sb))
+        atomic_set(&info->cache_dirty, 1);
+
+    hifs_flush_dirty_cache_items();
+
+    if (atomic_read(&info->cache_dirty))
+        queue_delayed_work(system_long_wq, &info->cache_sync_work,
+                           info->cache_flush_interval);
+}
+
+void hifs_cache_sync_init(struct super_block *sb, struct hifs_sb_info *info)
+{
+    if (!sb || !info)
+        return;
+
+    info->sb = sb;
+    atomic_set(&info->cache_dirty, 0);
+    info->cache_flush_interval = HIFS_CACHE_FLUSH_INTERVAL_DEFAULT;
+    INIT_DELAYED_WORK(&info->cache_sync_work, hifs_cache_sync_workfn);
+}
+
+void hifs_cache_sync_shutdown(struct hifs_sb_info *info)
+{
+    if (!info)
+        return;
+    cancel_delayed_work_sync(&info->cache_sync_work);
+}
+
+void hifs_cache_request_flush(struct super_block *sb, bool immediate)
+{
+    struct hifs_sb_info *info = sbinfo(sb);
+    unsigned long delay;
+
+    if (!info)
+        return;
+
+    atomic_set(&info->cache_dirty, 1);
+    delay = immediate ? 0 : info->cache_flush_interval;
+    mod_delayed_work(system_long_wq, &info->cache_sync_work, delay);
+}
+
+/* Copy bitmap under spinlock and flush it to disk without holding the lock. */
+static int hifs_cache_flush_bitmap(struct super_block *sb, spinlock_t *lock,
+                                   const struct hifs_cache_bitmap *bmp,
+                                   u64 offset, u32 blocksize)
+{
+    unsigned long flags;
+    size_t len;
+    u8 *tmp;
+    int ret;
+
+    if (!bmp || !bmp->bitmap)
+        return -EINVAL;
+
+    len = ALIGN(bmp->size, blocksize);
+    tmp = kvmalloc(len, GFP_KERNEL);
+    if (!tmp)
+        return -ENOMEM;
+
+    spin_lock_irqsave(lock, flags);
+    memcpy(tmp, bmp->bitmap, bmp->size);
+    if (len > bmp->size)
+        memset(tmp + bmp->size, 0, len - bmp->size);
+    spin_unlock_irqrestore(lock, flags);
+
+    ret = hifs_write_region(sb, offset, tmp, len);
+    kvfree(tmp);
+    return ret;
+}
+
 /* Allocate and load present/dirty cache bitmaps from their on-disk regions. */
 int hifs_cache_attach(struct super_block *sb, struct hifs_sb_info *info)
 {
@@ -203,38 +288,29 @@ int hifs_cache_save_ctx(struct super_block *sb)
 {
     struct hifs_sb_info *info = sbinfo(sb);
     struct hifs_cache_ctx *ctx = info ? info->cache : NULL;
-    size_t aligned;
-    unsigned long flags;
     int ret = 0;
 
     if (!ctx || !ctx->inode_bmp || !ctx->dirent_bmp || !ctx->block_bmp || !ctx->dirty_bmp)
         return -EINVAL;
 
-    aligned = ALIGN(ctx->block_bmp->size, info->s_blocksize);
-
     /* Save inode + dirent + block + dirty regions */
-    spin_lock_irqsave(&ctx->inode_lock, flags);
-    ret = hifs_write_region(sb, HIFS_INODE_BITMAP_OFFSET, ctx->inode_bmp->bitmap, ALIGN(ctx->inode_bmp->size, info->s_blocksize));
-    spin_unlock_irqrestore(&ctx->inode_lock, flags);
+    ret = hifs_cache_flush_bitmap(sb, &ctx->inode_lock, ctx->inode_bmp,
+                                  HIFS_INODE_BITMAP_OFFSET, info->s_blocksize);
     if (ret)
         return ret;
 
-    spin_lock_irqsave(&ctx->dirent_lock, flags);
-    ret = hifs_write_region(sb, HIFS_DIRENT_BITMAP_OFFSET, ctx->dirent_bmp->bitmap, ALIGN(ctx->dirent_bmp->size, info->s_blocksize));
-    spin_unlock_irqrestore(&ctx->dirent_lock, flags);
+    ret = hifs_cache_flush_bitmap(sb, &ctx->dirent_lock, ctx->dirent_bmp,
+                                  HIFS_DIRENT_BITMAP_OFFSET, info->s_blocksize);
     if (ret)
         return ret;
 
-    spin_lock_irqsave(&ctx->block_lock, flags);
-    ret = hifs_write_region(sb, HIFS_BLOCK_BITMAP_OFFSET, ctx->block_bmp->bitmap, aligned);
-    spin_unlock_irqrestore(&ctx->block_lock, flags);
+    ret = hifs_cache_flush_bitmap(sb, &ctx->block_lock, ctx->block_bmp,
+                                  HIFS_BLOCK_BITMAP_OFFSET, info->s_blocksize);
     if (ret)
         return ret;
 
-    spin_lock_irqsave(&ctx->dirty_lock, flags);
-    ret = hifs_write_region(sb, HIFS_DIRTY_TABLE_OFFSET, ctx->dirty_bmp->bitmap, aligned);
-    spin_unlock_irqrestore(&ctx->dirty_lock, flags);
-    return ret;
+    return hifs_cache_flush_bitmap(sb, &ctx->dirty_lock, ctx->dirty_bmp,
+                                   HIFS_DIRTY_TABLE_OFFSET, info->s_blocksize);
 }
 
 /* Free in-memory cache bitmap buffers and clear pointers. */
@@ -245,6 +321,7 @@ void hifs_cache_detach(struct hifs_sb_info *info)
         return;
     ctx = info->cache;
     info->cache = NULL;
+    info->sb = NULL;
     if (atomic_dec_and_test(&ctx->refcnt)) {
         if (ctx->inode_bmp) { kvfree(ctx->inode_bmp->bitmap); kfree(ctx->inode_bmp); }
         if (ctx->dirent_bmp) { kvfree(ctx->dirent_bmp->bitmap); kfree(ctx->dirent_bmp); }
@@ -279,11 +356,17 @@ void hifs_cache_mark_present(struct super_block *sb, uint64_t block)
 {
     struct hifs_cache_ctx *ctx = sbinfo(sb) ? sbinfo(sb)->cache : NULL;
     unsigned long flags;
+    bool changed = false;
     if (!ctx || !ctx->block_bmp || block >= ctx->block_bmp->cache_block_count)
         return;
     spin_lock_irqsave(&ctx->block_lock, flags);
-    __bitmap_set_byte(ctx->block_bmp->bitmap, block, true);
+    if (!__bitmap_test_byte(ctx->block_bmp->bitmap, block)) {
+        __bitmap_set_byte(ctx->block_bmp->bitmap, block, true);
+        changed = true;
+    }
     spin_unlock_irqrestore(&ctx->block_lock, flags);
+    if (changed)
+        hifs_cache_request_flush(sb, false);
 }
 
 /* Clear the present bit for a cache block. */
@@ -291,11 +374,17 @@ void hifs_cache_clear_present(struct super_block *sb, uint64_t block)
 {
     struct hifs_cache_ctx *ctx = sbinfo(sb) ? sbinfo(sb)->cache : NULL;
     unsigned long flags;
+    bool changed = false;
     if (!ctx || !ctx->block_bmp || block >= ctx->block_bmp->cache_block_count)
         return;
     spin_lock_irqsave(&ctx->block_lock, flags);
-    __bitmap_set_byte(ctx->block_bmp->bitmap, block, false);
+    if (__bitmap_test_byte(ctx->block_bmp->bitmap, block)) {
+        __bitmap_set_byte(ctx->block_bmp->bitmap, block, false);
+        changed = true;
+    }
     spin_unlock_irqrestore(&ctx->block_lock, flags);
+    if (changed)
+        hifs_cache_request_flush(sb, false);
 }
 
 /* Query whether a cache block is present locally. */
@@ -312,11 +401,17 @@ void hifs_cache_mark_dirty(struct super_block *sb, uint64_t block)
 {
     struct hifs_cache_ctx *ctx = sbinfo(sb) ? sbinfo(sb)->cache : NULL;
     unsigned long flags;
+    bool changed = false;
     if (!ctx || !ctx->dirty_bmp || block >= ctx->dirty_bmp->cache_block_count)
         return;
     spin_lock_irqsave(&ctx->dirty_lock, flags);
-    __bitmap_set_byte(ctx->dirty_bmp->bitmap, block, true);
+    if (!__bitmap_test_byte(ctx->dirty_bmp->bitmap, block)) {
+        __bitmap_set_byte(ctx->dirty_bmp->bitmap, block, true);
+        changed = true;
+    }
     spin_unlock_irqrestore(&ctx->dirty_lock, flags);
+    if (changed)
+        hifs_cache_request_flush(sb, false);
 }
 
 /* Clear the dirty bit for a cache block. */
@@ -324,11 +419,17 @@ void hifs_cache_clear_dirty(struct super_block *sb, uint64_t block)
 {
     struct hifs_cache_ctx *ctx = sbinfo(sb) ? sbinfo(sb)->cache : NULL;
     unsigned long flags;
+    bool changed = false;
     if (!ctx || !ctx->dirty_bmp || block >= ctx->dirty_bmp->cache_block_count)
         return;
     spin_lock_irqsave(&ctx->dirty_lock, flags);
-    __bitmap_set_byte(ctx->dirty_bmp->bitmap, block, false);
+    if (__bitmap_test_byte(ctx->dirty_bmp->bitmap, block)) {
+        __bitmap_set_byte(ctx->dirty_bmp->bitmap, block, false);
+        changed = true;
+    }
     spin_unlock_irqrestore(&ctx->dirty_lock, flags);
+    if (changed)
+        hifs_cache_request_flush(sb, false);
 }
 
 /* Query whether a cache block is marked dirty. */
@@ -344,22 +445,34 @@ void hifs_cache_mark_inode(struct super_block *sb, uint64_t ino)
 {
     struct hifs_cache_ctx *ctx = sbinfo(sb) ? sbinfo(sb)->cache : NULL;
     unsigned long flags;
+    bool changed = false;
     if (!ctx || !ctx->inode_bmp || ino >= ctx->inode_bmp->cache_block_count)
         return;
     spin_lock_irqsave(&ctx->inode_lock, flags);
-    __bitmap_set_byte(ctx->inode_bmp->bitmap, ino, true);
+    if (!__bitmap_test_byte(ctx->inode_bmp->bitmap, ino)) {
+        __bitmap_set_byte(ctx->inode_bmp->bitmap, ino, true);
+        changed = true;
+    }
     spin_unlock_irqrestore(&ctx->inode_lock, flags);
+    if (changed)
+        hifs_cache_request_flush(sb, false);
 }
 
 void hifs_cache_clear_inode(struct super_block *sb, uint64_t ino)
 {
     struct hifs_cache_ctx *ctx = sbinfo(sb) ? sbinfo(sb)->cache : NULL;
     unsigned long flags;
+    bool changed = false;
     if (!ctx || !ctx->inode_bmp || ino >= ctx->inode_bmp->cache_block_count)
         return;
     spin_lock_irqsave(&ctx->inode_lock, flags);
-    __bitmap_set_byte(ctx->inode_bmp->bitmap, ino, false);
+    if (__bitmap_test_byte(ctx->inode_bmp->bitmap, ino)) {
+        __bitmap_set_byte(ctx->inode_bmp->bitmap, ino, false);
+        changed = true;
+    }
     spin_unlock_irqrestore(&ctx->inode_lock, flags);
+    if (changed)
+        hifs_cache_request_flush(sb, false);
 }
 
 bool hifs_cache_test_inode(struct super_block *sb, uint64_t ino)
@@ -374,22 +487,34 @@ void hifs_cache_mark_dirent(struct super_block *sb, uint64_t dent)
 {
     struct hifs_cache_ctx *ctx = sbinfo(sb) ? sbinfo(sb)->cache : NULL;
     unsigned long flags;
+    bool changed = false;
     if (!ctx || !ctx->dirent_bmp || dent >= ctx->dirent_bmp->cache_block_count)
         return;
     spin_lock_irqsave(&ctx->dirent_lock, flags);
-    __bitmap_set_byte(ctx->dirent_bmp->bitmap, dent, true);
+    if (!__bitmap_test_byte(ctx->dirent_bmp->bitmap, dent)) {
+        __bitmap_set_byte(ctx->dirent_bmp->bitmap, dent, true);
+        changed = true;
+    }
     spin_unlock_irqrestore(&ctx->dirent_lock, flags);
+    if (changed)
+        hifs_cache_request_flush(sb, false);
 }
 
 void hifs_cache_clear_dirent(struct super_block *sb, uint64_t dent)
 {
     struct hifs_cache_ctx *ctx = sbinfo(sb) ? sbinfo(sb)->cache : NULL;
     unsigned long flags;
+    bool changed = false;
     if (!ctx || !ctx->dirent_bmp || dent >= ctx->dirent_bmp->cache_block_count)
         return;
     spin_lock_irqsave(&ctx->dirent_lock, flags);
-    __bitmap_set_byte(ctx->dirent_bmp->bitmap, dent, false);
+    if (__bitmap_test_byte(ctx->dirent_bmp->bitmap, dent)) {
+        __bitmap_set_byte(ctx->dirent_bmp->bitmap, dent, false);
+        changed = true;
+    }
     spin_unlock_irqrestore(&ctx->dirent_lock, flags);
+    if (changed)
+        hifs_cache_request_flush(sb, false);
 }
 
 bool hifs_cache_test_dirent(struct super_block *sb, uint64_t dent)
