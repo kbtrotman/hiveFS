@@ -68,10 +68,19 @@ static int __init hifs_init(void)
         hifs_info("Filesystem registered to kernel\n");
     }
 
+    hifs_inode_cache = kmem_cache_create("hifs_inode",
+                                         sizeof(struct hifs_inode),
+                                         0, SLAB_HWCACHE_ALIGN, NULL);
+    if (!hifs_inode_cache) {
+        hifs_err("Failed to create inode slab cache\n");
+        ret = -ENOMEM;
+        goto err_unregister_fs;
+    }
+
     ret = hifs_fifo_init();
     if (ret != 0) {
         hifs_err("Failed to initialise communications interface\n");
-        goto failure;
+        goto err_destroy_cache;
     } else {
         hifs_info("Communication control device registered\n");
     }
@@ -79,11 +88,19 @@ static int __init hifs_init(void)
     ret = hifs_start_queue_thread();
     if (ret != 0) {
         hifs_err("Failed to start hivefs comms management routine\n");
-    } else {
-        hifs_info("hive-fs ringbuffer communication manager thread started successful\n");
+        goto err_fifo_exit;
     }
-    return ret;
 
+    hifs_info("hive-fs ringbuffer communication manager thread started successful\n");
+    return 0;
+
+err_fifo_exit:
+    hifs_fifo_exit();
+err_destroy_cache:
+    kmem_cache_destroy(hifs_inode_cache);
+    hifs_inode_cache = NULL;
+err_unregister_fs:
+    unregister_filesystem(&hifs_type);
 failure:
     hifs_err("There were errors when attempting to register the filesystem\n");
     return ret;
@@ -96,12 +113,18 @@ static void __exit hifs_exit(void)
     hifs_stop_queue_thread();
     hifs_fifo_exit();
 
+    if (hifs_inode_cache) {
+        kmem_cache_destroy(hifs_inode_cache);
+        hifs_inode_cache = NULL;
+    }
+
     ret = unregister_filesystem(&hifs_type);
     if (ret != 0) {
         hifs_err("Failed to unregister filesystem\n");
         goto failure;
     }
     hifs_info("hiveFS unregistered\n");
+    return;
 
 failure:
     hifs_err("There were errors when attempting to unregister the filesystem\n");
