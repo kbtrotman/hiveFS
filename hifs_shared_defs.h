@@ -310,7 +310,7 @@ struct hifs_disk_superblock {
 	__le32	s_algorithm_usage_bitmap; /* for compression (unused) */
 
 	/* Performance hints */
-	__u8	s_prealloc_blocks;      /* # of blocks to preallocate */
+	__u8	s_preallocblocks_;      /* # of blocks to preallocate */
 	__u8	s_prealloc_dir_blocks;  /* # to preallocate for dirs */
 	__u16	s_reserved_gdt_blocks;  /* number of reserved GDT blocks */
 

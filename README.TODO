@@ -1,22 +1,24 @@
-1. Need write and delete functions for caches in hi_command.
-2. Need a configuration ability locally. For both HiveFS and Hi_Command.
-3. Need configuration for memory usage of disk caches.
-4. Then mock up an inode table.
-5. Superblock handling and make a filesystem mount function.
-6. De-dupe hashes via linked OpenSSL library in C (user-space) via hi-command. Basically  
-   copy over the C++ routines and port as everything else.
-7. For the Queen-B (catchy, but no I'm not really gonna call the main node that), I 
-   really want an embedded database. I want something screaming fast that can keep up with communication from 100 machines at once. That's the point. I can dev with postgres, but need to consider the possibilities here and maybe write something custom. A true DB isn't going to be as fast as we want for an FS most likely (performance testing?).
+
+Current status summary
+------------------------
+hiveFS kernel module:
+module mostly complete. Cache, mounting, and unmounting are complete.
+
+1. Need to hook cache structure into reads/writes to update memory structures and disk cache on every call.
+2. Need to add in-kernel de-dupe before writing to cache.
+3. Most of the read/write sync w/Hi_Command is complete, but need to hook in and trace flow.
+4. Testing, testing, testing, and more testing.
 
 
-   * Completed 3/1/2024: 
-   Once we have inode comms working, we need to flesh out block read/write comms.
-   That will automatically take care of de-dupe routine as part of that process.
+Hive:
+Key/value store is setup for blocks & working.
+metadata store is setup & working.
 
-   * Completed 3/1/2024:
-   At present, we only write superblock to local disk, which is needed to make a FS.
-   Hi-COmmand is fleshed out to recieve messages to user space for inode management,
-   so we need to flesh out the connection and test it.
+1. The items above are for testing purposes. Need a GUI front-end!
+2. Need scripts to link the stores with the front-end (python).
+3. Need testing data schema until I have a front-end to create setup with.
+4. Test, test, test!
 
-   * Completed 3/1/2014:
-   Need configuration for memory usage of queues.
+
+Honeycomb:
+Not a thing done yet. Give me 5 minutes and I'll have it done. :)

@@ -1,59 +1,58 @@
 # hiveFS
 A Hive Mind Filesystem
 
-HiveFS is a hive mind filesystem for physical Linux, Windows and VMWare/Nutanix/Cloud datastore.
+HiveFS is a hive mind filesystem for physical Linux, (Windows?) and VMWare/Nutanix/Cloud datastore.
 
-(This project is still is development.)
+(This project is still in development.)
 
 What is a hive mind filesystem? Well, in the past virtualization has hit everything, even storage
 can be virtualized. Why not the filesystem itself? HiveFS is a truely virtual global filesystem.
-In other words, it negotiates with the living kernel on a machine and makes the underlying storage
-look like one or many real, live filesystems, but on the backend, all data is stored in one global
-de-dupe pool. No data has to be stored on local disk or SAN mounted. Although, it's recommended to 
-have a small local cache on SSD disk just to make sure remote speed is no slower than local speed.
-The original goal of hiveFS was not to produce a clustered or NFS-style shared filesystem, but
-rather, by nature of its original intended design architecture it inherently acts as both. 
+A sort of filesystem hypervisor. In other words, it negotiates with the living kernel on a machine 
+and makes the underlying storage look like one or many real, live filesystems, but on the backend, 
+all data is stored in one global virtual de-dupe pool. No data has to be stored on local disk or 
+SAN mounted. Although, it's recommended to have a small local cache on SSD disk just to make sure 
+remote speed is no slower than local speed. The original goal of hiveFS was not to produce a 
+clustered or NFS-style shared filesystem, but rather, by nature of its original intended design 
+architecture it inherently acts as both. 
 
-There are 3 required and one optional companents to the "Bee Hive" in general:
+There are 3 required and one optional companents to the "Hive" in general:
 1. The central "Hive" is one or more server(s), storage appliances, installed via ISO image. 
-   The ISO install will setup an embedded linux system and configure all storage behind the blade
+   The ISO install will setup an embedded linux system and configure all storage behind the node
    for use as a blob of storage in the hive. From that point the storage can be managed without
    any traditional storage management (such as zoning, lun management, etc) since it is a
-   virtual appliance. All management is done from the hive blade's GUI or the client host CLI.
+   virtual filesystem. All management is done from the hive node's GUI or the client host CLI.
    Adding nodes adds both the ability to attach more storage via PCI slots and distribution of
-   incoming reads/writes for more bandwidth. Backend storage can be anything locally attached but
-   the hive is designed and tuned specifically for SSD (especially NVME). HSD is not recommended.
+   incoming reads/writes for more bandwidth. The software load balances across nodes. Backend 
+   storage can be anything locally attached but the hive is designed and tuned specifically for 
+   SSD (especially NVME). HSD is not recommended.
 
 2. HiveFS is a kernel module that takes a small local disk and builds a superblock on it and cache.
    The superblock allows the FS to load and then points it to the central hive for inode data. A small 
    configurable cache locally on the disk acts as NVRAM on a storage array acts. In other words, in 
    a power outage, the local cache keeps data consistent. Both the superblock and NVRAM area can be 
    very small, on the order of less than 1GB for typical use. Cache is not strictly required, but
-   without it there is a risk of data loss and a slight speed loss. Therectically this only needs to
-   be a few GB to hold a linux kernel and load up necessary boot drivers and moduoles, and then all
-   other storage could be accessed on a machine remotely once the hiveFS kernel module and hi_command
-   loads.
+   without it there is a risk of data loss and a slight speed loss.
 
 3. Hi_Command is a user-space program that runs on the same linux client as HiveFS. Hi_Command sets 
    up FIFO queues with the kernel module and accepts data from the kernel to be sent over ethernet to 
    the central hive. In other words, its a user space program that implements the protocol necessary 
    to communicate. Using insecure network comms from the linux kernel isn't a good idea. By moving this
-   to user space, it can use TLS encryption and higher-level toekn authentication, etc.
+   to user space, it can use TLS encryption and higher-level token authentication, etc.
 
-4. HoneyComb is an optional blade server install ISO that can be added which has the hive software to
-   access the datastore and both the hiveFS kernel module and hi_command installed. It can provide a 
-   front-end for NFS or webdav protocols for use in physical or cloud infrastructure. This extendeds 
-   the inherent block archtecture of the hive to file and object storage. Since the Honeycomb runs the 
-   hive software, if is it attached to the backend disk, it can also act as a full particupating member 
-   of the hive and storing data. However, it will hand off communication from hive clients as load gets
-   higher (contention with local NFS/Webdev reads/writes).
+4. HoneyComb is an optional node server install ISO that can be added which has the hive software to
+   access the datastore, the hiveFS kernel module, and hi_command installed. It can access storage 
+   high speed and provide a front-end for NFS or webdav protocols for use in physical or cloud 
+   infrastructure. This extendeds the inherent block archtecture of the hive to file and object storage. 
+   Since the Honeycomb runs the hive software, it can also act as a full particupating member of the hive 
+   and accept client communication to store data. However, it will hand off communication from hive 
+   clients as load gets higher (from contention with local NFS/Webdev reads/writes).
 
 
 
-HiveFS is designed to be completely cloud-friendly, easily expanding across a hybrid cloud or multi-cloud 
-setup by using local or cloud-vendor based SSD block storage and the hive can be installed into virtual 
-machines in any cloud. The clients do not need to be local to the hive install, however, to avoid storage 
-timeouts they should have a link with reasonable communication.
+HiveFS is designed by architecture to easily expand across a hybrid cloud or multi-cloud setup by using 
+local or cloud-vendor based SSD block storage and the hive can be installed into virtual machines in any 
+cloud. The clients do not need to be local to the hive install, however, to avoid storage timeouts they 
+should have a link with reasonable communication speed.
 
 And again, regardless of O/S, application, or other factors, hiveFS is designed to be globally de-dupable 
 across all volumes, hosts, and backend storage. In addition some compression is applied. However, because 

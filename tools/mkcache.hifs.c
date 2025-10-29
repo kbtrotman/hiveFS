@@ -173,6 +173,13 @@ static void init_superblock(struct hifs_disk_superblock *sb,
 			    const char *label,
 			    const char *mount_point)
 {
+	const uint32_t dir_prealloc_blocks = 50;
+	const uint64_t chunk_bytes = 4096ULL * 1024ULL;
+	uint64_t reserved_meta_blocks;
+	uint64_t usable_blocks;
+	uint64_t data_bytes;
+	uint64_t chunk_count = 0;
+
 	memset(sb, 0, sizeof(*sb));
 
 	time_t now = time(NULL);
@@ -195,6 +202,25 @@ static void init_superblock(struct hifs_disk_superblock *sb,
 	sb->s_inode_size        = to_le16(sizeof(struct hifs_inode));
 	sb->s_first_ino         = to_le32(HIFS_ROOT_INODE);
 	sb->s_mkfs_time         = to_le32((uint32_t)now);
+
+	reserved_meta_blocks = HIFS_CACHE_SPACE_START / block_size;
+	usable_blocks = (blocks > reserved_meta_blocks) ? (blocks - reserved_meta_blocks) : 0;
+	if (usable_blocks > dir_prealloc_blocks)
+		usable_blocks -= dir_prealloc_blocks;
+	else
+		usable_blocks = 0;
+
+	data_bytes = usable_blocks * block_size;
+	if (data_bytes) {
+		chunk_count = (data_bytes + chunk_bytes - 1) / chunk_bytes;
+		if (chunk_count > 255)
+			chunk_count = 255;
+		if (chunk_count == 0)
+			chunk_count = 1;
+	}
+
+	sb->s_prealloc_blocks = (uint8_t)chunk_count;
+	sb->s_prealloc_dir_blocks = (uint8_t)dir_prealloc_blocks;
 
 	if (label)
 		strncpy(sb->s_volume_name, label, sizeof(sb->s_volume_name));
