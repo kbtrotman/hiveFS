@@ -218,6 +218,7 @@ bool hifs_cache_test_inode(struct super_block *sb, uint64_t ino);
 void hifs_cache_mark_dirent(struct super_block *sb, uint64_t dent);
 void hifs_cache_clear_dirent(struct super_block *sb, uint64_t dent);
 bool hifs_cache_test_dirent(struct super_block *sb, uint64_t dent);
+void hifs_sort_most_recent_cache_used(struct super_block *sb);
 
 // END: Prototypes Here:
 
