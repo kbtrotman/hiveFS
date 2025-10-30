@@ -14,6 +14,7 @@
 #include <linux/slab.h>
 #include <linux/math64.h>
 #include <linux/ktime.h>
+#include <linux/sort.h>
 
 /*
    <<<HiveFS Cache Management>>>
@@ -168,6 +169,51 @@ static struct hifs_cache_fifo *hifs_cache_fifo_get(struct hifs_cache_ctx *ctx,
         return &ctx->inode_fifo;
     }
     return NULL;
+}
+
+static u64 hifs_cache_entry_weight(const struct hifs_cache_entry *entry)
+{
+    u32 count = entry->use_count;
+
+    if (count <= 3)
+        return count;
+
+    /* Emphasize frequently hit entries once they surpass the lower threshold. */
+    return 3 + (u64)(count - 3) * 2;
+}
+
+static int hifs_cache_entry_cmp_desc(const void *lhs, const void *rhs)
+{
+    const struct hifs_cache_entry *a = lhs;
+    const struct hifs_cache_entry *b = rhs;
+    u64 weight_a = hifs_cache_entry_weight(a);
+    u64 weight_b = hifs_cache_entry_weight(b);
+
+    if (weight_a > weight_b)
+        return -1;
+    if (weight_a < weight_b)
+        return 1;
+
+    if (a->last_used > b->last_used)
+        return -1;
+    if (a->last_used < b->last_used)
+        return 1;
+
+    if (a->id < b->id)
+        return -1;
+    if (a->id > b->id)
+        return 1;
+
+    return 0;
+}
+
+static void hifs_cache_sort_fifo(struct hifs_cache_fifo *fifo)
+{
+    if (!fifo || fifo->count < 2 || !fifo->entries)
+        return;
+
+    sort(fifo->entries, fifo->count, sizeof(struct hifs_cache_entry),
+         hifs_cache_entry_cmp_desc, NULL);
 }
 
 static struct hifs_cache_bitmap *hifs_cache_bitmap_get(struct hifs_cache_ctx *ctx,
@@ -974,13 +1020,22 @@ void hifs_sort_most_recent_cache_used(struct super_block *sb)
 {
 	struct hifs_sb_info *info = sbinfo(sb);
 	struct hifs_cache_ctx *ctx = info ? info->cache : NULL;
+	unsigned long flags;
 
 	if (!ctx)
 		return;
 
-	/* TODO: sort cache tracking arrays by usage frequency and most recently read/write.
-     * weight heavier on number of uses above 3 times.
-      */
+	spin_lock_irqsave(&ctx->block_lock, flags);
+	hifs_cache_sort_fifo(&ctx->block_fifo);
+	spin_unlock_irqrestore(&ctx->block_lock, flags);
+
+	spin_lock_irqsave(&ctx->dirent_lock, flags);
+	hifs_cache_sort_fifo(&ctx->dirent_fifo);
+	spin_unlock_irqrestore(&ctx->dirent_lock, flags);
+
+	spin_lock_irqsave(&ctx->inode_lock, flags);
+	hifs_cache_sort_fifo(&ctx->inode_fifo);
+	spin_unlock_irqrestore(&ctx->inode_lock, flags);
 }
 
 int hifs_fetch_block(struct super_block *sb, uint64_t block)
