@@ -47,6 +47,8 @@ void hifs_store_inode(struct super_block *sb, struct hifs_inode *hii)
 	struct buffer_head *bh;
 	struct hifs_inode *in_core;
 	uint32_t blk = hii->i_addrb[0] - 1;
+	uint8_t inode_hash[HIFS_BLOCK_HASH_SIZE];
+	int dedupe_ret;
 
 	/* put in-core inode */
 	/* Change me: here we just use fact that current allocator is cont.
@@ -58,11 +60,23 @@ void hifs_store_inode(struct super_block *sb, struct hifs_inode *hii)
 	in_core = (struct hifs_inode *)(bh->b_data);
 	memcpy(in_core, hii, sizeof(*in_core));
 
+	hifs_cache_mark_inode(sb, hii->i_ino);
+	hifs_cache_mark_present(sb, blk);
+	hifs_cache_mark_dirty(sb, blk);
+
+	dedupe_ret = hifs_dedupe_writes(sb, blk, bh->b_data,
+					sb->s_blocksize, inode_hash);
+	if (dedupe_ret)
+		hifs_warning("dedupe placeholder returned %d for inode %llu block %u",
+			     dedupe_ret, hii->i_ino, blk);
+	else {
+		memcpy(hii->i_block_hashes[0], inode_hash, HIFS_BLOCK_HASH_SIZE);
+		hii->i_hash_count = max_t(uint16_t, hii->i_hash_count, 1);
+	}
+
 	mark_buffer_dirty(bh);
 	sync_dirty_buffer(bh);
 	brelse(bh);
-
-	hifs_cache_mark_inode(sb, hii->i_ino);
 }
 
 /* Here introduce allocation for directory... */
@@ -72,6 +86,9 @@ int hifs_add_dir_record(struct super_block *sb, struct inode *dir, struct dentry
 	struct hifs_inode *parent, *hii;
 	struct hifs_dir_entry *dir_rec;
 	u32 blk, j;
+	uint8_t block_hash[HIFS_BLOCK_HASH_SIZE];
+	size_t block_index;
+	int dedupe_ret;
 
 	parent = dir->i_private;
 	hii = parent;
@@ -88,10 +105,38 @@ int hifs_add_dir_record(struct super_block *sb, struct inode *dir, struct dentry
 				dir_rec->name_len = strlen(dentry->d_name.name);
 				memset(dir_rec->name, 0, 256);
 				strcpy(dir_rec->name, dentry->d_name.name);
-				mark_buffer_dirty(bh);
-				sync_dirty_buffer(bh);
-				brelse(bh);
-				parent->i_size += sizeof(*dir_rec);
+
+				hifs_cache_mark_present(sb, blk);
+				hifs_cache_mark_dirty(sb, blk);
+
+					block_index = (blk >= parent->i_addrb[0]) ?
+						(blk - parent->i_addrb[0]) : 0;
+					hifs_cache_mark_dirent(sb, dir_rec->inode_nr);
+
+					dedupe_ret = hifs_dedupe_writes(sb, blk, bh->b_data,
+									sb->s_blocksize, block_hash);
+					if (dedupe_ret)
+						hifs_warning("dedupe placeholder returned %d for dir inode %lu block %u",
+							     dedupe_ret, dir->i_ino, blk);
+
+					if (block_index >= HIFS_MAX_BLOCK_HASHES) {
+						hifs_warning("directory block index %zu exceeds hash capacity",
+							     block_index);
+						block_index = HIFS_MAX_BLOCK_HASHES - 1;
+					}
+
+					memcpy(parent->i_block_hashes[block_index],
+					       block_hash, HIFS_BLOCK_HASH_SIZE);
+					parent->i_hash_count = max_t(uint16_t, parent->i_hash_count,
+								     (uint16_t)(block_index + 1));
+
+					mark_buffer_dirty(bh);
+					sync_dirty_buffer(bh);
+					brelse(bh);
+					parent->i_size += sizeof(*dir_rec);
+					hifs_cache_mark_inode(sb, parent->i_ino);
+					hifs_store_inode(sb, parent);
+					hifs_publish_inode(sb, parent, false);
 				{
 					struct super_block *sb = dir->i_sb;
 					u32 type = DT_UNKNOWN;
@@ -144,8 +189,35 @@ struct hifs_sb_info *hisb;
 	hii->i_flags = 0;
 	hii->i_mode = 0;
 	hii->i_size = 0;
+	hii->i_hash_count = 0;
+	hii->i_hash_reserved = 0;
+	memset(hii->i_block_hashes, 0, sizeof(hii->i_block_hashes));
 
-	/* TODO: check if there is any space left on the device */
+	{
+		const u64 total_blocks =
+			(u64)le32_to_cpu(hisb->disk.s_blocks_count) |
+			((u64)le32_to_cpu(hisb->disk.s_blocks_count_hi) << 32);
+		const u32 blocksize = hisb->s_blocksize ?
+				      hisb->s_blocksize : HIFS_DEFAULT_BLOCK_SIZE;
+		const u32 ring_base = blocksize ?
+				      (HIFS_CACHE_SPACE_START / blocksize) : 0;
+		const u32 span = HIFS_INODE_TSIZE;
+		u32 last = hisb->s_last_blk;
+
+		if (last < ring_base)
+			last = ring_base;
+
+		if (total_blocks) {
+			const u64 next = (u64)last + span;
+
+			if (next >= total_blocks) {
+				hifs_sort_most_recent_cache_used(sb);
+				last = ring_base;
+			}
+		}
+
+		hisb->s_last_blk = last;
+	}
 	/* First block is allocated for in-core inode struct */
 	/* Then 4 block for extends: that mean dmi struct is in i_addrb[0]-1 */
 	hii->i_addrb[0] = hisb->s_last_blk + 1;
@@ -299,13 +371,19 @@ struct hifs_inode *hifs_iget(struct super_block *sb, ino_t ino)
 	struct hifs_inode *itab;
 	u32 blk = 0;
 	u32 *ptr;
-	struct hifs_inode request = {0};
+	struct hifs_inode *request = NULL;
 
 	if (!hifs_cache_test_inode(sb, ino)) {
 		hifs_debug("inode %lu cache miss", (unsigned long)ino);
-	request.i_ino = ino;
-		if (hifs_publish_inode(sb, &request, true) < 0)
+		request = kzalloc(sizeof(*request), GFP_KERNEL);
+		if (!request)
 			return NULL;
+		request->i_ino = ino;
+		if (hifs_publish_inode(sb, request, true) < 0) {
+			kfree(request);
+			return NULL;
+		}
+		kfree(request);
 	}
 
 	/* get inode table 'file' */

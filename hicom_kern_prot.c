@@ -30,36 +30,6 @@ static void hifs_link_set_state(struct hifs_link *link, enum hifs_link_state sta
 		link->clockstart = GET_TIME();
 }
 
-int hifs_create_test_inode(void)
-{
-	struct hifs_inode inode;
-	int ret;
-
-	memset(&inode, 0, sizeof(inode));
-
-	inode.i_version = 1;
-	inode.i_mode = S_IFREG | 0644;
-	inode.i_uid = 0;
-	inode.i_gid = 0;
-	inode.i_blocks = 1;
-	inode.i_bytes = 512;
-	inode.i_size = 512;
-	inode.i_ino = 1;
-	strscpy(inode.i_name, "test_inode", sizeof(inode.i_name));
-
-    ret = hifs_cmd_fifo_out_push_cstr(HIFS_Q_PROTO_CMD_TEST);
-	if (ret)
-		return ret;
-
-    /* Test Example: send inode as raw payload via data FIFO if desired */
-    ret = hifs_data_fifo_out_push_buf(&inode, sizeof(inode));
-	if (ret)
-		return ret;
-
-	//hifs_info("Queued test inode and command\n");
-	return 0;
-}
-
 void hifs_comm_link_notify_online(void)
 {
 	hifs_link_set_state(&hifs_kern_link, HIFS_COMM_LINK_UP);
@@ -398,9 +368,10 @@ int hifs_handshake_superblock(struct super_block *sb)
 {
     struct hifs_sb_info *info;
     struct hifs_cmds cmd;
-    struct hifs_sb_msg msg_local;
-    struct hifs_sb_msg msg_remote;
-    int ret;
+    struct hifs_sb_msg *msg_local = NULL;
+    struct hifs_sb_msg *msg_remote = NULL;
+    struct hifs_data_frame *frame = NULL;
+    int ret = 0;
 
     if (!sb)
         return -EINVAL;
@@ -417,54 +388,79 @@ int hifs_handshake_superblock(struct super_block *sb)
     if (ret)
         return ret;
 
-    /* Build and send local per-volume super */
-    memset(&msg_local, 0, sizeof(msg_local));
-    msg_local.volume_id = cpu_to_le64(info->volume_id);
-    msg_local.vsb = info->vol_super;
+    msg_local = kzalloc(sizeof(*msg_local), GFP_KERNEL);
+    if (!msg_local)
+        return -ENOMEM;
+    msg_remote = kzalloc(sizeof(*msg_remote), GFP_KERNEL);
+    if (!msg_remote) {
+        ret = -ENOMEM;
+        goto out;
+    }
+    frame = kmalloc(sizeof(*frame), GFP_KERNEL);
+    if (!frame) {
+        ret = -ENOMEM;
+        goto out;
+    }
 
-    ret = hifs_data_fifo_out_push_buf(&msg_local, sizeof(msg_local));
+    /* Build and send local per-volume super */
+    memset(msg_local, 0, sizeof(*msg_local));
+    msg_local->volume_id = cpu_to_le64(info->volume_id);
+    msg_local->vsb = info->vol_super;
+
+    ret = hifs_data_fifo_out_push_buf(msg_local, sizeof(*msg_local));
     if (ret)
-        return ret;
+        goto out;
 
     /* Wait for an optional response: SB_RECV + payload of superblock */
     {
         int tries;
         for (tries = 0; tries < 20; tries++) {
+            memset(frame, 0, sizeof(*frame));
             if (!hifs_cmd_fifo_in_pop(&cmd, true)) {
                 if (cmd_equals(&cmd, HIFS_Q_PROTO_CMD_SB_RECV)) {
-                    struct hifs_data_frame frame;
-                    ret = hifs_data_fifo_in_pop(&frame, false);
+                    ret = hifs_data_fifo_in_pop(frame, false);
                     if (ret)
-                        return ret;
-                    if (frame.len != sizeof(msg_remote))
-                        return -EINVAL;
-                    memcpy(&msg_remote, frame.data, sizeof(msg_remote));
+                        goto out;
+                    if (frame->len != sizeof(*msg_remote)) {
+                        ret = -EINVAL;
+                        goto out;
+                    }
+                    memcpy(msg_remote, frame->data, sizeof(*msg_remote));
                     break;
                 }
             }
             schedule_timeout_interruptible(msecs_to_jiffies(50));
         }
-        if (tries == 20)
-            return 0; /* No response; assume local is fine */
+        if (tries == 20) {
+            ret = 0; /* No response; assume local is fine */
+            goto out;
+        }
     }
 
     /* Compare and update if remote is newer */
-    if (hifs_compare_sb_newer(&msg_local.vsb, &msg_remote.vsb) > 0) {
+    if (hifs_compare_sb_newer(&msg_local->vsb, &msg_remote->vsb) > 0) {
         /* Update per-volume logical super and persist in volume table */
-        info->vol_super = msg_remote.vsb;
+        info->vol_super = msg_remote->vsb;
         hifs_volume_save(sb, info);
         /* continue to root handshake even if super updated */
     }
-    return hifs_handshake_rootdentry(sb);
+    ret = hifs_handshake_rootdentry(sb);
+
+out:
+    kfree(frame);
+    kfree(msg_remote);
+    kfree(msg_local);
+    return ret;
 }
 
 int hifs_handshake_rootdentry(struct super_block *sb)
 {
     struct hifs_sb_info *info;
     struct hifs_cmds cmd;
-    struct hifs_root_msg msg_local;
-    struct hifs_root_msg msg_remote;
-    int ret;
+    struct hifs_root_msg *msg_local = NULL;
+    struct hifs_root_msg *msg_remote = NULL;
+    struct hifs_data_frame *frame = NULL;
+    int ret = 0;
 
     if (!sb)
         return -EINVAL;
@@ -479,41 +475,66 @@ int hifs_handshake_rootdentry(struct super_block *sb)
     if (ret)
         return ret;
 
-    memset(&msg_local, 0, sizeof(msg_local));
-    msg_local.volume_id = cpu_to_le64(info->volume_id);
-    msg_local.root = info->root_dentry;
+    msg_local = kzalloc(sizeof(*msg_local), GFP_KERNEL);
+    if (!msg_local)
+        return -ENOMEM;
+    msg_remote = kzalloc(sizeof(*msg_remote), GFP_KERNEL);
+    if (!msg_remote) {
+        ret = -ENOMEM;
+        goto out;
+    }
+    frame = kmalloc(sizeof(*frame), GFP_KERNEL);
+    if (!frame) {
+        ret = -ENOMEM;
+        goto out;
+    }
 
-    ret = hifs_data_fifo_out_push_buf(&msg_local, sizeof(msg_local));
+    memset(msg_local, 0, sizeof(*msg_local));
+    msg_local->volume_id = cpu_to_le64(info->volume_id);
+    msg_local->root = info->root_dentry;
+
+    ret = hifs_data_fifo_out_push_buf(msg_local, sizeof(*msg_local));
     if (ret)
-        return ret;
+        goto out;
 
     {
         int tries;
         for (tries = 0; tries < 20; tries++) {
+            memset(frame, 0, sizeof(*frame));
             if (!hifs_cmd_fifo_in_pop(&cmd, true)) {
                 if (cmd_equals(&cmd, HIFS_Q_PROTO_CMD_ROOT_RECV)) {
-                    struct hifs_data_frame frame;
-                    ret = hifs_data_fifo_in_pop(&frame, false);
+                    ret = hifs_data_fifo_in_pop(frame, false);
                     if (ret)
-                        return ret;
-                    if (frame.len != sizeof(msg_remote))
-                        return -EINVAL;
-                    memcpy(&msg_remote, frame.data, sizeof(msg_remote));
+                        goto out;
+                    if (frame->len != sizeof(*msg_remote)) {
+                        ret = -EINVAL;
+                        goto out;
+                    }
+                    memcpy(msg_remote, frame->data, sizeof(*msg_remote));
                     break;
                 }
             }
             schedule_timeout_interruptible(msecs_to_jiffies(50));
         }
-        if (tries == 20)
-            return 0;
+        if (tries == 20) {
+            ret = 0;
+            goto out;
+        }
     }
 
-    if (hifs_compare_root_newer(&info->root_dentry, &msg_remote.root) > 0) {
-        info->root_dentry = msg_remote.root;
+    if (hifs_compare_root_newer(&info->root_dentry, &msg_remote->root) > 0) {
+        info->root_dentry = msg_remote->root;
         hifs_volume_save(sb, info);
-        return 1;
+        ret = 1;
+        goto out;
     }
-    return 0;
+    ret = 0;
+
+out:
+    kfree(frame);
+    kfree(msg_remote);
+    kfree(msg_local);
+    return ret;
 }
 
 int hifs_publish_dentry(struct super_block *sb, uint64_t parent_ino, uint64_t child_ino,
@@ -521,10 +542,11 @@ int hifs_publish_dentry(struct super_block *sb, uint64_t parent_ino, uint64_t ch
 {
     struct hifs_sb_info *info;
     struct hifs_cmds cmd;
-    struct hifs_dentry_msg msg_local;
-    struct hifs_dentry_msg msg_remote;
+    struct hifs_dentry_msg *msg_local = NULL;
+    struct hifs_dentry_msg *msg_remote = NULL;
+    struct hifs_data_frame *frame = NULL;
     u32 copy_len;
-    int ret;
+    int ret = 0;
 
     if (!sb || !name)
         return -EINVAL;
@@ -539,20 +561,33 @@ int hifs_publish_dentry(struct super_block *sb, uint64_t parent_ino, uint64_t ch
     if (ret)
         return ret;
 
-    memset(&msg_local, 0, sizeof(msg_local));
-    msg_local.volume_id = cpu_to_le64(info->volume_id);
-    msg_local.dentry.de_flags = cpu_to_le32(request_only ? HIFS_DENTRY_MSGF_REQUEST : 0);
-    msg_local.dentry.de_parent = cpu_to_le64(parent_ino);
-    msg_local.dentry.de_inode = cpu_to_le64(child_ino);
-    msg_local.dentry.de_epoch = cpu_to_le32((u32)GET_TIME());
-    msg_local.dentry.de_type = cpu_to_le32(type);
-    copy_len = min_t(u32, name_len, (u32)sizeof(msg_local.dentry.de_name));
-    memcpy(msg_local.dentry.de_name, name, copy_len);
-    msg_local.dentry.de_name_len = cpu_to_le32(copy_len);
+    msg_local = kzalloc(sizeof(*msg_local), GFP_KERNEL);
+    if (!msg_local)
+        return -ENOMEM;
+    msg_remote = kzalloc(sizeof(*msg_remote), GFP_KERNEL);
+    if (!msg_remote) {
+        ret = -ENOMEM;
+        goto out;
+    }
+    frame = kmalloc(sizeof(*frame), GFP_KERNEL);
+    if (!frame) {
+        ret = -ENOMEM;
+        goto out;
+    }
 
-    ret = hifs_data_fifo_out_push_buf(&msg_local, sizeof(msg_local));
+    msg_local->volume_id = cpu_to_le64(info->volume_id);
+    msg_local->dentry.de_flags = cpu_to_le32(request_only ? HIFS_DENTRY_MSGF_REQUEST : 0);
+    msg_local->dentry.de_parent = cpu_to_le64(parent_ino);
+    msg_local->dentry.de_inode = cpu_to_le64(child_ino);
+    msg_local->dentry.de_epoch = cpu_to_le32((u32)GET_TIME());
+    msg_local->dentry.de_type = cpu_to_le32(type);
+    copy_len = min_t(u32, name_len, (u32)sizeof(msg_local->dentry.de_name));
+    memcpy(msg_local->dentry.de_name, name, copy_len);
+    msg_local->dentry.de_name_len = cpu_to_le32(copy_len);
+
+    ret = hifs_data_fifo_out_push_buf(msg_local, sizeof(*msg_local));
     if (ret)
-        return ret;
+        goto out;
 
     hifs_debug("publish dentry %llu/%llu name %.*s flags %#x",
                (unsigned long long)parent_ino,
@@ -563,29 +598,40 @@ int hifs_publish_dentry(struct super_block *sb, uint64_t parent_ino, uint64_t ch
     {
         int tries;
         for (tries = 0; tries < 20; tries++) {
+            memset(frame, 0, sizeof(*frame));
             if (!hifs_cmd_fifo_in_pop(&cmd, true)) {
                 if (cmd_equals(&cmd, HIFS_Q_PROTO_CMD_DENTRY_RECV)) {
-                    struct hifs_data_frame frame;
-                    ret = hifs_data_fifo_in_pop(&frame, false);
+                    ret = hifs_data_fifo_in_pop(frame, false);
                     if (ret)
-                        return ret;
-                    if (frame.len != sizeof(msg_remote))
-                        return -EINVAL;
-                    memcpy(&msg_remote, frame.data, sizeof(msg_remote));
+                        goto out;
+                    if (frame->len != sizeof(*msg_remote)) {
+                        ret = -EINVAL;
+                        goto out;
+                    }
+                    memcpy(msg_remote, frame->data, sizeof(*msg_remote));
                     break;
                 }
             }
             schedule_timeout_interruptible(msecs_to_jiffies(50));
         }
-        if (tries == 20)
-            return 0;
+        if (tries == 20) {
+            ret = 0;
+            goto out;
+        }
     }
 
-    if (hifs_compare_dentry_newer(&msg_local.dentry, &msg_remote.dentry) > 0) {
-        hifs_apply_remote_dentry(sb, info, &msg_remote.dentry);
-        return 1;
+    if (hifs_compare_dentry_newer(&msg_local->dentry, &msg_remote->dentry) > 0) {
+        hifs_apply_remote_dentry(sb, info, &msg_remote->dentry);
+        ret = 1;
+        goto out;
     }
-    return 0;
+    ret = 0;
+
+out:
+    kfree(frame);
+    kfree(msg_remote);
+    kfree(msg_local);
+    return ret;
 }
 
 int hifs_publish_inode(struct super_block *sb, const struct hifs_inode *hii,
@@ -593,10 +639,11 @@ int hifs_publish_inode(struct super_block *sb, const struct hifs_inode *hii,
 {
     struct hifs_sb_info *info;
     struct hifs_cmds cmd;
-    struct hifs_inode_msg msg_local;
-    struct hifs_inode_msg msg_remote;
-    struct hifs_inode_wire wire_local;
-    int ret;
+    struct hifs_inode_msg *msg_local = NULL;
+    struct hifs_inode_msg *msg_remote = NULL;
+    struct hifs_inode_wire *wire_local = NULL;
+    struct hifs_data_frame *frame = NULL;
+    int ret = 0;
 
     if (!sb || !hii)
         return -EINVAL;
@@ -605,7 +652,11 @@ int hifs_publish_inode(struct super_block *sb, const struct hifs_inode *hii,
     if (!info)
         return -EINVAL;
 
-    hifs_inode_host_to_wire(hii, &wire_local,
+    wire_local = kzalloc(sizeof(*wire_local), GFP_KERNEL);
+    if (!wire_local)
+        return -ENOMEM;
+
+    hifs_inode_host_to_wire(hii, wire_local,
                             request_only ? HIFS_INODE_MSGF_REQUEST : 0);
 
     memset(&cmd, 0, sizeof(cmd));
@@ -613,46 +664,73 @@ int hifs_publish_inode(struct super_block *sb, const struct hifs_inode *hii,
     cmd.count = strlen(cmd.cmd);
     ret = hifs_cmd_fifo_out_push(&cmd);
     if (ret)
-        return ret;
+        goto out;
 
-    memset(&msg_local, 0, sizeof(msg_local));
-    msg_local.volume_id = cpu_to_le64(info->volume_id);
-    msg_local.inode = wire_local;
+    msg_local = kzalloc(sizeof(*msg_local), GFP_KERNEL);
+    if (!msg_local) {
+        ret = -ENOMEM;
+        goto out;
+    }
+    msg_remote = kzalloc(sizeof(*msg_remote), GFP_KERNEL);
+    if (!msg_remote) {
+        ret = -ENOMEM;
+        goto out;
+    }
+    frame = kmalloc(sizeof(*frame), GFP_KERNEL);
+    if (!frame) {
+        ret = -ENOMEM;
+        goto out;
+    }
+
+    msg_local->volume_id = cpu_to_le64(info->volume_id);
+    msg_local->inode = *wire_local;
 
     hifs_debug("publish inode %llu flags %#x", hii->i_ino,
                request_only ? HIFS_INODE_MSGF_REQUEST : 0);
 
-    ret = hifs_data_fifo_out_push_buf(&msg_local, sizeof(msg_local));
+    ret = hifs_data_fifo_out_push_buf(msg_local, sizeof(*msg_local));
     if (ret)
-        return ret;
+        goto out;
 
     {
         int tries;
         for (tries = 0; tries < 20; tries++) {
+            memset(frame, 0, sizeof(*frame));
             if (!hifs_cmd_fifo_in_pop(&cmd, true)) {
                 if (cmd_equals(&cmd, HIFS_Q_PROTO_CMD_INODE_RECV)) {
-                    struct hifs_data_frame frame;
-                    ret = hifs_data_fifo_in_pop(&frame, false);
+                    ret = hifs_data_fifo_in_pop(frame, false);
                     if (ret)
-                        return ret;
-                    if (frame.len != sizeof(msg_remote))
-                        return -EINVAL;
-                    memcpy(&msg_remote, frame.data, sizeof(msg_remote));
+                        goto out;
+                    if (frame->len != sizeof(*msg_remote)) {
+                        ret = -EINVAL;
+                        goto out;
+                    }
+                    memcpy(msg_remote, frame->data, sizeof(*msg_remote));
                     break;
                 }
             }
             schedule_timeout_interruptible(msecs_to_jiffies(50));
         }
-        if (tries == 20)
-            return 0;
+        if (tries == 20) {
+            ret = 0;
+            goto out;
+        }
     }
 
-    if (hifs_compare_inode_newer(&msg_local.inode, &msg_remote.inode) > 0) {
-        hifs_apply_remote_inode(sb, &msg_remote.inode);
-        return 1;
+    if (hifs_compare_inode_newer(&msg_local->inode, &msg_remote->inode) > 0) {
+        hifs_apply_remote_inode(sb, &msg_remote->inode);
+        ret = 1;
+        goto out;
     }
 
-    return 0;
+    ret = 0;
+
+out:
+    kfree(frame);
+    kfree(msg_remote);
+    kfree(msg_local);
+    kfree(wire_local);
+    return ret;
 }
 
 int hifs_publish_block(struct super_block *sb, uint64_t block_no,
@@ -660,8 +738,10 @@ int hifs_publish_block(struct super_block *sb, uint64_t block_no,
 {
     struct hifs_sb_info *info;
     struct hifs_cmds cmd;
-    struct hifs_block_msg msg_local;
-    int ret;
+    struct hifs_block_msg *msg_local = NULL;
+    struct hifs_block_msg *msg_remote = NULL;
+    struct hifs_data_frame *frame = NULL;
+    int ret = 0;
 
     if (!sb)
         return -EINVAL;
@@ -681,65 +761,101 @@ int hifs_publish_block(struct super_block *sb, uint64_t block_no,
     if (ret)
         return ret;
 
-    memset(&msg_local, 0, sizeof(msg_local));
-    msg_local.volume_id = cpu_to_le64(info->volume_id);
-    msg_local.block_no = cpu_to_le64(block_no);
-    msg_local.flags = cpu_to_le32(request_only ? HIFS_BLOCK_MSGF_REQUEST : 0);
-    msg_local.data_len = cpu_to_le32(request_only ? 0 : data_len);
+    msg_local = kzalloc(sizeof(*msg_local), GFP_KERNEL);
+    if (!msg_local)
+        return -ENOMEM;
+    msg_remote = kzalloc(sizeof(*msg_remote), GFP_KERNEL);
+    if (!msg_remote) {
+        ret = -ENOMEM;
+        goto out;
+    }
+    frame = kmalloc(sizeof(*frame), GFP_KERNEL);
+    if (!frame) {
+        ret = -ENOMEM;
+        goto out;
+    }
+
+    msg_local->volume_id = cpu_to_le64(info->volume_id);
+    msg_local->block_no = cpu_to_le64(block_no);
+    msg_local->flags = cpu_to_le32(request_only ? HIFS_BLOCK_MSGF_REQUEST : 0);
+    msg_local->data_len = cpu_to_le32(request_only ? 0 : data_len);
 
     hifs_debug("publish block %llu len %u flags %#x",
                (unsigned long long)block_no, data_len,
                request_only ? HIFS_BLOCK_MSGF_REQUEST : 0);
 
-    ret = hifs_data_fifo_out_push_buf(&msg_local, sizeof(msg_local));
+    ret = hifs_data_fifo_out_push_buf(msg_local, sizeof(*msg_local));
     if (ret)
-        return ret;
+        goto out;
 
     if (!request_only && data_len) {
         ret = hifs_data_fifo_out_push_buf(data, data_len);
         if (ret)
-            return ret;
+            goto out;
     }
 
     {
         int tries;
         for (tries = 0; tries < 20; tries++) {
+            memset(frame, 0, sizeof(*frame));
             if (!hifs_cmd_fifo_in_pop(&cmd, true)) {
                 if (cmd_equals(&cmd, HIFS_Q_PROTO_CMD_BLOCK_RECV)) {
-                    struct hifs_data_frame frame;
-                    ret = hifs_data_fifo_in_pop(&frame, false);
-                    if (ret)
-                        return ret;
-                    struct hifs_block_msg msg_remote;
+                    struct hifs_data_frame *data_frame = NULL;
                     u32 r_len;
-                    memset(&msg_remote, 0, sizeof(msg_remote));
-                    if (frame.len != sizeof(msg_remote))
-                        return -EINVAL;
-                    memcpy(&msg_remote, frame.data, sizeof(msg_remote));
-                    r_len = le32_to_cpu(msg_remote.data_len);
+
+                    ret = hifs_data_fifo_in_pop(frame, false);
+                    if (ret)
+                        goto out;
+                    memset(msg_remote, 0, sizeof(*msg_remote));
+                    if (frame->len != sizeof(*msg_remote)) {
+                        ret = -EINVAL;
+                        goto out;
+                    }
+                    memcpy(msg_remote, frame->data, sizeof(*msg_remote));
+                    r_len = le32_to_cpu(msg_remote->data_len);
                     if (r_len > 0) {
-                        struct hifs_data_frame data_frame;
-                        ret = hifs_data_fifo_in_pop(&data_frame, false);
-                        if (ret)
-                            return ret;
-                        if (data_frame.len != r_len)
-                            return -EINVAL;
-                        ret = hifs_apply_remote_block(sb, le64_to_cpu(msg_remote.block_no),
-                                                       data_frame.data, r_len);
-                        if (!ret)
-                            return 1;
-                        return ret;
+                        data_frame = kmalloc(sizeof(*data_frame), GFP_KERNEL);
+                        if (!data_frame) {
+                            ret = -ENOMEM;
+                            goto out;
+                        }
+                        ret = hifs_data_fifo_in_pop(data_frame, false);
+                        if (ret) {
+                            kfree(data_frame);
+                            goto out;
+                        }
+                        if (data_frame->len != r_len) {
+                            kfree(data_frame);
+                            ret = -EINVAL;
+                            goto out;
+                        }
+                        ret = hifs_apply_remote_block(sb, le64_to_cpu(msg_remote->block_no),
+                                                       data_frame->data, r_len);
+                        kfree(data_frame);
+                        if (!ret) {
+                            ret = 1;
+                            goto out;
+                        }
+                        goto out;
                     }
                     break;
                 }
             }
             schedule_timeout_interruptible(msecs_to_jiffies(50));
         }
-        if (tries == 20)
-            return 0;
+        if (tries == 20) {
+            ret = 0;
+            goto out;
+        }
     }
 
-    return 0;
+    ret = 0;
+
+out:
+    kfree(frame);
+    kfree(msg_remote);
+    kfree(msg_local);
+    return ret;
 }
 int hifs_flush_dirty_cache_items(void)
 {

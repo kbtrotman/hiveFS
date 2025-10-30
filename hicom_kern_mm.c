@@ -155,16 +155,24 @@ static long hifs_comm_ioctl(struct file *file, unsigned int cmd, unsigned long a
 		return 0;
 	}
 	case HIFS_IOCTL_DATA_DEQUEUE: {
-		struct hifs_data_frame frame;
-		int ret = hifs_data_fifo_out_pop(&frame, nonblock);
+		struct hifs_data_frame *frame;
+		int ret;
 
-		if (ret)
+		frame = kmalloc(sizeof(*frame), GFP_KERNEL);
+		if (!frame)
+			return -ENOMEM;
+
+		ret = hifs_data_fifo_out_pop(frame, nonblock);
+		if (ret) {
+			kfree(frame);
 			return ret;
+		}
 
-		if (copy_to_user(user_ptr, &frame, sizeof(frame)))
-			return -EFAULT;
+		if (copy_to_user(user_ptr, frame, sizeof(*frame)))
+			ret = -EFAULT;
 
-		return 0;
+		kfree(frame);
+		return ret;
 	}
 	case HIFS_IOCTL_STATUS: {
 	struct hifs_comm_status status = {
@@ -188,12 +196,21 @@ static long hifs_comm_ioctl(struct file *file, unsigned int cmd, unsigned long a
         return hifs_cmd_fifo_in_push(&msg);
 	}
 	case HIFS_IOCTL_DATA_ENQUEUE: {
-		struct hifs_data_frame frame;
+		struct hifs_data_frame *frame;
+		int ret;
 
-		if (copy_from_user(&frame, user_ptr, sizeof(frame)))
+		frame = kmalloc(sizeof(*frame), GFP_KERNEL);
+		if (!frame)
+			return -ENOMEM;
+
+		if (copy_from_user(frame, user_ptr, sizeof(*frame))) {
+			kfree(frame);
 			return -EFAULT;
+		}
 
-        return hifs_data_fifo_in_push_buf(frame.data, frame.len);
+		ret = hifs_data_fifo_in_push_buf(frame->data, frame->len);
+		kfree(frame);
+		return ret;
 	}
 	default:
 		return -ENOTTY;
@@ -213,8 +230,9 @@ static __poll_t hifs_fifo_poll(struct file *file, poll_table *wait)
     if (hifs_data_fifo_out_len())
         mask |= POLLIN | POLLRDBAND;
 
-    if (!kfifo_is_full(&hifs_cmd_in_fifo) || !kfifo_is_full(&hifs_data_in_fifo))
+    if (!kfifo_is_full(&hifs_cmd_in_fifo) || !kfifo_is_full(&hifs_data_in_fifo)) {
         mask |= POLLOUT | POLLWRNORM;
+    }
 
 	return mask;
 }

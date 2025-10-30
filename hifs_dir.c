@@ -28,12 +28,13 @@ int hifs_readdir(struct file *filp, struct dir_context *ctx)
 	for (i = 0; i < HIFS_INODE_TSIZE; ++i) {
 		u32 b = dinode->i_addrb[i] , e = dinode->i_addre[i];
 		u32 blk = b;
-	while (blk < e) {
-		bool cache_hit = hifs_cache_test_present(sb, blk);
-		if (hifs_fetch_block(sb, blk) < 0)
-			return -EIO;
-		if (!cache_hit)
-			hifs_debug("readdir fetched block %u", blk);
+		while (blk < e) {
+			bool cache_hit = hifs_cache_test_present(sb, blk);
+
+			if (hifs_fetch_block(sb, blk) < 0)
+				return -EIO;
+			if (!cache_hit)
+				hifs_debug("readdir fetched block %u", blk);
 
 			bh = sb_bread(sb, blk);
 			BUG_ON(!bh);
@@ -41,9 +42,8 @@ int hifs_readdir(struct file *filp, struct dir_context *ctx)
 
 			for (j = 0; j < sb->s_blocksize; j += sizeof(*dir_rec)) {
 				/* We mark empty/free inodes */
-				if (dir_rec->inode_nr == 0xdeeddeed) {
+				if (dir_rec->inode_nr == 0xdeeddeed)
 					break;
-				}
 				dir_emit(ctx, dir_rec->name, dir_rec->name_len,
 					dir_rec->inode_nr, DT_UNKNOWN);
 				filp->f_pos += sizeof(*dir_rec);
