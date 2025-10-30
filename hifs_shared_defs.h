@@ -180,6 +180,8 @@ extern struct
 #define HIFS_NAME_LEN		     255
 #define HIFS_INODE_MSIZE		 4
 #define HIFS_INODE_TSIZE		 4
+#define HIFS_BLOCK_HASH_SIZE      16
+#define HIFS_MAX_BLOCK_HASHES     128
 #define HIFS_BOOT_OFFSET		 0
 #define HIFS_BOOT_LEN            512
 #define HIFS_BOOT2_OFFSET		 (HIFS_BOOT_LEN + 512)
@@ -198,7 +200,7 @@ extern struct
 /* Default place where FS will start using after mkcache (all above are used for mkcache tables) */
 #define HIFS_CACHE_SPACE_START	 (HIFS_BLOCK_BITMAP_OFFSET + HIFS_DEFAULT_BLOCK_SIZE)
 
-#define HIFS_INODE_SIZE		128
+#define HIFS_INODE_SIZE		(sizeof(struct hifs_inode))
 #define HIFS_INODE_NUMBER_TABLE	128
 #define HIFS_INODE_TABLE_SIZE	(HIFS_INODE_NUMBER_TABLE * HIFS_INODE_SIZE)/HIFS_DEFAULT_BLOCK_SIZE
 
@@ -246,6 +248,9 @@ struct hifs_inode
 	uint32_t	i_blocks;	/* Number of blocks */
 	uint32_t	i_bytes;	/* Number of bytes */
 	uint8_t		i_links;    /* Number of links to an inode */
+	uint8_t		i_block_hashes[HIFS_MAX_BLOCK_HASHES][HIFS_BLOCK_HASH_SIZE];
+	uint16_t	i_hash_count;
+	uint16_t	i_hash_reserved;
 };
 
 
@@ -638,6 +643,9 @@ struct hifs_inode_wire {
     __le32 i_bytes;
     __u8  i_links;
     __u8  __pad[3];
+    __u8  i_block_hashes[HIFS_MAX_BLOCK_HASHES][HIFS_BLOCK_HASH_SIZE];
+    __le16 i_hash_count;
+    __le16 i_hash_reserved;
 #else
     uint32_t i_msg_flags;
     uint8_t  i_version;
@@ -658,6 +666,9 @@ struct hifs_inode_wire {
     uint32_t i_bytes;
     uint8_t  i_links;
     uint8_t  __pad[3];
+    uint8_t  i_block_hashes[HIFS_MAX_BLOCK_HASHES][HIFS_BLOCK_HASH_SIZE];
+    uint16_t i_hash_count;
+    uint16_t i_hash_reserved;
 #endif
 };
 

@@ -15,8 +15,6 @@ static struct task_struct *task;
 
 int hifs_thread_fn(void *data)
 {
-	int ret;
-
     hifs_comm_link_notify_online();
 	
 	while (!kthread_should_stop()) {

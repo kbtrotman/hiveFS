@@ -703,25 +703,6 @@ void hifs_cache_detach(struct hifs_sb_info *info)
     }
 }
 
-/* Set or clear a single bit in a byte-addressed bitmap. */
-static inline void __bitmap_set_byte(uint8_t *bm, uint64_t bit, bool val)
-{
-    uint64_t byte = bit / 8;
-    uint8_t mask = 1u << (bit % 8);
-    if (val)
-        bm[byte] |= mask;
-    else
-        bm[byte] &= ~mask;
-}
-
-/* Test a single bit in a byte-addressed bitmap. */
-static inline bool __bitmap_test_byte(const uint8_t *bm, uint64_t bit)
-{
-    uint64_t byte = bit / 8;
-    uint8_t mask = 1u << (bit % 8);
-    return (bm[byte] & mask) != 0;
-}
-
 /* Mark a cache block as present in the local cache. */
 void hifs_cache_mark_present(struct super_block *sb, uint64_t block)
 {
@@ -958,42 +939,48 @@ void hifs_cache_mark_dirent(struct super_block *sb, uint64_t dent)
 
 void hifs_cache_clear_dirent(struct super_block *sb, uint64_t dent)
 {
-    struct hifs_sb_info *info = sbinfo(sb);
-    struct hifs_cache_ctx *ctx = info ? info->cache : NULL;
-    unsigned long flags;
-    bool changed = false;
-    if (!ctx || !ctx->dirent_bmp || dent >= ctx->dirent_bmp->cache_block_count)
-        return;
-    spin_lock_irqsave(&ctx->dirent_lock, flags);
-    if (ctx->dirent_fifo.capacity &&
-        hifs_cache_fifo_remove_id(&ctx->dirent_fifo, dent))
-        hifs_cache_account_sub(ctx, HIFS_CACHE_RESOURCE_DIRENT);
-    if (__bitmap_test_byte(ctx->dirent_bmp->bitmap, dent)) {
-        __bitmap_set_byte(ctx->dirent_bmp->bitmap, dent, false);
-        changed = true;
-    }
-    spin_unlock_irqrestore(&ctx->dirent_lock, flags);
-    if (changed)
-        hifs_cache_request_flush(sb, false);
+	struct hifs_sb_info *info = sbinfo(sb);
+	struct hifs_cache_ctx *ctx = info ? info->cache : NULL;
+	unsigned long flags;
+	bool changed = false;
+
+	if (!ctx || !ctx->dirent_bmp || dent >= ctx->dirent_bmp->cache_block_count)
+		return;
+
+	spin_lock_irqsave(&ctx->dirent_lock, flags);
+	if (ctx->dirent_fifo.capacity &&
+	    hifs_cache_fifo_remove_id(&ctx->dirent_fifo, dent))
+		hifs_cache_account_sub(ctx, HIFS_CACHE_RESOURCE_DIRENT);
+	if (__bitmap_test_byte(ctx->dirent_bmp->bitmap, dent)) {
+		__bitmap_set_byte(ctx->dirent_bmp->bitmap, dent, false);
+		changed = true;
+	}
+	spin_unlock_irqrestore(&ctx->dirent_lock, flags);
+	if (changed)
+		hifs_cache_request_flush(sb, false);
 }
 
 bool hifs_cache_test_dirent(struct super_block *sb, uint64_t dent)
 {
-    struct hifs_cache_ctx *ctx = sbinfo(sb) ? sbinfo(sb)->cache : NULL;
-    if (!ctx || !ctx->dirent_bmp || dent >= ctx->dirent_bmp->cache_block_count)
-        return false;
-    return __bitmap_test_byte(ctx->dirent_bmp->bitmap, dent);
+	struct hifs_cache_ctx *ctx = sbinfo(sb) ? sbinfo(sb)->cache : NULL;
+
+	if (!ctx || !ctx->dirent_bmp || dent >= ctx->dirent_bmp->cache_block_count)
+		return false;
+
+	return __bitmap_test_byte(ctx->dirent_bmp->bitmap, dent);
 }
 
 void hifs_sort_most_recent_cache_used(struct super_block *sb)
 {
-    struct hifs_sb_info *info = sbinfo(sb);
-    struct hifs_cache_ctx *ctx = info ? info->cache : NULL;
+	struct hifs_sb_info *info = sbinfo(sb);
+	struct hifs_cache_ctx *ctx = info ? info->cache : NULL;
 
-    if (!ctx)
-        return;
+	if (!ctx)
+		return;
 
-    /* TODO: sort cache tracking arrays by usage frequency. */
+	/* TODO: sort cache tracking arrays by usage frequency and most recently read/write.
+     * weight heavier on number of uses above 3 times.
+      */
 }
 
 int hifs_fetch_block(struct super_block *sb, uint64_t block)
@@ -1003,9 +990,10 @@ int hifs_fetch_block(struct super_block *sb, uint64_t block)
     if (!sb)
         return -EINVAL;
 
-    if (hifs_cache_test_present(sb, block))
+    if (hifs_cache_test_present(sb, block)) {
         hifs_debug("cache hit block %llu", (unsigned long long)block);
         return 0;
+    }
 
     hifs_debug("cache miss block %llu", (unsigned long long)block);
     ret = hifs_publish_block(sb, block, NULL, 0, true);

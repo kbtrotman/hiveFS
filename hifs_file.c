@@ -9,6 +9,7 @@
 
 #include "hifs.h"
 #include <linux/uaccess.h>
+#include <linux/math64.h>
 
 
 ssize_t hifs_get_loffset(struct hifs_inode *hii, loff_t off)
@@ -94,19 +95,20 @@ ssize_t hifs_write(struct kiocb *iocb, struct iov_iter *from)
 	struct inode *inode;
 	struct hifs_inode *dinode;
 	struct buffer_head *bh;
-	struct hifs_sb_info *dsb;
 	void *buf = from->__iov->iov_base; 
 	loff_t off = iocb->ki_pos;
 	size_t count = iov_iter_count(from);
-	size_t blk = 0;	
 	size_t boff = 0;
 	char *buffer;
+	int dedupe_ret;
+	uint8_t block_hash[HIFS_BLOCK_HASH_SIZE];
+	u64 block_index;
+	size_t hash_slot;
 	//int ret;
 
 	inode = iocb->ki_filp->f_path.dentry->d_inode;
 	sb = inode->i_sb;
 	dinode = inode->i_private;
-	dsb = sb->s_fs_info;
 	
 	//ret = generic_write_checks(iocb, from);
 	//if (ret <= 0) {
@@ -127,7 +129,7 @@ ssize_t hifs_write(struct kiocb *iocb, struct iov_iter *from)
 		bh = sb_bread(sb, boff);
 	}
 	if (!bh) {
-	    printk(KERN_ERR "Failed to read data block %lu\n", blk);
+	    printk(KERN_ERR "Failed to read data block %zu\n", boff);
 	    return 0;
 	}
 	
@@ -139,19 +141,46 @@ ssize_t hifs_write(struct kiocb *iocb, struct iov_iter *from)
 	}
 	
 	iocb->ki_pos += count; 
-	
-    mark_buffer_dirty(bh);
-    sync_dirty_buffer(bh);
-    hifs_cache_mark_present(sb, boff);
-    hifs_push_block(sb, boff, bh->b_data, HIFS_DEFAULT_BLOCK_SIZE);
-    brelse(bh);
 
-    dinode->i_size = max((size_t)(dinode->i_size), count);
+	dedupe_ret = hifs_dedupe_writes(sb, boff, bh->b_data,
+					HIFS_DEFAULT_BLOCK_SIZE, block_hash);
+	if (dedupe_ret)
+		hifs_warning("dedupe placeholder returned %d for block %zu", dedupe_ret, boff);
 
-    hifs_store_inode(sb, dinode);
-    hifs_publish_inode(sb, dinode, false);
+	hifs_cache_mark_present(sb, boff);
+	hifs_cache_mark_dirty(sb, boff);
+	hifs_cache_mark_inode(sb, dinode->i_ino);
 
-    return count;
+	block_index = div64_u64((u64)off, HIFS_DEFAULT_BLOCK_SIZE);
+	if (block_index >= HIFS_MAX_BLOCK_HASHES) {
+		hifs_warning("block index %llu exceeds hash capacity for inode %llu",
+			     (unsigned long long)block_index,
+			     (unsigned long long)dinode->i_ino);
+		hash_slot = HIFS_MAX_BLOCK_HASHES - 1;
+	} else {
+		hash_slot = (size_t)block_index;
+	}
+
+	memcpy(dinode->i_block_hashes[hash_slot], block_hash, HIFS_BLOCK_HASH_SIZE);
+	dinode->i_hash_count = max_t(uint16_t, dinode->i_hash_count,
+				 (uint16_t)(hash_slot + 1));
+
+	hifs_cache_mark_dirent(sb, dinode->i_ino);
+
+	mark_buffer_dirty(bh);
+	sync_dirty_buffer(bh);
+	hifs_push_block(sb, boff, bh->b_data, HIFS_DEFAULT_BLOCK_SIZE);
+	brelse(bh);
+
+	{
+		loff_t new_size = max_t(loff_t, (loff_t)dinode->i_size, off + count);
+		dinode->i_size = (uint32_t)new_size;
+	}
+
+	hifs_store_inode(sb, dinode);
+	hifs_publish_inode(sb, dinode, false);
+
+	return count;
 }
 
 int hifs_open_file(struct inode *inode, struct file *filp)

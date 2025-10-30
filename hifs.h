@@ -195,6 +195,7 @@ int hifs_release_file(struct inode *inode, struct file *filp);
 
 /* hifs_cache (shared cache context) */
 struct hifs_cache_ctx; /* opaque shared cache context */
+
 struct hifs_inode *cache_get_inode(void);
 void cache_put_inode(struct hifs_inode **hii);
 int hifs_cache_attach(struct super_block *sb, struct hifs_sb_info *info);
@@ -219,6 +220,41 @@ void hifs_cache_mark_dirent(struct super_block *sb, uint64_t dent);
 void hifs_cache_clear_dirent(struct super_block *sb, uint64_t dent);
 bool hifs_cache_test_dirent(struct super_block *sb, uint64_t dent);
 void hifs_sort_most_recent_cache_used(struct super_block *sb);
+/* Cache Helpers */
+static inline void __bitmap_set_byte(uint8_t *bm, uint64_t bit, bool val)
+{
+	uint64_t byte;
+	uint8_t mask;
+
+	if (!bm)
+		return;
+
+	byte = bit >> 3;
+	mask = (uint8_t)(1u << (bit & 0x7));
+	if (val)
+		bm[byte] |= mask;
+	else
+		bm[byte] &= (uint8_t)~mask;
+}
+
+static inline bool __bitmap_test_byte(const uint8_t *bm, uint64_t bit)
+{
+	uint64_t byte;
+	uint8_t mask;
+
+	if (!bm)
+		return false;
+
+	byte = bit >> 3;
+	mask = (uint8_t)(1u << (bit & 0x7));
+	return (bm[byte] & mask) != 0;
+}
+
+/* hifs_dedupe (elimination of duplicate blocks) */
+int hifs_dedupe_writes(struct super_block *sb, uint64_t block,
+		       const void *data, size_t len,
+		       uint8_t hash_out[HIFS_BLOCK_HASH_SIZE]);
+
 
 // END: Prototypes Here:
 
