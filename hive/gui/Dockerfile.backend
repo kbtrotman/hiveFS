@@ -1,4 +1,4 @@
-FROM python: 3.9-slim-buster AS base
+FROM python:3.9-slim-buster AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 
@@ -11,5 +11,4 @@ RUN useradd --create-home django && chown -R django:django /app
 USER django
 EXPOSE 8000
 ENTRYPOINT ["./entrypoint.sh"]
-CMD ["src.config.wsgi:application", "--bind", "0.0.0.0:8000"]
-#"gunicorn",
+CMD ["gunicorn", "src.config.wsgi:application", "--bind", "0.0.0.0:8000"]

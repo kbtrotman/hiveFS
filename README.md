@@ -70,20 +70,7 @@ support the same live mount function as today's CDM-based software via the Honey
 Clustered access. Because all storage is contained in one global filesystem, hosts can have their own filesystem 
 or share filesystems with other hosts. In other words, the global filesystem is layed out like this:
 
-/Global root/
-    |
-    |-----/Shares
-    |----------/HoneyComb_Shares
-    |----------/Shared_FS1
-    |----------/etc
-    |-----/Machine1/
-    |----------/mount1
-    |----------/mount2
-    |----------/Global root/Shared_FS1 junctioned here<<<>>>
-    |-----/Machine2
-    |----------/mount1
-    |----------/machine1_mount1 junctioned here<<<>>>>
-    |----------/Global root/Shared_FS1 junctioned here<<<>>>
+![alt text](assets/ex_layout.png)
 
 Since it's a global filesystem, so long as permissions allow, you can junction any dirs whatever machines you 
 like and they become either subdirectories of existing mounts or are advertised as new filesystems to be mounted. 
