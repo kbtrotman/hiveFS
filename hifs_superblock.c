@@ -13,6 +13,8 @@
 #include <linux/math64.h>
 #include <linux/mount.h>
 #include <linux/time64.h>
+#include <linux/limits.h>
+#include <linux/string.h>
 
 static u64 hifs_merge_lohi(__le32 lo, __le32 hi)
 {
@@ -104,6 +106,46 @@ static void hifs_prepare_root_dentry(struct hifs_sb_info *info,
 		info->root_dentry.rd_name_len = cpu_to_le32((u32)copy_len);
 	}
 }
+
+static void hifs_apply_root_metadata(struct hifs_inode *inode,
+				     const struct hifs_volume_root_dentry *root)
+{
+	u64 ino;
+	u32 mode, uid32, gid32, flags, links, name_len;
+	u64 size, blocks;
+
+	if (!inode || !root)
+		return;
+
+	ino = le64_to_cpu(root->rd_inode);
+	mode = le32_to_cpu(root->rd_mode);
+	uid32 = le32_to_cpu(root->rd_uid);
+	gid32 = le32_to_cpu(root->rd_gid);
+	flags = le32_to_cpu(root->rd_flags);
+	size = le64_to_cpu(root->rd_size);
+	blocks = le64_to_cpu(root->rd_blocks);
+	links = le32_to_cpu(root->rd_links);
+	name_len = le32_to_cpu(root->rd_name_len);
+
+	inode->i_ino = ino ? ino : HIFS_ROOT_INODE;
+	inode->i_mode = mode;
+	inode->i_uid = (u16)((uid32 > USHRT_MAX) ? USHRT_MAX : uid32);
+	inode->i_gid = (u16)((gid32 > USHRT_MAX) ? USHRT_MAX : gid32);
+	inode->i_flags = (u8)((flags > U8_MAX) ? U8_MAX : flags);
+	inode->i_size = (u32)((size > U32_MAX) ? U32_MAX : size);
+	inode->i_blocks = (u32)((blocks > U32_MAX) ? U32_MAX : blocks);
+	inode->i_bytes = inode->i_size;
+	inode->i_hrd_lnk = (u16)((links > USHRT_MAX) ? USHRT_MAX : links);
+	inode->i_links = (u8)((links > U8_MAX) ? U8_MAX : links);
+	inode->i_atime = le32_to_cpu(root->rd_atime);
+	inode->i_mtime = le32_to_cpu(root->rd_mtime);
+	inode->i_ctime = le32_to_cpu(root->rd_ctime);
+
+	if (name_len > sizeof(inode->i_name))
+		name_len = sizeof(inode->i_name);
+	memset(inode->i_name, 0, sizeof(inode->i_name));
+	memcpy(inode->i_name, root->rd_name, name_len);
+}
 /* Read a block at an arbitrary byte offset from the block device. */
 static struct buffer_head *hifs_bread_at(struct super_block *sb, u64 byte_offset,
 					 unsigned int *intra_block_offset)
@@ -120,10 +162,25 @@ static struct buffer_head *hifs_bread_at(struct super_block *sb, u64 byte_offset
 /* Parse volume ID from mount data (if any). */
 static uint64_t hifs_parse_volume_id(void *data)
 {
-    uint64_t id = 1; /* default volume id */
-    if (data) {
-        const char *s = (const char *)data;
-        char *end = NULL;
+    uint64_t id = HIFS_VOLUME_CACHE_ID;
+    const char *s = data ? (const char *)data : NULL;
+    char *end = NULL;
+
+    if (!s || !*s)
+        return id;
+
+    if (!strncasecmp(s, "cache", strlen("cache")))
+        return HIFS_VOLUME_CACHE_ID;
+
+    if (!strncmp(s, "volume=", strlen("volume=")))
+        s += strlen("volume=");
+    else if (!strncmp(s, "remote=", strlen("remote=")))
+        s += strlen("remote=");
+
+    if (!*s)
+        return id;
+
+    {
         unsigned long long v = simple_strtoull(s, &end, 0);
         if (end && end != s)
             id = v;
@@ -202,17 +259,13 @@ int hifs_get_super(struct super_block *sb, void *data, int silent)
     /* Determine volume id (from mount data, if provided) and load/create entry */
 	/* This structure holds the local cache volume and all virtual volumes equally.*/
     sb_info->volume_id = hifs_parse_volume_id(data);
+    sb_info->is_cache_volume = (sb_info->volume_id == HIFS_VOLUME_CACHE_ID);
+    sb_info->is_remote_volume = !sb_info->is_cache_volume;
     ret = hifs_volume_load(sb, sb_info, true);
     if (ret)
         goto out;
 
     hifs_prepare_volume_super(sb, sb_info);
-	{
-		int vsb_ret = hifs_volume_save(sb, sb_info);
-		if (vsb_ret)
-			hifs_warning("Failed to persist per-volume super metadata: %d",
-				     vsb_ret);
-	}
 
     /* Read the on-disk root inode from the inode table, not the root directory block. */
     bh = hifs_bread_at(sb, HIFS_INODE_TABLE_OFFSET, &offset);
@@ -229,12 +282,23 @@ int hifs_get_super(struct super_block *sb, void *data, int silent)
 
 	memcpy(root_hifsinode, bh->b_data + offset, sizeof(*root_hifsinode));
 	hifs_prepare_root_dentry(sb_info, root_hifsinode);
-	{
-		int root_ret = hifs_volume_save(sb, sb_info);
-		if (root_ret)
-			hifs_warning("Failed to persist root dentry metadata: %d",
-				     root_ret);
+
+	if (sb_info->is_remote_volume) {
+		int sync_ret = hifs_handshake_superblock(sb);
+		if (sync_ret < 0)
+			hifs_warning("Remote super/root handshake failed for volume %llu: %d",
+				     (unsigned long long)sb_info->volume_id, sync_ret);
 	}
+
+	{
+		int save_ret = hifs_volume_save(sb, sb_info);
+		if (save_ret)
+			hifs_warning("Failed to persist per-volume metadata: %d",
+				     save_ret);
+	}
+
+	if (sb_info->is_remote_volume)
+		hifs_apply_root_metadata(root_hifsinode, &sb_info->root_dentry);
 
 	root_inode = new_inode(sb);
 	if (!root_inode) {
@@ -245,18 +309,37 @@ int hifs_get_super(struct super_block *sb, void *data, int silent)
 	inode_init_owner(&nop_mnt_idmap, root_inode, NULL,
 			 root_hifsinode->i_mode);
 	root_inode->i_flags = root_hifsinode->i_flags;
-	root_inode->i_ino = HIFS_ROOT_INODE;
+	root_inode->i_ino = root_hifsinode->i_ino ? root_hifsinode->i_ino : HIFS_ROOT_INODE;
 	root_inode->i_op = &hifs_cache_root_inode_ops;
 	root_inode->i_fop = &hifs_cache_dir_operations;
 	root_inode->i_private = root_hifsinode;
 	root_inode->i_blocks = root_hifsinode->i_blocks;
 	root_inode->i_size = root_hifsinode->i_size;
 
-	now = current_time(root_inode);
-	inode_set_atime_to_ts(root_inode, now);
-	inode_set_mtime_to_ts(root_inode, now);
-	inode_set_ctime_to_ts(root_inode, now);
-	inc_nlink(root_inode);
+	if (sb_info->is_remote_volume) {
+		struct timespec64 atime = {
+			.tv_sec = root_hifsinode->i_atime,
+			.tv_nsec = 0,
+		};
+		struct timespec64 mtime = {
+			.tv_sec = root_hifsinode->i_mtime,
+			.tv_nsec = 0,
+		};
+		struct timespec64 ctime = {
+			.tv_sec = root_hifsinode->i_ctime,
+			.tv_nsec = 0,
+		};
+		inode_set_atime_to_ts(root_inode, atime);
+		inode_set_mtime_to_ts(root_inode, mtime);
+		inode_set_ctime_to_ts(root_inode, ctime);
+	} else {
+		now = current_time(root_inode);
+		inode_set_atime_to_ts(root_inode, now);
+		inode_set_mtime_to_ts(root_inode, now);
+		inode_set_ctime_to_ts(root_inode, now);
+	}
+	set_nlink(root_inode,
+		  root_hifsinode->i_hrd_lnk ? root_hifsinode->i_hrd_lnk : 1);
 
 	sb->s_root = d_make_root(root_inode);
 	if (!sb->s_root) {

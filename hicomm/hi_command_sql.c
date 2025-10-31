@@ -568,24 +568,17 @@ bool hifs_root_dentry_load(uint64_t volume_id, struct hifs_volume_root_dentry *o
 	MYSQL_RES *res;
 	MYSQL_ROW row;
 	unsigned long *lengths;
-	const char *machine = safe_str(sqldb.host.machine_id);
-	char *escaped = NULL;
 	bool ok = false;
 
-	if (!sqldb.sql_init || !sqldb.conn || !out || !machine[0])
-		return false;
-
-	escaped = hifs_get_quoted_value(machine);
-	if (!escaped)
+	if (!sqldb.sql_init || !sqldb.conn || !out)
 		return false;
 
 	snprintf(sql_query, sizeof(sql_query),
 		 "SELECT rd_inode, rd_mode, rd_uid, rd_gid, rd_flags, "
 		 "rd_size, rd_blocks, rd_atime, rd_mtime, rd_ctime, rd_links, "
 		 "rd_name_len, HEX(rd_name) "
-		 "FROM root_dentries WHERE machine_uid='%s' AND volume_id=%llu",
-		 escaped, (unsigned long long)volume_id);
-	free(escaped);
+		 "FROM volume_root_dentries WHERE volume_id=%llu",
+		 (unsigned long long)volume_id);
 
 	res = hifs_execute_sql(sql_query);
 	if (!res)
@@ -634,15 +627,9 @@ bool hifs_root_dentry_store(uint64_t volume_id, const struct hifs_volume_root_de
 {
 	char sql_query[MAX_QUERY_SIZE];
 	char name_hex[HIFS_MAX_NAME_SIZE * 2 + 1];
-	const char *machine = safe_str(sqldb.host.machine_id);
-	char *escaped = NULL;
 	uint32_t name_len;
 
-	if (!sqldb.sql_init || !sqldb.conn || !root || !machine[0])
-		return false;
-
-	escaped = hifs_get_quoted_value(machine);
-	if (!escaped)
+	if (!sqldb.sql_init || !sqldb.conn || !root)
 		return false;
 
 	name_len = root->rd_name_len;
@@ -651,17 +638,15 @@ bool hifs_root_dentry_store(uint64_t volume_id, const struct hifs_volume_root_de
 	bytes_to_hex((const uint8_t *)root->rd_name, name_len, name_hex);
 
 	snprintf(sql_query, sizeof(sql_query),
-		 "INSERT INTO root_dentries "
-		 "(machine_uid, volume_id, rd_inode, rd_mode, rd_uid, rd_gid, rd_flags, "
+		 "INSERT INTO volume_root_dentries "
+		 "(volume_id, rd_inode, rd_mode, rd_uid, rd_gid, rd_flags, "
 		 "rd_size, rd_blocks, rd_atime, rd_mtime, rd_ctime, rd_links, rd_name_len, rd_name) "
-		 "VALUES ('%s', %llu, %llu, %u, %u, %u, %u, %llu, %llu, %u, %u, %u, %u, %u, UNHEX('%s')) "
+		 "VALUES (%llu, %llu, %u, %u, %u, %u, %llu, %llu, %u, %u, %u, %u, %u, UNHEX('%s')) "
 		 "ON DUPLICATE KEY UPDATE "
 		 "rd_inode=VALUES(rd_inode), rd_mode=VALUES(rd_mode), rd_uid=VALUES(rd_uid), "
 		 "rd_gid=VALUES(rd_gid), rd_flags=VALUES(rd_flags), rd_size=VALUES(rd_size), "
 		 "rd_blocks=VALUES(rd_blocks), rd_atime=VALUES(rd_atime), rd_mtime=VALUES(rd_mtime), "
-		 "rd_ctime=VALUES(rd_ctime), rd_links=VALUES(rd_links), rd_name_len=VALUES(rd_name_len), "
-		 "rd_name=VALUES(rd_name)",
-		 escaped,
+		 "rd_ctime=VALUES(rd_ctime), rd_links=VALUES(rd_links), rd_name_len=VALUES(rd_name_len), rd_name=VALUES(rd_name)",
 		 (unsigned long long)volume_id,
 		 (unsigned long long)root->rd_inode,
 		 root->rd_mode, root->rd_uid, root->rd_gid, root->rd_flags,
@@ -670,7 +655,6 @@ bool hifs_root_dentry_store(uint64_t volume_id, const struct hifs_volume_root_de
 		 root->rd_atime, root->rd_mtime, root->rd_ctime,
 		 root->rd_links, root->rd_name_len, name_hex);
 
-	free(escaped);
 	return hifs_insert_sql(sql_query);
 }
 

@@ -295,10 +295,13 @@ struct hifs_sb_info
 	uint32_t	s_block_olt;	/* Object location table block */
 	uint32_t	s_inode_cnt;	/* number of inodes in inode table */
 	uint32_t	s_last_blk;	    /* just move forward with allocation */
-	/* Shared cache context across mounts */
+    /* Shared cache context across mounts */
     struct hifs_cache_ctx *cache;
     /* Per-mount volume identifier within shared cache */
     uint64_t volume_id;
+    /* Cached classification for mount type */
+    bool is_cache_volume;
+    bool is_remote_volume;
     /* Per-volume logical super (remote-facing minimal copy) */
     struct hifs_volume_superblock vol_super;
     /* Per-volume root dentry metadata */
