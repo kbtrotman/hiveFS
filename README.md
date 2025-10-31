@@ -75,5 +75,5 @@ or share filesystems with other hosts. In other words, the global filesystem is 
 Since it's a global filesystem, so long as permissions allow, you can junction any dirs whatever machines you 
 like and they become either subdirectories of existing mounts or are advertised as new filesystems to be mounted. 
 You can have a single host as owner of an FS to allow the host admin to control permissions, or you can allow the 
-hive to own a directory as a shared filesystem with permissions controlled by the hive admin. Even dirs controlled
+hive to own a directory as a shared filesystem with permissions controlled by the hive admin. Even dirs owned
 by only one host, such as mount1 by machine1 and machine2 above, are still de-duped against each other.
