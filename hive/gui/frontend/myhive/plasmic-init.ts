@@ -1,6 +1,5 @@
 import { initPlasmicLoader } from "@plasmicapp/loader-nextjs";
-import { PlasmicRootProvider, PlasmicComponent } from '@plasmicapp/loader-react';
-import { PLASMIC } from '../plasmic-init';
+
 
 export const PLASMIC = initPlasmicLoader({
   projects: [
@@ -17,14 +16,6 @@ export const PLASMIC = initPlasmicLoader({
   preview: false,
 });
 
-
-export function MyComponent() {
-  return (
-    <PlasmicRootProvider loader={PLASMIC}>
-      <PlasmicComponent component="COMPONENTNAME" />
-    </PlasmicRootProvider>
-  );
-}
 
 
 // You can register any code components that you want to use here; see
