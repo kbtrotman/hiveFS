@@ -9,10 +9,12 @@ compile_commands.json
 CTestTestfile.cmake
 cache.hifs
 node_modules
-hive/gui/bin
-hive/gui/lib
-hive/gui/share
-hive/gui/src
-hive/gui/include
+bin/
+lib/
+lib64/
+share/
+src/
+include/
+node_modules/
 .codex
 _deps
