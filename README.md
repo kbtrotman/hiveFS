@@ -57,15 +57,20 @@ should have a link with reasonable communication speed.
 And again, regardless of O/S, application, or other factors, hiveFS is designed to be globally de-dupable 
 across all volumes, hosts, and backend storage. In addition some compression is applied. However, because 
 keeping only one copy of every block of data is a very bad idea, the hive is designed to be at least 3 nodes 
-with the data split into 3 copies the nodes or to be a single node with replication to a second node. So, 
-whether you have 3 nodes or twenty, at least 3 copies of all data will be kept by doing split-writes across 
-the nodes (the number of copies is cofigurable from 3+ or replication for 2). A single copy is possible for 
-small global filesystems and supported.
+with the data split into 3 copies. It does support a single node or dual-node (with replication to the second 
+node). However, whether you have 3 nodes or twenty, at least 3 copies of all data will be kept by doing 
+split-writes across the nodes (the number of copies is cofigurable from 3+ or replication for 2). Single copy 
+is possible for small global filesystems and supported but carries the risk of loss of data, so is prefereable
+only for test environments.
 
-File versioning. A file can have a configurable number of copies as a backup method to go back to previous 
-versions of theat file. Replication covers large-scale outages, so traditional backup is made unnecessary by 
-the way these two functions behave. Further, since a directory structure can be modified on the fly, it would 
-support the same live mount function as today's CDM-based software via the Honeycomb server.
+File versioning. A file can have a configurable number of historical copies as a backup method to go back to 
+previous versions of that file/dir. Replication covers large-scale outages, so traditional backup is built-in 
+to the filesystem architecture by the way these two functions behave. Further, since a directory structure can 
+be modified on the fly and new mounts advertised, it supports the same live mount function as today's CDM-based software via the Honeycomb server (by cloning a dir/filesystem and mounting to the desires host(s)).
+
+(Note that the more file versioning copies are kept, the more old data blocks must stay around and not cleaned.)
+
+Extended ACLs and extended file meta-data (for use in web-based file tagging) is intended to be supported.
 
 Clustered access. Because all storage is contained in one global filesystem, hosts can have their own filesystem 
 or share filesystems with other hosts. In other words, the global filesystem is layed out like this:
