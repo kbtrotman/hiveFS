@@ -8,5 +8,9 @@ install_manifest.txt
 compile_commands.json
 CTestTestfile.cmake
 cache.hifs
+node_modules
+lib
+lib64
+bin
 .codex
 _deps
