@@ -687,6 +687,7 @@ struct hifs_inode_msg {
  * */
 #define HIFS_VOLUME_TABLE_OFFSET   (HIFS_BLOCK_BITMAP_OFFSET + HIFS_DEFAULT_BLOCK_SIZE)
 #define HIFS_VOLUME_TABLE_MAX      1024
+#define HIFS_VOLUME_CACHE_ID       0ULL  /* volume_id that refers to the on-disk cache image */
 
 struct hifs_volume_entry {
 #ifdef __KERNEL__

@@ -1,4 +1,3 @@
--- Metadata stays on InnoDB (for searchable keys)
 CREATE DATABASE IF NOT EXISTS hive_meta ENGINE=InnoDB;
 CREATE DATABASE IF NOT EXISTS hive_data ENGINE=ROCKSDB;
 
@@ -94,9 +93,8 @@ CREATE TABLE volume_superblocks (
                           ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
 
-CREATE TABLE root_dentries (
-  machine_uid           VARCHAR(128) NOT NULL,
-  volume_id             BIGINT UNSIGNED NOT NULL,
+CREATE TABLE volume_root_dentries (
+  volume_id             BIGINT UNSIGNED NOT NULL PRIMARY KEY,
   rd_inode              BIGINT UNSIGNED NOT NULL,
   rd_mode               INT UNSIGNED NOT NULL,
   rd_uid                INT UNSIGNED NOT NULL,
@@ -112,9 +110,8 @@ CREATE TABLE root_dentries (
   rd_name               VARBINARY(256) NOT NULL,
   updated_at            TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                          ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (machine_uid, volume_id),
-  CONSTRAINT fk_root_machine FOREIGN KEY (machine_uid)
-    REFERENCES host_auth(machine_uid) ON DELETE CASCADE
+  CONSTRAINT fk_volume_root FOREIGN KEY (volume_id)
+    REFERENCES volume_superblocks(volume_id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
 CREATE TABLE volume_dentries (
