@@ -25,7 +25,7 @@ SECRET_KEY = 'django-insecure-#j5r__)ay3)*q*$(9*ssr#&zi0s@u$(8qhum)@b3m+yyt1w@ox
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = [*]
+ALLOWED_HOSTS = ['*']
 
 
 # Application definition
@@ -78,8 +78,12 @@ WSGI_APPLICATION = 'hive.wsgi.application'
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'ENGINE': 'django.db.backends.mysql',
+        'NAME': 'hive_api',
+        'USER': 'hiveadmin',
+        'PASSWORD': 'hiveadmin',
+        'HOST': 'localhost',  # Or the IP/hostname of your MariaDB server
+        'PORT': '3306',       # Default MariaDB port
     }
 }
 
