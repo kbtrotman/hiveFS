@@ -182,6 +182,11 @@ extern struct
 #define HIFS_INODE_TSIZE		 4
 #define HIFS_BLOCK_HASH_SIZE      16
 #define HIFS_MAX_BLOCK_HASHES     128
+enum hifs_hash_algorithm {
+	HIFS_HASH_ALGO_NONE = 0,
+	HIFS_HASH_ALGO_SHA256 = 1,
+	HIFS_HASH_ALGO_SIPHASH = 2,
+};
 #define HIFS_BOOT_OFFSET		 0
 #define HIFS_BOOT_LEN            512
 #define HIFS_BOOT2_OFFSET		 (HIFS_BOOT_LEN + 512)
@@ -199,6 +204,36 @@ extern struct
 #define HIFS_BLOCK_BITMAP_OFFSET  (HIFS_DIRENT_BITMAP_OFFSET + HIFS_DEFAULT_BLOCK_SIZE)
 /* Default place where FS will start using after mkcache (all above are used for mkcache tables) */
 #define HIFS_CACHE_SPACE_START	 (HIFS_BLOCK_BITMAP_OFFSET + HIFS_DEFAULT_BLOCK_SIZE)
+
+#ifdef __KERNEL__
+struct hifs_block_fingerprint {
+	uint32_t	block_no;   /* logical block number within the file */
+	uint8_t		hash[HIFS_BLOCK_HASH_SIZE];
+	uint8_t		hash_algo;  /* HIFS_HASH_ALGO_* */
+	uint8_t		reserved[3];
+};
+#else
+struct hifs_block_fingerprint {
+	uint32_t	block_no;
+	uint8_t		hash[HIFS_BLOCK_HASH_SIZE];
+	uint8_t		hash_algo;
+	uint8_t		reserved[3];
+};
+#endif
+
+struct hifs_block_fingerprint_wire {
+#ifdef __KERNEL__
+	__le32	block_no;
+	__u8	hash[HIFS_BLOCK_HASH_SIZE];
+	__u8	hash_algo;
+	__u8	reserved[3];
+#else
+	uint32_t block_no;
+	uint8_t  hash[HIFS_BLOCK_HASH_SIZE];
+	uint8_t  hash_algo;
+	uint8_t  reserved[3];
+#endif
+};
 
 #define HIFS_INODE_SIZE		(sizeof(struct hifs_inode))
 #define HIFS_INODE_NUMBER_TABLE	128
@@ -248,7 +283,7 @@ struct hifs_inode
 	uint32_t	i_blocks;	/* Number of blocks */
 	uint32_t	i_bytes;	/* Number of bytes */
 	uint8_t		i_links;    /* Number of links to an inode */
-	uint8_t		i_block_hashes[HIFS_MAX_BLOCK_HASHES][HIFS_BLOCK_HASH_SIZE];
+	struct hifs_block_fingerprint i_block_fingerprints[HIFS_MAX_BLOCK_HASHES];
 	uint16_t	i_hash_count;
 	uint16_t	i_hash_reserved;
 };
@@ -643,7 +678,7 @@ struct hifs_inode_wire {
     __le32 i_bytes;
     __u8  i_links;
     __u8  __pad[3];
-    __u8  i_block_hashes[HIFS_MAX_BLOCK_HASHES][HIFS_BLOCK_HASH_SIZE];
+    struct hifs_block_fingerprint_wire i_block_fingerprints[HIFS_MAX_BLOCK_HASHES];
     __le16 i_hash_count;
     __le16 i_hash_reserved;
 #else
@@ -666,7 +701,7 @@ struct hifs_inode_wire {
     uint32_t i_bytes;
     uint8_t  i_links;
     uint8_t  __pad[3];
-    uint8_t  i_block_hashes[HIFS_MAX_BLOCK_HASHES][HIFS_BLOCK_HASH_SIZE];
+    struct hifs_block_fingerprint_wire i_block_fingerprints[HIFS_MAX_BLOCK_HASHES];
     uint16_t i_hash_count;
     uint16_t i_hash_reserved;
 #endif

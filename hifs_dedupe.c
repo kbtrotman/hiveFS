@@ -29,6 +29,7 @@ struct hifs_dedupe_entry {
 	u64 last_update_ns;
 	bool dirty;
 	bool have_hash;
+	u8 algo;
 	u8 hash[HIFS_BLOCK_HASH_SIZE];
 };
 
@@ -68,7 +69,8 @@ static void hifs_dedupe_store_u128(u8 dst[HIFS_BLOCK_HASH_SIZE], u64 h1, u64 h2)
 }
 
 static int hifs_dedupe_hash_block(struct hifs_dedupe_ctx *ctx, const void *data,
-				  size_t len, u8 out[HIFS_BLOCK_HASH_SIZE])
+				  size_t len, u8 out[HIFS_BLOCK_HASH_SIZE],
+				  enum hifs_hash_algorithm *algo_out)
 {
 	u8 digest[SHA256_DIGEST_SIZE];
 	siphash_key_t key_a, key_b;
@@ -88,6 +90,8 @@ static int hifs_dedupe_hash_block(struct hifs_dedupe_ctx *ctx, const void *data,
 
 		memcpy(out, digest, HIFS_BLOCK_HASH_SIZE);
 		memzero_explicit(digest, sizeof(digest));
+		if (algo_out)
+			*algo_out = HIFS_HASH_ALGO_SHA256;
 		return 0;
 	}
 
@@ -110,12 +114,15 @@ static int hifs_dedupe_hash_block(struct hifs_dedupe_ctx *ctx, const void *data,
 	h2 = siphash(data, len, &key_b);
 
 	hifs_dedupe_store_u128(out, h1, h2);
+	if (algo_out)
+		*algo_out = HIFS_HASH_ALGO_SIPHASH;
 	return 0;
 }
 
 static int hifs_dedupe_update_entry(struct hifs_dedupe_ctx *ctx, u64 block_no,
-				    const u8 hash[HIFS_BLOCK_HASH_SIZE],
-				    bool *changed)
+				      const u8 hash[HIFS_BLOCK_HASH_SIZE],
+				      enum hifs_hash_algorithm algo,
+				      bool *changed)
 {
 	struct hifs_dedupe_entry *entry;
 	u64 now_ns = ktime_get_coarse_ns();
@@ -136,12 +143,13 @@ static int hifs_dedupe_update_entry(struct hifs_dedupe_ctx *ctx, u64 block_no,
 		entry->block_no = block_no;
 		entry->dirty = true;
 		entry->have_hash = true;
+		entry->algo = algo;
 		entry->last_update_ns = now_ns;
 		memcpy(entry->hash, hash, HIFS_BLOCK_HASH_SIZE);
 		hash_add(ctx->entries, &entry->hnode, block_no);
 		hifs_debug("dedupe: track block %llu", (unsigned long long)block_no);
 	} else {
-		if (entry->have_hash &&
+		if (entry->have_hash && entry->algo == algo &&
 		    !memcmp(entry->hash, hash, HIFS_BLOCK_HASH_SIZE)) {
 			local_changed = false;
 			entry->dirty = false;
@@ -149,6 +157,7 @@ static int hifs_dedupe_update_entry(struct hifs_dedupe_ctx *ctx, u64 block_no,
 			memcpy(entry->hash, hash, HIFS_BLOCK_HASH_SIZE);
 			entry->dirty = true;
 			entry->have_hash = true;
+			entry->algo = algo;
 		}
 		entry->last_update_ns = now_ns;
 	}
@@ -161,7 +170,8 @@ out_unlock:
 }
 
 static void hifs_dedupe_note_read(struct hifs_dedupe_ctx *ctx, u64 block_no,
-				  const u8 hash[HIFS_BLOCK_HASH_SIZE])
+			  const u8 hash[HIFS_BLOCK_HASH_SIZE],
+			  enum hifs_hash_algorithm algo)
 {
 	struct hifs_dedupe_entry *entry;
 	u64 now_ns = ktime_get_coarse_ns();
@@ -180,18 +190,21 @@ static void hifs_dedupe_note_read(struct hifs_dedupe_ctx *ctx, u64 block_no,
 		entry->have_hash = true;
 		entry->last_update_ns = now_ns;
 		memcpy(entry->hash, hash, HIFS_BLOCK_HASH_SIZE);
+		entry->algo = algo;
 		hash_add(ctx->entries, &entry->hnode, block_no);
 	} else {
 		if (entry->have_hash &&
-		    memcmp(entry->hash, hash, HIFS_BLOCK_HASH_SIZE)) {
+		    (entry->algo != algo ||
+		     memcmp(entry->hash, hash, HIFS_BLOCK_HASH_SIZE))) {
 			hifs_warning("dedupe: block %llu hash mismatch during read",
-				     (unsigned long long)block_no);
+			     (unsigned long long)block_no);
 			memcpy(entry->hash, hash, HIFS_BLOCK_HASH_SIZE);
 			entry->dirty = true;
 		} else {
 			entry->dirty = false;
 		}
 		entry->have_hash = true;
+		entry->algo = algo;
 		entry->last_update_ns = now_ns;
 	}
 
@@ -293,52 +306,62 @@ void hifs_dedupe_mark_clean(struct super_block *sb, uint64_t block_no, bool succ
 }
 
 int hifs_dedupe_writes(struct super_block *sb, uint64_t block,
-		       const void *data, size_t len,
-		       uint8_t hash_out[HIFS_BLOCK_HASH_SIZE])
+	       const void *data, size_t len,
+	       uint8_t hash_out[HIFS_BLOCK_HASH_SIZE],
+	       enum hifs_hash_algorithm *algo_out)
 {
 	struct hifs_dedupe_ctx *ctx;
 	u8 hash[HIFS_BLOCK_HASH_SIZE];
 	bool changed = true;
+	enum hifs_hash_algorithm algo = HIFS_HASH_ALGO_NONE;
 	int ret;
 
 	if (!sb || !data || !len || !hash_out)
 		return -EINVAL;
 
 	ctx = hifs_sb_dedupe_ctx(sb);
-	ret = hifs_dedupe_hash_block(ctx, data, len, hash);
+	ret = hifs_dedupe_hash_block(ctx, data, len, hash, &algo);
 	if (ret)
 		return ret;
 
 	memcpy(hash_out, hash, HIFS_BLOCK_HASH_SIZE);
 
-	ret = hifs_dedupe_update_entry(ctx, block, hash, &changed);
+	ret = hifs_dedupe_update_entry(ctx, block, hash, algo, &changed);
 	if (ret)
 		return ret;
 
 	if (!changed)
 		hifs_debug("dedupe: block %llu unchanged", (unsigned long long)block);
 
+	if (algo_out)
+		*algo_out = algo;
+
 	return 0;
 }
 
 int hifs_rehydrate_reads(struct super_block *sb, uint64_t block,
-		       const void *data, size_t len,
-		       uint8_t hash_out[HIFS_BLOCK_HASH_SIZE])
+	       const void *data, size_t len,
+	       uint8_t hash_out[HIFS_BLOCK_HASH_SIZE],
+	       enum hifs_hash_algorithm *algo_out)
 {
 	struct hifs_dedupe_ctx *ctx;
 	u8 hash[HIFS_BLOCK_HASH_SIZE];
+	enum hifs_hash_algorithm algo = HIFS_HASH_ALGO_NONE;
 	int ret;
 
 	if (!sb || !data || !len || !hash_out)
 		return -EINVAL;
 
 	ctx = hifs_sb_dedupe_ctx(sb);
-	ret = hifs_dedupe_hash_block(ctx, data, len, hash);
+	ret = hifs_dedupe_hash_block(ctx, data, len, hash, &algo);
 	if (ret)
 		return ret;
 
 	memcpy(hash_out, hash, HIFS_BLOCK_HASH_SIZE);
-	hifs_dedupe_note_read(ctx, block, hash);
+	hifs_dedupe_note_read(ctx, block, hash, algo);
+
+	if (algo_out)
+		*algo_out = algo;
 
 	return 0;
 }

@@ -254,10 +254,12 @@ static inline bool __bitmap_test_byte(const uint8_t *bm, uint64_t bit)
 /* hifs_dedupe (elimination of duplicate blocks) */
 int hifs_dedupe_writes(struct super_block *sb, uint64_t block,
 		       const void *data, size_t len,
-		       uint8_t hash_out[HIFS_BLOCK_HASH_SIZE]);
+		       uint8_t hash_out[HIFS_BLOCK_HASH_SIZE],
+		       enum hifs_hash_algorithm *algo_out);
 int hifs_rehydrate_reads(struct super_block *sb, uint64_t block,
 		       const void *data, size_t len,
-		       uint8_t hash_out[HIFS_BLOCK_HASH_SIZE]);
+		       uint8_t hash_out[HIFS_BLOCK_HASH_SIZE],
+		       enum hifs_hash_algorithm *algo_out);
 int hifs_dedupe_init(struct hifs_sb_info *info);
 void hifs_dedupe_shutdown(struct hifs_sb_info *info);
 bool hifs_dedupe_should_push(struct super_block *sb, uint64_t block_no);
