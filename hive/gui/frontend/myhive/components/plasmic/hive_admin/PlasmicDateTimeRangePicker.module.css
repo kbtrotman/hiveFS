@@ -1,0 +1,47 @@
+.root {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  height: auto;
+  max-width: 100%;
+  background: var(--token-BcgeLQqBhxwK);
+  position: relative;
+  min-width: 0;
+  padding: 8px 16px;
+}
+.h2 {
+  color: var(--token-rWSjqD1G25yv);
+  font-family: "Inter", sans-serif;
+  font-weight: 600;
+  font-size: 16px;
+  line-height: 24px;
+  letter-spacing: -1.1%;
+  position: relative;
+  width: 100%;
+  height: auto;
+  max-width: 100%;
+  min-width: 0;
+}
+.freeBox {
+  display: flex;
+  position: relative;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-end;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  column-gap: 8px;
+  padding: 0px;
+}
+.dateTimePicker__qOeC:global(.__wab_instance) {
+  max-width: 100%;
+  object-fit: cover;
+}
+.dateTimePicker__ntqtm:global(.__wab_instance) {
+  max-width: 100%;
+  object-fit: cover;
+  position: relative;
+}
