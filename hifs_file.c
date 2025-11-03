@@ -44,10 +44,12 @@ ssize_t hifs_read(struct kiocb *iocb, struct iov_iter *to)
 	char *buffer;
 	void *buf = to->__iov->iov_base;
 	int nbytes;
+	int dedupe_ret;
 	size_t count = iov_iter_count(to);
 	loff_t off = iocb->ki_pos;
 	//loff_t end = off + count;
 	size_t blk = 0;
+	uint8_t block_hash[HIFS_BLOCK_HASH_SIZE];
 
 
 	inode = iocb->ki_filp->f_path.dentry->d_inode;
@@ -66,6 +68,12 @@ ssize_t hifs_read(struct kiocb *iocb, struct iov_iter *to)
         printk(KERN_ERR "Failed to read data block %lu\n", blk);
 		return 0;
 	}
+
+	dedupe_ret = hifs_rehydrate_reads(sb, blk, bh->b_data,
+					 sb->s_blocksize, block_hash);
+	if (dedupe_ret)
+		hifs_warning("dedupe rehydrate returned %d for block %lu",
+			     dedupe_ret, (unsigned long)blk);
 
 	buffer = (char *)bh->b_data + (off % HIFS_DEFAULT_BLOCK_SIZE);
 	nbytes = min((size_t)(hiinode->i_size - off), count);

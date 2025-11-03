@@ -237,6 +237,10 @@ int hifs_get_super(struct super_block *sb, void *data, int silent)
 	}
 	sb_info->disk.s_inodes_count = cpu_to_le32(sb_info->s_inode_cnt);
 
+	ret = hifs_dedupe_init(sb_info);
+	if (ret)
+		goto out;
+
 	brelse(bh);
 	bh = NULL;
 
@@ -351,9 +355,11 @@ out:
     if (bh)
         brelse(bh);
     if (ret) {
-        hifs_cache_sync_shutdown(sb_info);
-        if (sb_info)
+        if (sb_info) {
+            hifs_dedupe_shutdown(sb_info);
+            hifs_cache_sync_shutdown(sb_info);
             sb_info->sb = NULL;
+        }
         if (root_inode)
             iput(root_inode);
         else if (root_hifsinode)
@@ -437,6 +443,7 @@ void hifs_put_super(struct super_block *sb)
 	hifs_flush_dirty_cache_items();
 
 	/* Finally, free the superblock info structure. */
+	hifs_dedupe_shutdown(info);
 
     hifs_cache_detach(info);
     kfree(info);
