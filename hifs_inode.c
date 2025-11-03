@@ -48,6 +48,7 @@ void hifs_store_inode(struct super_block *sb, struct hifs_inode *hii)
 	struct hifs_inode *in_core;
 	uint32_t blk = hii->i_addrb[0] - 1;
 	uint8_t inode_hash[HIFS_BLOCK_HASH_SIZE];
+	enum hifs_hash_algorithm hash_algo = HIFS_HASH_ALGO_NONE;
 	int dedupe_ret;
 
 	/* put in-core inode */
@@ -65,13 +66,25 @@ void hifs_store_inode(struct super_block *sb, struct hifs_inode *hii)
 	hifs_cache_mark_dirty(sb, blk);
 
 	dedupe_ret = hifs_dedupe_writes(sb, blk, bh->b_data,
-					sb->s_blocksize, inode_hash);
+					sb->s_blocksize, inode_hash,
+					&hash_algo);
 	if (dedupe_ret)
 		hifs_warning("dedupe placeholder returned %d for inode %llu block %u",
 			     dedupe_ret, hii->i_ino, blk);
 	else {
-		memcpy(hii->i_block_hashes[0], inode_hash, HIFS_BLOCK_HASH_SIZE);
+		struct hifs_block_fingerprint fp;
+
+		memset(&fp, 0, sizeof(fp));
+		if (blk > U32_MAX)
+			hifs_warning("inode block %u exceeds fingerprint width", blk);
+		fp.block_no = blk;
+		memcpy(fp.hash, inode_hash, HIFS_BLOCK_HASH_SIZE);
+		fp.hash_algo = (uint8_t)hash_algo;
+
+		hii->i_block_fingerprints[0] = fp;
+		in_core->i_block_fingerprints[0] = fp;
 		hii->i_hash_count = max_t(uint16_t, hii->i_hash_count, 1);
+		in_core->i_hash_count = hii->i_hash_count;
 	}
 
 	mark_buffer_dirty(bh);
@@ -87,6 +100,7 @@ int hifs_add_dir_record(struct super_block *sb, struct inode *dir, struct dentry
 	struct hifs_dir_entry *dir_rec;
 	u32 blk, j;
 	uint8_t block_hash[HIFS_BLOCK_HASH_SIZE];
+	enum hifs_hash_algorithm hash_algo = HIFS_HASH_ALGO_NONE;
 	size_t block_index;
 	int dedupe_ret;
 
@@ -113,11 +127,13 @@ int hifs_add_dir_record(struct super_block *sb, struct inode *dir, struct dentry
 						(blk - parent->i_addrb[0]) : 0;
 					hifs_cache_mark_dirent(sb, dir_rec->inode_nr);
 
+					hash_algo = HIFS_HASH_ALGO_NONE;
 					dedupe_ret = hifs_dedupe_writes(sb, blk, bh->b_data,
-									sb->s_blocksize, block_hash);
+									sb->s_blocksize, block_hash,
+									&hash_algo);
 					if (dedupe_ret)
 						hifs_warning("dedupe placeholder returned %d for dir inode %lu block %u",
-							     dedupe_ret, dir->i_ino, blk);
+						     dedupe_ret, dir->i_ino, blk);
 
 					if (block_index >= HIFS_MAX_BLOCK_HASHES) {
 						hifs_warning("directory block index %zu exceeds hash capacity",
@@ -125,10 +141,16 @@ int hifs_add_dir_record(struct super_block *sb, struct inode *dir, struct dentry
 						block_index = HIFS_MAX_BLOCK_HASHES - 1;
 					}
 
-					memcpy(parent->i_block_hashes[block_index],
-					       block_hash, HIFS_BLOCK_HASH_SIZE);
+					{
+						struct hifs_block_fingerprint *fp =
+							&parent->i_block_fingerprints[block_index];
+						memset(fp, 0, sizeof(*fp));
+						fp->block_no = blk;
+						memcpy(fp->hash, block_hash, HIFS_BLOCK_HASH_SIZE);
+						fp->hash_algo = (uint8_t)hash_algo;
+					}
 					parent->i_hash_count = max_t(uint16_t, parent->i_hash_count,
-								     (uint16_t)(block_index + 1));
+						     (uint16_t)(block_index + 1));
 
 					mark_buffer_dirty(bh);
 					sync_dirty_buffer(bh);
@@ -191,7 +213,7 @@ struct hifs_sb_info *hisb;
 	hii->i_size = 0;
 	hii->i_hash_count = 0;
 	hii->i_hash_reserved = 0;
-	memset(hii->i_block_hashes, 0, sizeof(hii->i_block_hashes));
+	memset(hii->i_block_fingerprints, 0, sizeof(hii->i_block_fingerprints));
 
 	{
 		const u64 total_blocks =

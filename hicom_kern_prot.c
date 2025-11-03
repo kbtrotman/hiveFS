@@ -135,6 +135,17 @@ static void hifs_inode_host_to_wire(const struct hifs_inode *src,
     dst->i_blocks = cpu_to_le32(src->i_blocks);
     dst->i_bytes = cpu_to_le32(src->i_bytes);
     dst->i_links = src->i_links;
+    for (i = 0; i < HIFS_MAX_BLOCK_HASHES; ++i) {
+        const struct hifs_block_fingerprint *fp = &src->i_block_fingerprints[i];
+        struct hifs_block_fingerprint_wire *wire = &dst->i_block_fingerprints[i];
+
+        wire->block_no = cpu_to_le32(fp->block_no);
+        memcpy(wire->hash, fp->hash, sizeof(wire->hash));
+        wire->hash_algo = fp->hash_algo;
+        memset(wire->reserved, 0, sizeof(wire->reserved));
+    }
+    dst->i_hash_count = cpu_to_le16(src->i_hash_count);
+    dst->i_hash_reserved = cpu_to_le16(src->i_hash_reserved);
 }
 
 static void hifs_inode_wire_to_host(const struct hifs_inode_wire *src,
@@ -163,6 +174,17 @@ static void hifs_inode_wire_to_host(const struct hifs_inode_wire *src,
     dst->i_blocks = le32_to_cpu(src->i_blocks);
     dst->i_bytes = le32_to_cpu(src->i_bytes);
     dst->i_links = src->i_links;
+    for (i = 0; i < HIFS_MAX_BLOCK_HASHES; ++i) {
+        struct hifs_block_fingerprint *fp = &dst->i_block_fingerprints[i];
+        const struct hifs_block_fingerprint_wire *wire = &src->i_block_fingerprints[i];
+
+        fp->block_no = le32_to_cpu(wire->block_no);
+        memcpy(fp->hash, wire->hash, sizeof(fp->hash));
+        fp->hash_algo = wire->hash_algo;
+        memset(fp->reserved, 0, sizeof(fp->reserved));
+    }
+    dst->i_hash_count = le16_to_cpu(src->i_hash_count);
+    dst->i_hash_reserved = le16_to_cpu(src->i_hash_reserved);
 }
 
 static int hifs_compare_inode_newer(const struct hifs_inode_wire *local,

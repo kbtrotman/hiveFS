@@ -70,7 +70,7 @@ ssize_t hifs_read(struct kiocb *iocb, struct iov_iter *to)
 	}
 
 	dedupe_ret = hifs_rehydrate_reads(sb, blk, bh->b_data,
-					 sb->s_blocksize, block_hash);
+					 sb->s_blocksize, block_hash, NULL);
 	if (dedupe_ret)
 		hifs_warning("dedupe rehydrate returned %d for block %lu",
 			     dedupe_ret, (unsigned long)blk);
@@ -110,6 +110,7 @@ ssize_t hifs_write(struct kiocb *iocb, struct iov_iter *from)
 	char *buffer;
 	int dedupe_ret;
 	uint8_t block_hash[HIFS_BLOCK_HASH_SIZE];
+	enum hifs_hash_algorithm hash_algo = HIFS_HASH_ALGO_NONE;
 	u64 block_index;
 	size_t hash_slot;
 	//int ret;
@@ -150,8 +151,10 @@ ssize_t hifs_write(struct kiocb *iocb, struct iov_iter *from)
 	
 	iocb->ki_pos += count; 
 
+	hash_algo = HIFS_HASH_ALGO_NONE;
 	dedupe_ret = hifs_dedupe_writes(sb, boff, bh->b_data,
-					HIFS_DEFAULT_BLOCK_SIZE, block_hash);
+					HIFS_DEFAULT_BLOCK_SIZE, block_hash,
+					&hash_algo);
 	if (dedupe_ret)
 		hifs_warning("dedupe placeholder returned %d for block %zu", dedupe_ret, boff);
 
@@ -169,7 +172,15 @@ ssize_t hifs_write(struct kiocb *iocb, struct iov_iter *from)
 		hash_slot = (size_t)block_index;
 	}
 
-	memcpy(dinode->i_block_hashes[hash_slot], block_hash, HIFS_BLOCK_HASH_SIZE);
+	{
+		struct hifs_block_fingerprint *fp = &dinode->i_block_fingerprints[hash_slot];
+		memset(fp, 0, sizeof(*fp));
+		if (boff > U32_MAX)
+			hifs_warning("block %zu overflows fingerprint storage", boff);
+		fp->block_no = (uint32_t)boff;
+		memcpy(fp->hash, block_hash, HIFS_BLOCK_HASH_SIZE);
+		fp->hash_algo = (uint8_t)hash_algo;
+	}
 	dinode->i_hash_count = max_t(uint16_t, dinode->i_hash_count,
 				 (uint16_t)(hash_slot + 1));
 
