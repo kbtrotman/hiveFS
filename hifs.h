@@ -44,6 +44,7 @@
 /* Definitions past this point should be specific only to the kernel-space module! */
 
 struct hifs_sb_info;
+struct hifs_dedupe_ctx;
 
 /*
 
@@ -254,7 +255,13 @@ static inline bool __bitmap_test_byte(const uint8_t *bm, uint64_t bit)
 int hifs_dedupe_writes(struct super_block *sb, uint64_t block,
 		       const void *data, size_t len,
 		       uint8_t hash_out[HIFS_BLOCK_HASH_SIZE]);
-
+int hifs_rehydrate_reads(struct super_block *sb, uint64_t block,
+		       const void *data, size_t len,
+		       uint8_t hash_out[HIFS_BLOCK_HASH_SIZE]);
+int hifs_dedupe_init(struct hifs_sb_info *info);
+void hifs_dedupe_shutdown(struct hifs_sb_info *info);
+bool hifs_dedupe_should_push(struct super_block *sb, uint64_t block_no);
+void hifs_dedupe_mark_clean(struct super_block *sb, uint64_t block_no, bool success);
 
 // END: Prototypes Here:
 
@@ -297,6 +304,7 @@ struct hifs_sb_info
 	uint32_t	s_last_blk;	    /* just move forward with allocation */
     /* Shared cache context across mounts */
     struct hifs_cache_ctx *cache;
+    struct hifs_dedupe_ctx *dedupe;
     /* Per-mount volume identifier within shared cache */
     uint64_t volume_id;
     /* Cached classification for mount type */

@@ -1069,7 +1069,18 @@ int hifs_push_block(struct super_block *sb, uint64_t block,
 
     hifs_cache_mark_dirty(sb, block);
     hifs_cache_mark_present(sb, block);
-    return hifs_publish_block(sb, block, data, data_len, false);
+    if (!hifs_dedupe_should_push(sb, block)) {
+        hifs_debug("dedupe: skipping remote push for block %llu",
+                   (unsigned long long)block);
+        hifs_dedupe_mark_clean(sb, block, true);
+        return 0;
+    }
+
+    {
+        int ret = hifs_publish_block(sb, block, data, data_len, false);
+        hifs_dedupe_mark_clean(sb, block, ret >= 0);
+        return ret;
+    }
 }
 /* Volume table helpers */
 static int hifs_read_volume_entry(struct super_block *sb, u32 index, struct hifs_volume_entry *ve)
