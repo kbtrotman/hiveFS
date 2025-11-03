@@ -16,16 +16,21 @@ CREATE TABLE inodes (
     b_time        TIMESTAMP       NULL,
     filename      VARCHAR(255),
     type          CHAR(1),
+    hash_count    SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+    hash_reserved SMALLINT UNSIGNED NOT NULL DEFAULT 0,
     UNIQUE KEY u_iname (iname)
 ) ENGINE=InnoDB;
 
 -- Link table can stay on InnoDB for FK support
 CREATE TABLE inode_to_blocks (
-    inode_id   BIGINT UNSIGNED NOT NULL,
-    block_hash VARBINARY(32)    NOT NULL,
-    block_order INT UNSIGNED    NOT NULL,
+    inode_id      BIGINT UNSIGNED NOT NULL,
+    block_order   INT UNSIGNED    NOT NULL,
+    block_no      BIGINT UNSIGNED NOT NULL,
+    hash_algo     TINYINT UNSIGNED NOT NULL,
+    block_hash    VARBINARY(32)   NOT NULL,
+    block_bck_hash VARBINARY(16)  NULL,
     PRIMARY KEY (inode_id, block_order),
-    KEY idx_block_hash (block_hash),
+    KEY idx_block_hash (hash_algo, block_hash),
     CONSTRAINT fk_inode FOREIGN KEY (inode_id) REFERENCES inodes(inode_id)
         ON DELETE CASCADE
 ) ENGINE=InnoDB;
@@ -134,7 +139,7 @@ CREATE TABLE volume_dentries (
 CREATE TABLE volume_inodes (
   volume_id    BIGINT UNSIGNED NOT NULL,
   inode        BIGINT UNSIGNED NOT NULL,
-  inode_blob   VARBINARY(512) NOT NULL,
+  inode_blob   VARBINARY(4096) NOT NULL,
   epoch        INT UNSIGNED NOT NULL,
   updated_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 ON UPDATE CURRENT_TIMESTAMP,
@@ -204,16 +209,21 @@ CREATE TABLE inodes (
     b_time        TIMESTAMP       NULL,
     filename      VARCHAR(255),
     type          CHAR(1),
+    hash_count    SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+    hash_reserved SMALLINT UNSIGNED NOT NULL DEFAULT 0,
     UNIQUE KEY u_iname (iname)
 ) ENGINE=InnoDB;
 
 -- Link table can stay on InnoDB for FK support
 CREATE TABLE inode_to_blocks (
-    inode_id   BIGINT UNSIGNED NOT NULL,
-    block_hash VARBINARY(32)    NOT NULL,
-    block_order INT UNSIGNED    NOT NULL,
+    inode_id      BIGINT UNSIGNED NOT NULL,
+    block_order   INT UNSIGNED    NOT NULL,
+    block_no      BIGINT UNSIGNED NOT NULL,
+    hash_algo     TINYINT UNSIGNED NOT NULL,
+    block_hash    VARBINARY(32)   NOT NULL,
+    block_bck_hash VARBINARY(16)  NULL,
     PRIMARY KEY (inode_id, block_order),
-    KEY idx_block_hash (block_hash),
+    KEY idx_block_hash (hash_algo, block_hash),
     CONSTRAINT fk_inode FOREIGN KEY (inode_id) REFERENCES inodes(inode_id)
         ON DELETE CASCADE
 ) ENGINE=InnoDB;
@@ -322,7 +332,7 @@ CREATE TABLE volume_dentries (
 CREATE TABLE volume_inodes (
   volume_id    BIGINT UNSIGNED NOT NULL,
   inode        BIGINT UNSIGNED NOT NULL,
-  inode_blob   VARBINARY(512) NOT NULL,
+  inode_blob   VARBINARY(4096) NOT NULL,
   epoch        INT UNSIGNED NOT NULL,
   updated_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 ON UPDATE CURRENT_TIMESTAMP,
@@ -356,9 +366,10 @@ USE hive_data;
 
 -- RocksDB key/value table: hash -> 4 KB payload
 CREATE TABLE blocks (
-    block_hash      VARBINARY(128) NOT NULL PRIMARY KEY,  -- 256-bit hash
-    block_data           VARBINARY(4096) NOT NULL,
-    block_bck_hash  VARBINARY(128)
+    block_hash      VARBINARY(32) NOT NULL PRIMARY KEY,  -- primary fingerprint (SHA-256 truncated or full)
+    hash_algo       TINYINT UNSIGNED NOT NULL DEFAULT 1, -- HIFS_HASH_ALGO_*
+    block_data      VARBINARY(4096) NOT NULL,
+    block_bck_hash  VARBINARY(16) NULL
 ) ENGINE=ROCKSDB
   COMMENT='rocksdb_cf=block_data';  -- optional: use its own column family
 
