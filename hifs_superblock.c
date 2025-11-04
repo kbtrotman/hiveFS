@@ -314,8 +314,13 @@ int hifs_get_super(struct super_block *sb, void *data, int silent)
 			 root_hifsinode->i_mode);
 	root_inode->i_flags = root_hifsinode->i_flags;
 	root_inode->i_ino = root_hifsinode->i_ino ? root_hifsinode->i_ino : HIFS_ROOT_INODE;
-	root_inode->i_op = &hifs_cache_root_inode_ops;
-	root_inode->i_fop = &hifs_cache_dir_operations;
+    if (sb_info->is_cache_volume) {
+        root_inode->i_op = &hifs_cache_root_inode_ops;
+        root_inode->i_fop = &hifs_cache_dir_operations;
+    } else {
+        root_inode->i_op = &hifs_inode_operations;
+        root_inode->i_fop = &hifs_dir_operations;
+    }
 	root_inode->i_private = root_hifsinode;
 	root_inode->i_blocks = root_hifsinode->i_blocks;
 	root_inode->i_size = root_hifsinode->i_size;

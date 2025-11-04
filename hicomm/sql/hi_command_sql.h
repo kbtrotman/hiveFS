@@ -25,11 +25,12 @@
 #endif
 
 #include <stdbool.h>
+#include <stdint.h>
 
 #define DB_HOST     "127.0.0.1"
-#define DB_NAME     "hivefs"
+#define DB_NAME     "hive_meta"
 #define DB_USER     "hiveadmin"
-#define DB_PASS     "MyHiveFS"
+#define DB_PASS     "hiveadmin"
 #define DB_PORT     3306
 #define DB_SOCKET   NULL
 #define DB_FLAGS    0
@@ -40,25 +41,110 @@
 #define MAX_INSERT_SIZE 512
 
 /***********************
- * SQL Definitions
+ * SQL Format Strings
  ***********************/
-#define MACHINE_INSERT(buffer, a, b, c, d, e, f, g, h) \
-    snprintf(buffer, MAX_QUERY_SIZE, \
-        "INSERT INTO machines (name, machine_id, host_id, ip_address, os_name, os_version, os_release, machine_type) " \
-        "VALUES ('%.*s', '%.*s', %ld, '%.*s', '%.*s', '%.*s', '%.*s', '%.*s') " \
-        "ON DUPLICATE KEY UPDATE name=VALUES(name), host_id=VALUES(host_id), ip_address=VALUES(ip_address), " \
-        "os_name=VALUES(os_name), os_version=VALUES(os_version), os_release=VALUES(os_release), machine_type=VALUES(machine_type);", \
-        255, safe_str(a), 255, safe_str(b), (long)(c), 255, safe_str(d), 255, safe_str(e), \
-        255, safe_str(f), 255, safe_str(g), 255, safe_str(h))
+#define SQL_HOST_SELECT_BY_SERIAL \
+	"SELECT serial, name, host_id, os_name, os_version, create_time, " \
+	"security_level, root_connect_as, def_user_connect_as, ldap_member " \
+	"FROM host WHERE serial='%s'"
 
-#define MACHINE_GETINFO(buffer, a) \
-    snprintf(buffer, MAX_QUERY_SIZE, \
-             "SELECT m_id, name, host_id, ip_address, os_name, os_version, machine_type, os_release FROM machines WHERE machine_id = '%s';", a)
+#define SQL_HOST_UPSERT \
+	"INSERT INTO host (serial, name, host_id, os_name, os_version, create_time) " \
+	"VALUES ('%s', '%s', %ld, '%s', '%s', NOW()) " \
+	"ON DUPLICATE KEY UPDATE name=VALUES(name), host_id=VALUES(host_id), " \
+	"os_name=VALUES(os_name), os_version=VALUES(os_version)"
 
-#define MACHINE_GETSBS(buffer, a) \
-    snprintf(buffer, MAX_QUERY_SIZE, \
-             "SELECT s_id, mach_id, f_id, magic_num, block_size, mount_time, write_time, mount_count, max_mount_count, filesys_state, " \
-             "max_inodes, max_blocks, free_blocks, free_inodes, blocks_shared FROM superblocks WHERE m_id = '%s';", a)
+#define SQL_VOLUME_SUPER_LIST \
+	"SELECT volume_id, s_magic, s_blocksize, s_blocksize_bits, " \
+	"s_blocks_count, s_free_blocks, s_inodes_count, s_free_inodes " \
+	"FROM volume_superblocks ORDER BY volume_id"
+
+#define SQL_VOLUME_SUPER_SELECT \
+	"SELECT s_magic, s_blocksize, s_blocksize_bits, s_blocks_count, " \
+	"s_free_blocks, s_inodes_count, s_free_inodes, s_maxbytes, " \
+	"s_feature_compat, s_feature_ro_compat, s_feature_incompat, " \
+	"HEX(s_uuid), s_rev_level, s_wtime, s_flags, HEX(s_volume_name) " \
+	"FROM volume_superblocks WHERE volume_id=%llu"
+
+#define SQL_VOLUME_SUPER_UPSERT \
+	"INSERT INTO volume_superblocks " \
+	"(volume_id, s_magic, s_blocksize, s_blocksize_bits, s_blocks_count, " \
+	"s_free_blocks, s_inodes_count, s_free_inodes, s_maxbytes, " \
+	"s_feature_compat, s_feature_ro_compat, s_feature_incompat, s_uuid, " \
+	"s_rev_level, s_wtime, s_flags, s_volume_name) " \
+	"VALUES (%llu, %u, %u, %u, %llu, %llu, %llu, %llu, %llu, %u, %u, %u, " \
+	"UNHEX('%s'), %u, %u, %u, UNHEX('%s')) " \
+	"ON DUPLICATE KEY UPDATE " \
+	"s_magic=VALUES(s_magic), s_blocksize=VALUES(s_blocksize), " \
+	"s_blocksize_bits=VALUES(s_blocksize_bits), s_blocks_count=VALUES(s_blocks_count), " \
+	"s_free_blocks=VALUES(s_free_blocks), s_inodes_count=VALUES(s_inodes_count), " \
+	"s_free_inodes=VALUES(s_free_inodes), s_maxbytes=VALUES(s_maxbytes), " \
+	"s_feature_compat=VALUES(s_feature_compat), " \
+	"s_feature_ro_compat=VALUES(s_feature_ro_compat), " \
+	"s_feature_incompat=VALUES(s_feature_incompat), s_uuid=VALUES(s_uuid), " \
+	"s_rev_level=VALUES(s_rev_level), s_wtime=VALUES(s_wtime), " \
+	"s_flags=VALUES(s_flags), s_volume_name=VALUES(s_volume_name)"
+
+#define SQL_ROOT_DENTRY_SELECT \
+	"SELECT rd_inode, rd_mode, rd_uid, rd_gid, rd_flags, rd_size, " \
+	"rd_blocks, rd_atime, rd_mtime, rd_ctime, rd_links, rd_name_len, " \
+	"HEX(rd_name) FROM volume_root_dentries WHERE volume_id=%llu"
+
+#define SQL_ROOT_DENTRY_UPSERT \
+	"INSERT INTO volume_root_dentries " \
+	"(volume_id, rd_inode, rd_mode, rd_uid, rd_gid, rd_flags, rd_size, " \
+	"rd_blocks, rd_atime, rd_mtime, rd_ctime, rd_links, rd_name_len, rd_name) " \
+	"VALUES (%llu, %llu, %u, %u, %u, %u, %llu, %llu, %u, %u, %u, %u, %u, UNHEX('%s')) " \
+	"ON DUPLICATE KEY UPDATE " \
+	"rd_inode=VALUES(rd_inode), rd_mode=VALUES(rd_mode), rd_uid=VALUES(rd_uid), " \
+	"rd_gid=VALUES(rd_gid), rd_flags=VALUES(rd_flags), rd_size=VALUES(rd_size), " \
+	"rd_blocks=VALUES(rd_blocks), rd_atime=VALUES(rd_atime), rd_mtime=VALUES(rd_mtime), " \
+	"rd_ctime=VALUES(rd_ctime), rd_links=VALUES(rd_links), " \
+	"rd_name_len=VALUES(rd_name_len), rd_name=VALUES(rd_name)"
+
+#define SQL_DENTRY_BY_INODE \
+	"SELECT de_parent, de_inode, de_epoch, de_type, de_name_len, HEX(de_name) " \
+	"FROM volume_dentries WHERE volume_id=%llu AND de_inode=%llu LIMIT 1"
+
+#define SQL_DENTRY_BY_NAME \
+	"SELECT de_parent, de_inode, de_epoch, de_type, de_name_len, HEX(de_name) " \
+	"FROM volume_dentries WHERE volume_id=%llu AND de_parent=%llu " \
+	"AND de_name=UNHEX('%.*s') LIMIT 1"
+
+#define SQL_DENTRY_UPSERT \
+	"INSERT INTO volume_dentries " \
+	"(volume_id, de_parent, de_inode, de_epoch, de_type, de_name_len, de_name) " \
+	"VALUES (%llu, %llu, %llu, %u, %u, %u, UNHEX('%s')) " \
+	"ON DUPLICATE KEY UPDATE " \
+	"de_inode=VALUES(de_inode), de_epoch=VALUES(de_epoch), " \
+	"de_type=VALUES(de_type), de_name_len=VALUES(de_name_len), " \
+	"de_name=VALUES(de_name)"
+
+#define SQL_VOLUME_INODE_SELECT \
+	"SELECT HEX(inode_blob) FROM volume_inodes WHERE volume_id=%llu AND inode=%llu"
+
+#define SQL_VOLUME_INODE_UPSERT \
+	"INSERT INTO volume_inodes (volume_id, inode, inode_blob, epoch) " \
+	"VALUES (%llu, %llu, UNHEX('%s'), %u) " \
+	"ON DUPLICATE KEY UPDATE inode_blob=VALUES(inode_blob), epoch=VALUES(epoch)"
+
+#define SQL_VOLUME_BLOCK_MAP_SELECT \
+    "SELECT hash_algo, HEX(block_hash) FROM volume_block_mappings " \
+    "WHERE volume_id=%llu AND block_no=%llu"
+
+#define SQL_VOLUME_BLOCK_MAP_UPSERT \
+    "INSERT INTO volume_block_mappings (volume_id, block_no, hash_algo, block_hash) " \
+    "VALUES (%llu, %llu, %u, UNHEX('%s')) " \
+    "ON DUPLICATE KEY UPDATE hash_algo=VALUES(hash_algo), block_hash=VALUES(block_hash)"
+
+#define SQL_DATA_BLOCK_UPSERT \
+    "INSERT INTO hive_data.blocks (block_hash, hash_algo, block_data, block_bck_hash) " \
+    "VALUES (UNHEX('%s'), %u, UNHEX('%s'), %s) " \
+    "ON DUPLICATE KEY UPDATE hash_algo=VALUES(hash_algo), " \
+    "block_data=VALUES(block_data), block_bck_hash=VALUES(block_bck_hash)"
+
+#define SQL_DATA_BLOCK_SELECT \
+    "SELECT HEX(block_data) FROM hive_data.blocks WHERE hash_algo=%u AND block_hash=UNHEX('%s')"
 
 /* Prototypes */
 void init_hive_link(void);
@@ -98,33 +184,22 @@ bool hifs_volume_block_store(uint64_t volume_id, uint64_t block_no,
 
 
 struct superblock {
-	char *s_id;
-	char *mach_id; 
-	char *f_id; 
-	char *magic_num; 
-	int block_size; 
-	char *mount_time; 
-	char *write_time; 
-	int mount_count; 
-	int max_mount_count; 
-	int filesys_state; 
-	long max_inodes; 
-	long max_blocks; 
-	long free_blocks; 
-	long free_inodes; 
-	long blocks_shared;
+	uint64_t volume_id;
+	uint32_t s_magic;
+	uint32_t s_blocksize;
+	uint32_t s_blocksize_bits;
+	uint64_t s_blocks_count;
+	uint64_t s_free_blocks;
+	uint64_t s_inodes_count;
+	uint64_t s_free_inodes;
 };
 
 struct machine {
-	char *m_id;
+	char *serial;
 	char *name;
-	char *machine_id;
 	long host_id;
-	char *ip_address;
 	char *os_name;
 	char *os_version;
-	char *os_release;
-	char *machine_type;
 	char *create_time;
 };
 struct SQLDB {

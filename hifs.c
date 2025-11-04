@@ -25,6 +25,7 @@ struct file_system_type hifs_type =
     .name = "hivefs",
     .mount = hifs_mount,
     .kill_sb = kill_block_super,
+    .owner = THIS_MODULE,
 };
 
 const struct file_operations hifs_file_operations = 
@@ -193,10 +194,17 @@ static void __exit hifs_exit(void)
 {
     int ret;
 
+    /* Ensure any pending cache items are flushed before teardown. */
+    hifs_flush_dirty_cache_items();
+
     hifs_stop_queue_thread();
     hifs_fifo_exit();
 
+    if (!hlist_empty(&hifs_type.fs_supers))
+        hifs_warning("hivefs: filesystem still mounted during module unload");
+
     if (hifs_inode_cache) {
+        kmem_cache_shrink(hifs_inode_cache);
         kmem_cache_destroy(hifs_inode_cache);
         hifs_inode_cache = NULL;
     }

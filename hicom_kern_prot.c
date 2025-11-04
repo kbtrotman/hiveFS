@@ -879,8 +879,27 @@ out:
     kfree(msg_local);
     return ret;
 }
+struct hifs_flush_ctx {
+	int rc;
+};
+
+static void hifs_flush_sync_super(struct super_block *sb, void *data)
+{
+	struct hifs_flush_ctx *ctx = data;
+	int ret;
+
+	if (!sb || sb->s_type != &hifs_type)
+		return;
+
+	ret = sync_filesystem(sb);
+	if (ret && !ctx->rc)
+		ctx->rc = ret;
+}
+
 int hifs_flush_dirty_cache_items(void)
 {
+	struct hifs_flush_ctx ctx = { .rc = 0 };
 
-	return 0;
+	iterate_supers_type(&hifs_type, hifs_flush_sync_super, &ctx);
+	return ctx.rc;
 }
