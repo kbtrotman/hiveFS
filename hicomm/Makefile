@@ -18,7 +18,7 @@ else
 MYSQL_CFLAGS := $(shell $(MYSQL_CONFIG) --cflags)
 MYSQL_LIBS := $(shell $(MYSQL_CONFIG) --libs)
 CFLAGS += $(MYSQL_CFLAGS)
-LDFLAGS += $(MYSQL_LIBS)
+LDFLAGS += $(MYSQL_LIBS) -lcrypto
 endif
 
 # Define the C source files

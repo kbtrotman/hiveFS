@@ -53,6 +53,8 @@ int main(int argc, char *argv[])
 	if (hicomm_send_cmd_str(comm_fd, HIFS_Q_PROTO_CMD_LINK_UP) != 0)
 		hifs_warning("Failed to notify kernel that user link is up");
 
+	init_hive_link();
+
 	register_hive_host();
 	if (!hifs_get_hive_host_sbs()) {
 		hifs_warning("No local cache for this host; have you run mkcache? remote volumes will run solely on hive metadata.");
