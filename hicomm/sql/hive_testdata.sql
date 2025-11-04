@@ -140,3 +140,33 @@ INSERT INTO inodes (
     0,
     0
 ) ON DUPLICATE KEY UPDATE m_time = VALUES(m_time);
+
+-- Seed one example block hash (zero-filled block) for the root directory
+USE hive_data;
+INSERT INTO blocks (
+    hash_algo,
+    block_hash,
+    block_data,
+    block_bck_hash
+) VALUES (
+    1,
+    UNHEX('ad7facb2586fc6e966c004d7d1d16b024f5805ff7cb47c7a85dabd8b48892ca7'),
+    UNHEX(REPEAT('00', 4096)),
+    NULL
+) ON DUPLICATE KEY UPDATE
+    block_data = VALUES(block_data);
+
+USE hive_meta;
+INSERT INTO volume_block_mappings (
+    volume_id,
+    block_no,
+    hash_algo,
+    block_hash
+) VALUES (
+    @volume_id,
+    0,
+    1,
+    UNHEX('ad7facb2586fc6e966c004d7d1d16b024f5805ff7cb47c7a85dabd8b48892ca7')
+) ON DUPLICATE KEY UPDATE
+    hash_algo = VALUES(hash_algo),
+    block_hash = VALUES(block_hash);

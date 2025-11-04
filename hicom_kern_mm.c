@@ -187,6 +187,14 @@ static long hifs_comm_ioctl(struct file *file, unsigned int cmd, unsigned long a
 
 		return 0;
 	}
+	case HIFS_IOCTL_CACHE_STATUS: {
+		struct hifs_cache_status stats;
+
+		hifs_cache_get_stats(&stats);
+		if (copy_to_user(user_ptr, &stats, sizeof(stats)))
+			return -EFAULT;
+		return 0;
+	}
 	case HIFS_IOCTL_CMD_ENQUEUE: {
 		struct hifs_cmds msg;
 

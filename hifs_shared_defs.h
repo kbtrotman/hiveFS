@@ -66,6 +66,7 @@
 #define HIFS_IOCTL_STATUS         _IOR(HIFS_IOCTL_MAGIC,  2, struct hifs_comm_status)
 #define HIFS_IOCTL_CMD_ENQUEUE    _IOW (HIFS_IOCTL_MAGIC, 3, struct hifs_cmds)
 #define HIFS_IOCTL_DATA_ENQUEUE   _IOW (HIFS_IOCTL_MAGIC, 4, struct hifs_data_frame)
+#define HIFS_IOCTL_CACHE_STATUS   _IOR(HIFS_IOCTL_MAGIC,  5, struct hifs_cache_status)
 
 /******************************
  * Queue Comms Protocol
@@ -143,6 +144,46 @@ struct hifs_comm_status {
 	uint32_t inode_available;
 	uint32_t cmd_pending;
 	uint32_t inode_pending;
+#endif
+};
+
+struct hifs_cache_status {
+#ifdef __KERNEL__
+	__u64 block_bytes_total;
+	__u64 block_bytes_used;
+	__u32 block_unit_bytes;
+	__u32 block_fifo_capacity;
+	__u32 block_fifo_count;
+
+	__u64 dirent_bytes_total;
+	__u64 dirent_bytes_used;
+	__u32 dirent_unit_bytes;
+	__u32 dirent_fifo_capacity;
+	__u32 dirent_fifo_count;
+
+	__u64 inode_bytes_total;
+	__u64 inode_bytes_used;
+	__u32 inode_unit_bytes;
+	__u32 inode_fifo_capacity;
+	__u32 inode_fifo_count;
+#else
+	uint64_t block_bytes_total;
+	uint64_t block_bytes_used;
+	uint32_t block_unit_bytes;
+	uint32_t block_fifo_capacity;
+	uint32_t block_fifo_count;
+
+	uint64_t dirent_bytes_total;
+	uint64_t dirent_bytes_used;
+	uint32_t dirent_unit_bytes;
+	uint32_t dirent_fifo_capacity;
+	uint32_t dirent_fifo_count;
+
+	uint64_t inode_bytes_total;
+	uint64_t inode_bytes_used;
+	uint32_t inode_unit_bytes;
+	uint32_t inode_fifo_capacity;
+	uint32_t inode_fifo_count;
 #endif
 };
 

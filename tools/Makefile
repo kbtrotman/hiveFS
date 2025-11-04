@@ -2,7 +2,7 @@ CC      := gcc
 CFLAGS  := -std=gnu11 -Wall -Wextra -g
 LDFLAGS :=
 
-TOOLS := mkcache.hifs get-size
+TOOLS := mkcache.hifs get-size lscache
 
 .PHONY: all clean mkfs getsize
 
@@ -22,6 +22,12 @@ mkcache.hifs.o: mkcache.hifs.c tools.h
 	$(CC) $(CFLAGS) -c $< -o $@
 
 get-size.o: get-size.c
+	$(CC) $(CFLAGS) -c $< -o $@
+
+lscache: lscache.o
+	$(CC) $(LDFLAGS) $^ -o $@
+
+lscache.o: lscache.c tools.h
 	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:
