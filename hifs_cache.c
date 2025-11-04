@@ -157,6 +157,38 @@ static inline u64 hifs_cache_now(void)
     return ktime_get_coarse_ns();
 }
 
+void hifs_cache_get_stats(struct hifs_cache_status *status)
+{
+    struct hifs_cache_ctx *ctx;
+
+    if (!status)
+        return;
+
+    memset(status, 0, sizeof(*status));
+
+    ctx = g_cache_ctx;
+    if (!ctx)
+        return;
+
+    status->block_bytes_total = ctx->block_bytes_total;
+    status->block_bytes_used = ctx->block_bytes_used;
+    status->block_unit_bytes = ctx->block_unit_bytes;
+    status->block_fifo_capacity = ctx->block_fifo.capacity;
+    status->block_fifo_count = ctx->block_fifo.count;
+
+    status->dirent_bytes_total = ctx->dirent_bytes_total;
+    status->dirent_bytes_used = ctx->dirent_bytes_used;
+    status->dirent_unit_bytes = ctx->dirent_unit_bytes;
+    status->dirent_fifo_capacity = ctx->dirent_fifo.capacity;
+    status->dirent_fifo_count = ctx->dirent_fifo.count;
+
+    status->inode_bytes_total = ctx->inode_bytes_total;
+    status->inode_bytes_used = ctx->inode_bytes_used;
+    status->inode_unit_bytes = ctx->inode_unit_bytes;
+    status->inode_fifo_capacity = ctx->inode_fifo.capacity;
+    status->inode_fifo_count = ctx->inode_fifo.count;
+}
+
 static struct hifs_cache_fifo *hifs_cache_fifo_get(struct hifs_cache_ctx *ctx,
                                                    enum hifs_cache_resource res)
 {

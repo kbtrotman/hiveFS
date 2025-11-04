@@ -110,6 +110,15 @@ int hicomm_comm_get_status(int fd, struct hifs_comm_status *status)
     return hifs_comm_ioctl_common(fd, HIFS_IOCTL_STATUS, status);
 }
 
+int hicomm_comm_get_cache_status(int fd, struct hifs_cache_status *status)
+{
+	if (!status)
+		return -EINVAL;
+
+	memset(status, 0, sizeof(*status));
+	return hifs_comm_ioctl_common(fd, HIFS_IOCTL_CACHE_STATUS, status);
+}
+
 int hicomm_comm_send_cmd(int fd, const struct hifs_cmds *cmd)
 {
 	if (!cmd)
