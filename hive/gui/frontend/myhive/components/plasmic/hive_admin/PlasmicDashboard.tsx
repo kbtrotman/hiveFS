@@ -67,9 +67,13 @@ import {
   usePlasmicInvalidate
 } from "@plasmicapp/react-web/lib/data-sources";
 
+import TextField from "../../TextField"; // plasmic-import: OfVdG6fCBlg2/component
+import { AntdButton } from "@plasmicpkgs/antd5/skinny/registerButton";
+import { RichTable } from "@plasmicpkgs/plasmic-rich-components/skinny/rich-table";
+import { tableHelpers as RichTable_Helpers } from "@plasmicpkgs/plasmic-rich-components/skinny/rich-table";
 import { AntdDirectoryTree } from "@plasmicpkgs/antd5/skinny/registerTree";
 import { treeHelpers as AntdDirectoryTree_Helpers } from "@plasmicpkgs/antd5/skinny/registerTree";
-import { DataFetcher } from "@plasmicpkgs/plasmic-query";
+import { AntdSelect } from "@plasmicpkgs/antd5/skinny/registerSelect";
 import { Fetcher } from "@plasmicapp/react-web/lib/data-sources";
 import { _useGlobalVariants } from "./plasmic"; // plasmic-import: c8gT28iq7v39gxBJ6CcbGP/projectModule
 import { _useStyleTokens } from "./PlasmicStyleTokensProvider"; // plasmic-import: c8gT28iq7v39gxBJ6CcbGP/styleTokensProvider
@@ -78,6 +82,8 @@ import "@plasmicapp/react-web/lib/plasmic.css";
 
 import projectcss from "./plasmic.module.css"; // plasmic-import: c8gT28iq7v39gxBJ6CcbGP/projectcss
 import sty from "./PlasmicDashboard.module.css"; // plasmic-import: PylZ-UK7gSPz/css
+
+import CircleIcon from "./icons/PlasmicIcon__Circle"; // plasmic-import: 1y_RXGc1d4jh/icon
 
 createPlasmicElementProxy;
 
@@ -92,8 +98,11 @@ export const PlasmicDashboard__ArgProps = new Array<ArgPropType>();
 
 export type PlasmicDashboard__OverridesType = {
   dashboard?: Flex__<"div">;
+  textField?: Flex__<typeof TextField>;
+  svg?: Flex__<"svg">;
+  table?: Flex__<typeof RichTable>;
   directoryTree?: Flex__<typeof AntdDirectoryTree>;
-  httpRestApiFetcher?: Flex__<typeof DataFetcher>;
+  select?: Flex__<typeof AntdSelect>;
 };
 
 export interface DefaultDashboardProps {}
@@ -136,6 +145,8 @@ function PlasmicDashboard__RenderFunc(props: {
   const $ctx = useDataEnv?.() || {};
   const refsRef = React.useRef({});
   const $refs = refsRef.current;
+
+  const globalVariants = _useGlobalVariants();
 
   const currentUser = useCurrentUser?.() || {};
 
@@ -212,6 +223,50 @@ function PlasmicDashboard__RenderFunc(props: {
           "expandedKeys",
           AntdDirectoryTree_Helpers
         )
+      },
+      {
+        path: "textField.value",
+        type: "private",
+        variableType: "text",
+        initFunc: ({ $props, $state, $queries, $ctx }) => undefined
+      },
+      {
+        path: "select.value",
+        type: "private",
+        variableType: "text",
+        initFunc: ({ $props, $state, $queries, $ctx }) => undefined
+      },
+      {
+        path: "table.selectedRowKey",
+        type: "private",
+        variableType: "text",
+        initFunc: ({ $props, $state, $queries, $ctx }) => undefined,
+
+        onMutate: generateOnMutateForSpec("selectedRowKey", RichTable_Helpers)
+      },
+      {
+        path: "table.selectedRow",
+        type: "private",
+        variableType: "object",
+        initFunc: ({ $props, $state, $queries, $ctx }) => undefined,
+
+        onMutate: generateOnMutateForSpec("selectedRow", RichTable_Helpers)
+      },
+      {
+        path: "table.selectedRows",
+        type: "private",
+        variableType: "array",
+        initFunc: ({ $props, $state, $queries, $ctx }) => undefined,
+
+        onMutate: generateOnMutateForSpec("selectedRows", RichTable_Helpers)
+      },
+      {
+        path: "table.selectedRowKeys",
+        type: "private",
+        variableType: "array",
+        initFunc: ({ $props, $state, $queries, $ctx }) => undefined,
+
+        onMutate: generateOnMutateForSpec("selectedRowKeys", RichTable_Helpers)
       }
     ],
     [$props, $ctx, $refs]
@@ -473,212 +528,515 @@ function PlasmicDashboard__RenderFunc(props: {
             sty.dashboard
           )}
         >
-          <div className={classNames(projectcss.all, sty.freeBox___3Ry9N)}>
-            <div className={classNames(projectcss.all, sty.freeBox___2Z59)}>
-              {(() => {
-                const child$Props = {
-                  autoExpandParent: true,
-                  checkable: false,
-                  checkedKeys: generateStateValueProp($state, [
-                    "directoryTree",
-                    "checkedKeys"
-                  ]),
-                  className: classNames("__wab_instance", sty.directoryTree),
-                  defaultExpandAll: true,
-                  expandedKeys: generateStateValueProp($state, [
-                    "directoryTree",
-                    "expandedKeys"
-                  ]),
-                  onCheck: async (...eventArgs: any) => {
-                    generateStateOnChangePropForCodeComponents(
-                      $state,
-                      "checkedKeys",
-                      ["directoryTree", "checkedKeys"],
-                      AntdDirectoryTree_Helpers
-                    ).apply(null, eventArgs);
-                    generateStateOnChangePropForCodeComponents(
-                      $state,
-                      "checkedNodes",
-                      ["directoryTree", "checkedNodes"],
-                      AntdDirectoryTree_Helpers
-                    ).apply(null, eventArgs);
-                    generateStateOnChangePropForCodeComponents(
-                      $state,
-                      "checkedDetails",
-                      ["directoryTree", "checkedDetails"],
-                      AntdDirectoryTree_Helpers
-                    ).apply(null, eventArgs);
-                  },
-                  onExpand: async (...eventArgs: any) => {
-                    generateStateOnChangePropForCodeComponents(
-                      $state,
-                      "expandedKeys",
-                      ["directoryTree", "expandedKeys"],
-                      AntdDirectoryTree_Helpers
-                    ).apply(null, eventArgs);
-                  },
-                  onSelect: async (...eventArgs: any) => {
-                    generateStateOnChangePropForCodeComponents(
-                      $state,
-                      "selectedKeys",
-                      ["directoryTree", "selectedKeys"],
-                      AntdDirectoryTree_Helpers
-                    ).apply(null, eventArgs);
-                    generateStateOnChangePropForCodeComponents(
-                      $state,
-                      "selectedNodes",
-                      ["directoryTree", "selectedNodes"],
-                      AntdDirectoryTree_Helpers
-                    ).apply(null, eventArgs);
-                  },
-                  selectedKeys: generateStateValueProp($state, [
-                    "directoryTree",
-                    "selectedKeys"
-                  ]),
-                  titleRender: (node: any) => (
-                    <DataFetcher
-                      data-plasmic-name={"httpRestApiFetcher"}
-                      data-plasmic-override={overrides.httpRestApiFetcher}
-                      className={classNames(
-                        "__wab_instance",
-                        sty.httpRestApiFetcher
-                      )}
-                      dataName={"fetchedData"}
-                      errorDisplay={
-                        <DataCtxReader__>
-                          {$ctx => "Error fetching data"}
-                        </DataCtxReader__>
-                      }
-                      errorName={"fetchError"}
-                      loadingDisplay={
-                        <DataCtxReader__>
-                          {$ctx => "Loading..."}
-                        </DataCtxReader__>
-                      }
-                      method={"GET"}
-                      noLayout={false}
-                      url={"https://api.github.com/users/plasmicapp/repos"}
-                    />
-                  ),
+          <div className={classNames(projectcss.all, sty.freeBox___7XcWx)}>
+            <PlasmicImg__
+              alt={""}
+              className={classNames(sty.img__tqu9N)}
+              displayHeight={"38px"}
+              displayMaxHeight={"none"}
+              displayMaxWidth={"100%"}
+              displayMinHeight={"0"}
+              displayMinWidth={"0"}
+              displayWidth={"auto"}
+              loading={"lazy"}
+              src={{
+                src: "/plasmic/hive_admin/images/image11.svg",
+                fullWidth: 150,
+                fullHeight: 150,
+                aspectRatio: 1
+              }}
+            />
 
-                  treeData: [
-                    {
-                      title: "Node 0",
-                      key: "0",
-                      children: [
-                        {
-                          title: "Node 0-0",
-                          key: "0-0",
-                          children: [
-                            {
-                              title: "Node 0-0-0",
-                              key: "0-0-0",
-                              disableCheckbox: true
-                            },
-                            {
-                              title: "Node 0-0-1",
-                              key: "0-0-1",
-                              disabled: true
-                            },
-                            { title: "Node 0-0-2", key: "0-0-2" }
-                          ]
-                        },
-                        {
-                          title: "Node 0-1",
-                          key: "0-1",
-                          children: [
-                            { title: "Node 0-1-0", key: "0-1-0" },
-                            { title: "Node 0-1-1", key: "0-1-1" }
-                          ]
-                        }
-                      ]
-                    }
-                  ]
-                };
-                initializeCodeComponentStates(
-                  $state,
-                  [
-                    {
-                      name: "checkedKeys",
-                      plasmicStateName: "directoryTree.checkedKeys"
-                    },
-                    {
-                      name: "checkedNodes",
-                      plasmicStateName: "directoryTree.checkedNodes"
-                    },
-                    {
-                      name: "checkedDetails",
-                      plasmicStateName: "directoryTree.checkedDetails"
-                    },
-                    {
-                      name: "selectedKeys",
-                      plasmicStateName: "directoryTree.selectedKeys"
-                    },
-                    {
-                      name: "selectedNodes",
-                      plasmicStateName: "directoryTree.selectedNodes"
-                    },
-                    {
-                      name: "expandedKeys",
-                      plasmicStateName: "directoryTree.expandedKeys"
-                    }
-                  ],
-                  [],
-                  AntdDirectoryTree_Helpers ?? {},
-                  child$Props
+            <PlasmicImg__
+              alt={""}
+              className={classNames(sty.img__rKQy0)}
+              displayHeight={"38px"}
+              displayMaxHeight={"none"}
+              displayMaxWidth={"100%"}
+              displayMinHeight={"0"}
+              displayMinWidth={"0"}
+              displayWidth={"auto"}
+              loading={"lazy"}
+              src={{
+                src: "/plasmic/hive_admin/images/image12.svg",
+                fullWidth: 150,
+                fullHeight: 150,
+                aspectRatio: 1
+              }}
+            />
+          </div>
+          <div className={classNames(projectcss.all, sty.freeBox__apFbP)}>
+            <PlasmicImg__
+              alt={""}
+              className={classNames(sty.img__uyofo)}
+              displayHeight={"38px"}
+              displayMaxHeight={"none"}
+              displayMaxWidth={"100%"}
+              displayMinHeight={"0"}
+              displayMinWidth={"0"}
+              displayWidth={"auto"}
+              loading={"lazy"}
+              src={{
+                src: "/plasmic/hive_admin/images/image11.svg",
+                fullWidth: 150,
+                fullHeight: 150,
+                aspectRatio: 1
+              }}
+            />
+
+            <PlasmicImg__
+              alt={""}
+              className={classNames(sty.img__hjl0D)}
+              displayHeight={"38px"}
+              displayMaxHeight={"none"}
+              displayMaxWidth={"100%"}
+              displayMinHeight={"0"}
+              displayMinWidth={"0"}
+              displayWidth={"auto"}
+              loading={"lazy"}
+              src={{
+                src: "/plasmic/hive_admin/images/image15.svg",
+                fullWidth: 150,
+                fullHeight: 150,
+                aspectRatio: 1
+              }}
+            />
+
+            <PlasmicImg__
+              alt={""}
+              className={classNames(sty.img__kKm5Q)}
+              displayHeight={"38px"}
+              displayMaxHeight={"none"}
+              displayMaxWidth={"100%"}
+              displayMinHeight={"0"}
+              displayMinWidth={"0"}
+              displayWidth={"auto"}
+              loading={"lazy"}
+              src={{
+                src: "/plasmic/hive_admin/images/image15.svg",
+                fullWidth: 150,
+                fullHeight: 150,
+                aspectRatio: 1
+              }}
+            />
+
+            <TextField
+              data-plasmic-name={"textField"}
+              data-plasmic-override={overrides.textField}
+              className={classNames("__wab_instance", sty.textField)}
+              inputMode={"search"}
+              label={
+                <div
+                  className={classNames(
+                    projectcss.all,
+                    projectcss.__wab_text,
+                    sty.text__kz21U
+                  )}
+                >
+                  {"Label"}
+                </div>
+              }
+              onChange={async (...eventArgs: any) => {
+                generateStateOnChangeProp($state, ["textField", "value"]).apply(
+                  null,
+                  eventArgs
                 );
 
-                return (
-                  <AntdDirectoryTree
-                    data-plasmic-name={"directoryTree"}
-                    data-plasmic-override={overrides.directoryTree}
-                    {...child$Props}
-                  />
+                if (
+                  eventArgs.length > 1 &&
+                  eventArgs[1] &&
+                  eventArgs[1]._plasmic_state_init_
+                ) {
+                  return;
+                }
+              }}
+              placeholder={"Search"}
+              type={"search"}
+              value={generateStateValueProp($state, ["textField", "value"])}
+            />
+
+            <CircleIcon
+              data-plasmic-name={"svg"}
+              data-plasmic-override={overrides.svg}
+              className={classNames(projectcss.all, sty.svg)}
+              role={"img"}
+            />
+
+            <AntdButton
+              className={classNames("__wab_instance", sty.button___0Ex9N)}
+            >
+              <div
+                className={classNames(
+                  projectcss.all,
+                  projectcss.__wab_text,
+                  sty.text__ak21
+                )}
+              >
+                {"Dashboards"}
+              </div>
+            </AntdButton>
+            <AntdButton
+              className={classNames("__wab_instance", sty.button__wqkTh)}
+            >
+              <div
+                className={classNames(
+                  projectcss.all,
+                  projectcss.__wab_text,
+                  sty.text__h9OZ9
+                )}
+              >
+                {"Actions"}
+              </div>
+            </AntdButton>
+            <AntdButton
+              className={classNames("__wab_instance", sty.button__gpy4Q)}
+            >
+              <div
+                className={classNames(
+                  projectcss.all,
+                  projectcss.__wab_text,
+                  sty.text__umVcf
+                )}
+              >
+                {"Logs"}
+              </div>
+            </AntdButton>
+            <AntdButton
+              className={classNames("__wab_instance", sty.button___6TTuu)}
+            >
+              <div
+                className={classNames(
+                  projectcss.all,
+                  projectcss.__wab_text,
+                  sty.text__rps2Z
+                )}
+              >
+                {"Reports"}
+              </div>
+            </AntdButton>
+          </div>
+          <div className={classNames(projectcss.all, sty.freeBox__i3Qsa)}>
+            <PlasmicLink__
+              className={classNames(
+                projectcss.all,
+                projectcss.a,
+                projectcss.__wab_text,
+                sty.link__zSb2D
+              )}
+              component={Link}
+              href={"https://www.plasmic.app/"}
+              platform={"nextjs"}
+            >
+              {"Files"}
+            </PlasmicLink__>
+            <PlasmicLink__
+              className={classNames(
+                projectcss.all,
+                projectcss.a,
+                projectcss.__wab_text,
+                sty.link___8KqsW
+              )}
+              component={Link}
+              href={"https://www.plasmic.app/"}
+              platform={"nextjs"}
+            >
+              {"Hosts"}
+            </PlasmicLink__>
+            <PlasmicLink__
+              className={classNames(
+                projectcss.all,
+                projectcss.a,
+                projectcss.__wab_text,
+                sty.link__g4Kar
+              )}
+              component={Link}
+              href={"https://www.plasmic.app/"}
+              platform={"nextjs"}
+            >
+              {"Solitaries"}
+            </PlasmicLink__>
+            <PlasmicLink__
+              className={classNames(
+                projectcss.all,
+                projectcss.a,
+                projectcss.__wab_text,
+                sty.link__xLp8N
+              )}
+              component={Link}
+              href={"https://www.plasmic.app/"}
+              platform={"nextjs"}
+            >
+              {"Tennants"}
+            </PlasmicLink__>
+          </div>
+          <div className={classNames(projectcss.all, sty.freeBox__oRyBh)}>
+            {(() => {
+              const child$Props = {
+                canSelectRows: "click",
+                className: classNames("__wab_instance", sty.table),
+                onRowSelectionChanged: async (...eventArgs: any) => {
+                  generateStateOnChangePropForCodeComponents(
+                    $state,
+                    "selectedRowKey",
+                    ["table", "selectedRowKey"],
+                    RichTable_Helpers
+                  ).apply(null, eventArgs);
+                  generateStateOnChangePropForCodeComponents(
+                    $state,
+                    "selectedRow",
+                    ["table", "selectedRow"],
+                    RichTable_Helpers
+                  ).apply(null, eventArgs);
+                  generateStateOnChangePropForCodeComponents(
+                    $state,
+                    "selectedRows",
+                    ["table", "selectedRows"],
+                    RichTable_Helpers
+                  ).apply(null, eventArgs);
+                  generateStateOnChangePropForCodeComponents(
+                    $state,
+                    "selectedRowKeys",
+                    ["table", "selectedRowKeys"],
+                    RichTable_Helpers
+                  ).apply(null, eventArgs);
+                },
+                scopeClassName: sty["table__instance"],
+                selectedRowKey: generateStateValueProp($state, [
+                  "table",
+                  "selectedRowKey"
+                ]),
+                selectedRowKeys: generateStateValueProp($state, [
+                  "table",
+                  "selectedRowKeys"
+                ]),
+                themeResetClassName: classNames(
+                  projectcss.root_reset,
+                  projectcss.root_reset_tags,
+                  projectcss.plasmic_default_styles,
+                  projectcss.plasmic_mixins,
+                  styleTokensClassNames
+                )
+              };
+              initializeCodeComponentStates(
+                $state,
+                [
+                  {
+                    name: "selectedRowKey",
+                    plasmicStateName: "table.selectedRowKey"
+                  },
+                  {
+                    name: "selectedRow",
+                    plasmicStateName: "table.selectedRow"
+                  },
+                  {
+                    name: "selectedRows",
+                    plasmicStateName: "table.selectedRows"
+                  },
+                  {
+                    name: "selectedRowKeys",
+                    plasmicStateName: "table.selectedRowKeys"
+                  }
+                ],
+                [],
+                RichTable_Helpers ?? {},
+                child$Props
+              );
+
+              return (
+                <RichTable
+                  data-plasmic-name={"table"}
+                  data-plasmic-override={overrides.table}
+                  {...child$Props}
+                />
+              );
+            })()}
+          </div>
+          <div className={classNames(projectcss.all, sty.freeBox__apTkU)} />
+
+          <div className={classNames(projectcss.all, sty.freeBox__lg0Jy)}>
+            {(() => {
+              const child$Props = {
+                autoExpandParent: true,
+                checkable: false,
+                checkedKeys: generateStateValueProp($state, [
+                  "directoryTree",
+                  "checkedKeys"
+                ]),
+                className: classNames("__wab_instance", sty.directoryTree),
+                defaultExpandAll: true,
+                expandedKeys: generateStateValueProp($state, [
+                  "directoryTree",
+                  "expandedKeys"
+                ]),
+                onCheck: async (...eventArgs: any) => {
+                  generateStateOnChangePropForCodeComponents(
+                    $state,
+                    "checkedKeys",
+                    ["directoryTree", "checkedKeys"],
+                    AntdDirectoryTree_Helpers
+                  ).apply(null, eventArgs);
+                  generateStateOnChangePropForCodeComponents(
+                    $state,
+                    "checkedNodes",
+                    ["directoryTree", "checkedNodes"],
+                    AntdDirectoryTree_Helpers
+                  ).apply(null, eventArgs);
+                  generateStateOnChangePropForCodeComponents(
+                    $state,
+                    "checkedDetails",
+                    ["directoryTree", "checkedDetails"],
+                    AntdDirectoryTree_Helpers
+                  ).apply(null, eventArgs);
+                },
+                onExpand: async (...eventArgs: any) => {
+                  generateStateOnChangePropForCodeComponents(
+                    $state,
+                    "expandedKeys",
+                    ["directoryTree", "expandedKeys"],
+                    AntdDirectoryTree_Helpers
+                  ).apply(null, eventArgs);
+                },
+                onSelect: async (...eventArgs: any) => {
+                  generateStateOnChangePropForCodeComponents(
+                    $state,
+                    "selectedKeys",
+                    ["directoryTree", "selectedKeys"],
+                    AntdDirectoryTree_Helpers
+                  ).apply(null, eventArgs);
+                  generateStateOnChangePropForCodeComponents(
+                    $state,
+                    "selectedNodes",
+                    ["directoryTree", "selectedNodes"],
+                    AntdDirectoryTree_Helpers
+                  ).apply(null, eventArgs);
+                },
+                selectedKeys: generateStateValueProp($state, [
+                  "directoryTree",
+                  "selectedKeys"
+                ]),
+                treeData: [
+                  {
+                    title: "Node 0",
+                    key: "0",
+                    children: [
+                      {
+                        title: "Node 0-0",
+                        key: "0-0",
+                        children: [
+                          {
+                            title: "Node 0-0-0",
+                            key: "0-0-0",
+                            disableCheckbox: true
+                          },
+                          { title: "Node 0-0-1", key: "0-0-1", disabled: true },
+                          { title: "Node 0-0-2", key: "0-0-2" }
+                        ]
+                      },
+                      {
+                        title: "Node 0-1",
+                        key: "0-1",
+                        children: [
+                          { title: "Node 0-1-0", key: "0-1-0" },
+                          { title: "Node 0-1-1", key: "0-1-1" }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              };
+              initializeCodeComponentStates(
+                $state,
+                [
+                  {
+                    name: "checkedKeys",
+                    plasmicStateName: "directoryTree.checkedKeys"
+                  },
+                  {
+                    name: "checkedNodes",
+                    plasmicStateName: "directoryTree.checkedNodes"
+                  },
+                  {
+                    name: "checkedDetails",
+                    plasmicStateName: "directoryTree.checkedDetails"
+                  },
+                  {
+                    name: "selectedKeys",
+                    plasmicStateName: "directoryTree.selectedKeys"
+                  },
+                  {
+                    name: "selectedNodes",
+                    plasmicStateName: "directoryTree.selectedNodes"
+                  },
+                  {
+                    name: "expandedKeys",
+                    plasmicStateName: "directoryTree.expandedKeys"
+                  }
+                ],
+                [],
+                AntdDirectoryTree_Helpers ?? {},
+                child$Props
+              );
+
+              return (
+                <AntdDirectoryTree
+                  data-plasmic-name={"directoryTree"}
+                  data-plasmic-override={overrides.directoryTree}
+                  {...child$Props}
+                />
+              );
+            })()}
+            <AntdSelect
+              data-plasmic-name={"select"}
+              data-plasmic-override={overrides.select}
+              className={classNames("__wab_instance", sty.select)}
+              defaultStylesClassName={classNames(
+                projectcss.root_reset,
+                projectcss.plasmic_default_styles,
+                projectcss.plasmic_mixins,
+                styleTokensClassNames
+              )}
+              onChange={async (...eventArgs: any) => {
+                generateStateOnChangeProp($state, ["select", "value"]).apply(
+                  null,
+                  eventArgs
                 );
+              }}
+              options={(() => {
+                const __composite = [
+                  { type: "option", value: null, label: null },
+                  { value: null, label: null, type: "option" },
+                  { value: null, label: null, type: null },
+                  { type: "option", value: null, label: null }
+                ];
+                __composite["0"]["value"] = "3";
+                __composite["0"]["label"] = "3 Dir Layers";
+                __composite["1"]["value"] = "4";
+                __composite["1"]["label"] = "4 Dir Layers";
+                __composite["2"]["value"] = "5";
+                __composite["2"]["label"] = "6 Dir Layers";
+                __composite["2"]["type"] = "option";
+                __composite["3"]["value"] = "6";
+                __composite["3"]["label"] = "6 Dir Layers";
+                return __composite;
               })()}
-            </div>
-            <div className={classNames(projectcss.all, sty.freeBox__n7CN)} />
+              placeholder={"Select Num of Levels..."}
+              popupScopeClassName={sty["select__popup"]}
+              value={generateStateValueProp($state, ["select", "value"])}
+            />
 
-            <div className={classNames(projectcss.all, sty.freeBox___521Ra)} />
-
-            <div className={classNames(projectcss.all, sty.freeBox__nUkfg)}>
-              <PlasmicImg__
-                alt={""}
-                className={classNames(sty.img___6NJdO)}
-                displayHeight={"31px"}
-                displayMaxHeight={"none"}
-                displayMaxWidth={"100%"}
-                displayMinHeight={"0"}
-                displayMinWidth={"0"}
-                displayWidth={"auto"}
-                loading={"lazy"}
-                src={{
-                  src: "/plasmic/hive_admin/images/image11.svg",
-                  fullWidth: 150,
-                  fullHeight: 150,
-                  aspectRatio: 1
-                }}
-              />
-            </div>
-            <div className={classNames(projectcss.all, sty.freeBox__j0Ret)}>
-              <PlasmicImg__
-                alt={""}
-                className={classNames(sty.img___0Rg9E)}
-                displayHeight={"33px"}
-                displayMaxHeight={"none"}
-                displayMaxWidth={"100%"}
-                displayMinHeight={"0"}
-                displayMinWidth={"0"}
-                displayWidth={"43px"}
-                loading={"lazy"}
-                src={{
-                  src: "/plasmic/hive_admin/images/image17.png",
-                  fullWidth: 681,
-                  fullHeight: 844,
-                  aspectRatio: undefined
-                }}
-              />
-            </div>
+            <PlasmicLink__
+              className={classNames(
+                projectcss.all,
+                projectcss.a,
+                projectcss.__wab_text,
+                sty.link__rsKzz
+              )}
+              component={Link}
+              href={"https://www.plasmic.app/"}
+              platform={"nextjs"}
+            >
+              {"Path: / Global Root / "}
+            </PlasmicLink__>
           </div>
         </div>
       </div>
@@ -687,17 +1045,30 @@ function PlasmicDashboard__RenderFunc(props: {
 }
 
 const PlasmicDescendants = {
-  dashboard: ["dashboard", "directoryTree", "httpRestApiFetcher"],
-  directoryTree: ["directoryTree", "httpRestApiFetcher"],
-  httpRestApiFetcher: ["httpRestApiFetcher"]
+  dashboard: [
+    "dashboard",
+    "textField",
+    "svg",
+    "table",
+    "directoryTree",
+    "select"
+  ],
+  textField: ["textField"],
+  svg: ["svg"],
+  table: ["table"],
+  directoryTree: ["directoryTree"],
+  select: ["select"]
 } as const;
 type NodeNameType = keyof typeof PlasmicDescendants;
 type DescendantsType<T extends NodeNameType> =
   (typeof PlasmicDescendants)[T][number];
 type NodeDefaultElementType = {
   dashboard: "div";
+  textField: typeof TextField;
+  svg: "svg";
+  table: typeof RichTable;
   directoryTree: typeof AntdDirectoryTree;
-  httpRestApiFetcher: typeof DataFetcher;
+  select: typeof AntdSelect;
 };
 
 type ReservedPropsType = "variants" | "args" | "overrides";
@@ -787,8 +1158,11 @@ export const PlasmicDashboard = Object.assign(
   withUsePlasmicAuth(makeNodeComponent("dashboard")),
   {
     // Helper components rendering sub-elements
+    textField: makeNodeComponent("textField"),
+    svg: makeNodeComponent("svg"),
+    table: makeNodeComponent("table"),
     directoryTree: makeNodeComponent("directoryTree"),
-    httpRestApiFetcher: makeNodeComponent("httpRestApiFetcher"),
+    select: makeNodeComponent("select"),
 
     // Metadata about props expected for PlasmicDashboard
     internalVariantProps: PlasmicDashboard__VariantProps,

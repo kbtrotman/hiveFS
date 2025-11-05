@@ -17,6 +17,7 @@
     "@plasmicpkgs/plasmic-basic-components": "^0.0.256",
     "@plasmicpkgs/plasmic-query": "^0.0.247",
     "@plasmicpkgs/plasmic-rich-components": "^1.0.224",
+    "@plasmicpkgs/react-aria": "^0.0.155",
     "@plasmicpkgs/react-chartjs-2": "^1.0.138",
     "chart.js": "^4.5.1",
     "next": "14.2.33",
