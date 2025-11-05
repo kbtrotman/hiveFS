@@ -67,6 +67,9 @@ import {
   usePlasmicInvalidate
 } from "@plasmicapp/react-web/lib/data-sources";
 
+import { AntdDirectoryTree } from "@plasmicpkgs/antd5/skinny/registerTree";
+import { treeHelpers as AntdDirectoryTree_Helpers } from "@plasmicpkgs/antd5/skinny/registerTree";
+import { DataFetcher } from "@plasmicpkgs/plasmic-query";
 import { Fetcher } from "@plasmicapp/react-web/lib/data-sources";
 import { _useGlobalVariants } from "./plasmic"; // plasmic-import: c8gT28iq7v39gxBJ6CcbGP/projectModule
 import { _useStyleTokens } from "./PlasmicStyleTokensProvider"; // plasmic-import: c8gT28iq7v39gxBJ6CcbGP/styleTokensProvider
@@ -89,6 +92,8 @@ export const PlasmicDashboard__ArgProps = new Array<ArgPropType>();
 
 export type PlasmicDashboard__OverridesType = {
   dashboard?: Flex__<"div">;
+  directoryTree?: Flex__<typeof AntdDirectoryTree>;
+  httpRestApiFetcher?: Flex__<typeof DataFetcher>;
 };
 
 export interface DefaultDashboardProps {}
@@ -137,6 +142,86 @@ function PlasmicDashboard__RenderFunc(props: {
   let [$queries, setDollarQueries] = React.useState<
     Record<string, ReturnType<typeof usePlasmicDataOp>>
   >({});
+  const stateSpecs: Parameters<typeof useDollarState>[0] = React.useMemo(
+    () => [
+      {
+        path: "directoryTree.checkedKeys",
+        type: "private",
+        variableType: "array",
+        initFunc: ({ $props, $state, $queries, $ctx }) => undefined,
+
+        onMutate: generateOnMutateForSpec(
+          "checkedKeys",
+          AntdDirectoryTree_Helpers
+        )
+      },
+      {
+        path: "directoryTree.checkedNodes",
+        type: "private",
+        variableType: "array",
+        initFunc: ({ $props, $state, $queries, $ctx }) => [],
+
+        onMutate: generateOnMutateForSpec(
+          "checkedNodes",
+          AntdDirectoryTree_Helpers
+        )
+      },
+      {
+        path: "directoryTree.checkedDetails",
+        type: "private",
+        variableType: "object",
+        initFunc: ({ $props, $state, $queries, $ctx }) => ({
+          checkedNodesPositions: [],
+          halfCheckedKeys: []
+        }),
+
+        onMutate: generateOnMutateForSpec(
+          "checkedDetails",
+          AntdDirectoryTree_Helpers
+        )
+      },
+      {
+        path: "directoryTree.selectedKeys",
+        type: "private",
+        variableType: "array",
+        initFunc: ({ $props, $state, $queries, $ctx }) => undefined,
+
+        onMutate: generateOnMutateForSpec(
+          "selectedKeys",
+          AntdDirectoryTree_Helpers
+        )
+      },
+      {
+        path: "directoryTree.selectedNodes",
+        type: "private",
+        variableType: "array",
+        initFunc: ({ $props, $state, $queries, $ctx }) => [],
+
+        onMutate: generateOnMutateForSpec(
+          "selectedNodes",
+          AntdDirectoryTree_Helpers
+        )
+      },
+      {
+        path: "directoryTree.expandedKeys",
+        type: "private",
+        variableType: "array",
+        initFunc: ({ $props, $state, $queries, $ctx }) => undefined,
+
+        onMutate: generateOnMutateForSpec(
+          "expandedKeys",
+          AntdDirectoryTree_Helpers
+        )
+      }
+    ],
+    [$props, $ctx, $refs]
+  );
+  const $state = useDollarState(stateSpecs, {
+    $props,
+    $ctx,
+    $queries: $queries,
+    $refs
+  });
 
   const new$Queries: Record<string, ReturnType<typeof usePlasmicDataOp>> = {
     totalUsersByMonthCustomRange: usePlasmicDataOp(() => {
@@ -389,11 +474,211 @@ function PlasmicDashboard__RenderFunc(props: {
           )}
         >
           <div className={classNames(projectcss.all, sty.freeBox___3Ry9N)}>
-            <div className={classNames(projectcss.all, sty.freeBox__aZc3V)} />
+            <div className={classNames(projectcss.all, sty.freeBox___2Z59)}>
+              {(() => {
+                const child$Props = {
+                  autoExpandParent: true,
+                  checkable: false,
+                  checkedKeys: generateStateValueProp($state, [
+                    "directoryTree",
+                    "checkedKeys"
+                  ]),
+                  className: classNames("__wab_instance", sty.directoryTree),
+                  defaultExpandAll: true,
+                  expandedKeys: generateStateValueProp($state, [
+                    "directoryTree",
+                    "expandedKeys"
+                  ]),
+                  onCheck: async (...eventArgs: any) => {
+                    generateStateOnChangePropForCodeComponents(
+                      $state,
+                      "checkedKeys",
+                      ["directoryTree", "checkedKeys"],
+                      AntdDirectoryTree_Helpers
+                    ).apply(null, eventArgs);
+                    generateStateOnChangePropForCodeComponents(
+                      $state,
+                      "checkedNodes",
+                      ["directoryTree", "checkedNodes"],
+                      AntdDirectoryTree_Helpers
+                    ).apply(null, eventArgs);
+                    generateStateOnChangePropForCodeComponents(
+                      $state,
+                      "checkedDetails",
+                      ["directoryTree", "checkedDetails"],
+                      AntdDirectoryTree_Helpers
+                    ).apply(null, eventArgs);
+                  },
+                  onExpand: async (...eventArgs: any) => {
+                    generateStateOnChangePropForCodeComponents(
+                      $state,
+                      "expandedKeys",
+                      ["directoryTree", "expandedKeys"],
+                      AntdDirectoryTree_Helpers
+                    ).apply(null, eventArgs);
+                  },
+                  onSelect: async (...eventArgs: any) => {
+                    generateStateOnChangePropForCodeComponents(
+                      $state,
+                      "selectedKeys",
+                      ["directoryTree", "selectedKeys"],
+                      AntdDirectoryTree_Helpers
+                    ).apply(null, eventArgs);
+                    generateStateOnChangePropForCodeComponents(
+                      $state,
+                      "selectedNodes",
+                      ["directoryTree", "selectedNodes"],
+                      AntdDirectoryTree_Helpers
+                    ).apply(null, eventArgs);
+                  },
+                  selectedKeys: generateStateValueProp($state, [
+                    "directoryTree",
+                    "selectedKeys"
+                  ]),
+                  titleRender: (node: any) => (
+                    <DataFetcher
+                      data-plasmic-name={"httpRestApiFetcher"}
+                      data-plasmic-override={overrides.httpRestApiFetcher}
+                      className={classNames(
+                        "__wab_instance",
+                        sty.httpRestApiFetcher
+                      )}
+                      dataName={"fetchedData"}
+                      errorDisplay={
+                        <DataCtxReader__>
+                          {$ctx => "Error fetching data"}
+                        </DataCtxReader__>
+                      }
+                      errorName={"fetchError"}
+                      loadingDisplay={
+                        <DataCtxReader__>
+                          {$ctx => "Loading..."}
+                        </DataCtxReader__>
+                      }
+                      method={"GET"}
+                      noLayout={false}
+                      url={"https://api.github.com/users/plasmicapp/repos"}
+                    />
+                  ),
 
-            <div className={classNames(projectcss.all, sty.freeBox___2Z59)} />
+                  treeData: [
+                    {
+                      title: "Node 0",
+                      key: "0",
+                      children: [
+                        {
+                          title: "Node 0-0",
+                          key: "0-0",
+                          children: [
+                            {
+                              title: "Node 0-0-0",
+                              key: "0-0-0",
+                              disableCheckbox: true
+                            },
+                            {
+                              title: "Node 0-0-1",
+                              key: "0-0-1",
+                              disabled: true
+                            },
+                            { title: "Node 0-0-2", key: "0-0-2" }
+                          ]
+                        },
+                        {
+                          title: "Node 0-1",
+                          key: "0-1",
+                          children: [
+                            { title: "Node 0-1-0", key: "0-1-0" },
+                            { title: "Node 0-1-1", key: "0-1-1" }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                };
+                initializeCodeComponentStates(
+                  $state,
+                  [
+                    {
+                      name: "checkedKeys",
+                      plasmicStateName: "directoryTree.checkedKeys"
+                    },
+                    {
+                      name: "checkedNodes",
+                      plasmicStateName: "directoryTree.checkedNodes"
+                    },
+                    {
+                      name: "checkedDetails",
+                      plasmicStateName: "directoryTree.checkedDetails"
+                    },
+                    {
+                      name: "selectedKeys",
+                      plasmicStateName: "directoryTree.selectedKeys"
+                    },
+                    {
+                      name: "selectedNodes",
+                      plasmicStateName: "directoryTree.selectedNodes"
+                    },
+                    {
+                      name: "expandedKeys",
+                      plasmicStateName: "directoryTree.expandedKeys"
+                    }
+                  ],
+                  [],
+                  AntdDirectoryTree_Helpers ?? {},
+                  child$Props
+                );
 
+                return (
+                  <AntdDirectoryTree
+                    data-plasmic-name={"directoryTree"}
+                    data-plasmic-override={overrides.directoryTree}
+                    {...child$Props}
+                  />
+                );
+              })()}
+            </div>
             <div className={classNames(projectcss.all, sty.freeBox__n7CN)} />
+
+            <div className={classNames(projectcss.all, sty.freeBox___521Ra)} />
+
+            <div className={classNames(projectcss.all, sty.freeBox__nUkfg)}>
+              <PlasmicImg__
+                alt={""}
+                className={classNames(sty.img___6NJdO)}
+                displayHeight={"31px"}
+                displayMaxHeight={"none"}
+                displayMaxWidth={"100%"}
+                displayMinHeight={"0"}
+                displayMinWidth={"0"}
+                displayWidth={"auto"}
+                loading={"lazy"}
+                src={{
+                  src: "/plasmic/hive_admin/images/image11.svg",
+                  fullWidth: 150,
+                  fullHeight: 150,
+                  aspectRatio: 1
+                }}
+              />
+            </div>
+            <div className={classNames(projectcss.all, sty.freeBox__j0Ret)}>
+              <PlasmicImg__
+                alt={""}
+                className={classNames(sty.img___0Rg9E)}
+                displayHeight={"33px"}
+                displayMaxHeight={"none"}
+                displayMaxWidth={"100%"}
+                displayMinHeight={"0"}
+                displayMinWidth={"0"}
+                displayWidth={"43px"}
+                loading={"lazy"}
+                src={{
+                  src: "/plasmic/hive_admin/images/image17.png",
+                  fullWidth: 681,
+                  fullHeight: 844,
+                  aspectRatio: undefined
+                }}
+              />
+            </div>
           </div>
         </div>
       </div>
@@ -402,13 +687,17 @@ function PlasmicDashboard__RenderFunc(props: {
 }
 
 const PlasmicDescendants = {
-  dashboard: ["dashboard"]
+  dashboard: ["dashboard", "directoryTree", "httpRestApiFetcher"],
+  directoryTree: ["directoryTree", "httpRestApiFetcher"],
+  httpRestApiFetcher: ["httpRestApiFetcher"]
 } as const;
 type NodeNameType = keyof typeof PlasmicDescendants;
 type DescendantsType<T extends NodeNameType> =
   (typeof PlasmicDescendants)[T][number];
 type NodeDefaultElementType = {
   dashboard: "div";
+  directoryTree: typeof AntdDirectoryTree;
+  httpRestApiFetcher: typeof DataFetcher;
 };
 
 type ReservedPropsType = "variants" | "args" | "overrides";
@@ -498,6 +787,8 @@ export const PlasmicDashboard = Object.assign(
   withUsePlasmicAuth(makeNodeComponent("dashboard")),
   {
     // Helper components rendering sub-elements
+    directoryTree: makeNodeComponent("directoryTree"),
+    httpRestApiFetcher: makeNodeComponent("httpRestApiFetcher"),
 
     // Metadata about props expected for PlasmicDashboard
     internalVariantProps: PlasmicDashboard__VariantProps,

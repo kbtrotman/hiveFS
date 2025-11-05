@@ -5,6 +5,8 @@ CREATE DATABASE IF NOT EXISTS hive_api;
 CREATE DATABASE IF NOT EXISTS hive_meta;
 CREATE DATABASE IF NOT EXISTS hive_data;
 
+
+
 -- =========================
 -- META SCHEMA (hive_meta)
 -- =========================
@@ -221,6 +223,25 @@ CREATE TABLE blocks (
   PRIMARY KEY (hash_algo, block_hash)
 ) ENGINE=ROCKSDB
   COMMENT='rocksdb_cf=block_data';
+
+
+
+use hive_api;
+-- Fast child listing and name uniqueness in a dir
+CREATE INDEX idx_dentries_parent_name ON hive_meta.dentries(parent_id, name);
+CREATE INDEX idx_dentries_parent ON hive_meta.dentries(parent_id);
+CREATE INDEX idx_dentries_inode ON hive_meta.dentries(inode_id);
+CREATE INDEX idx_inodes_kind ON hive_meta.inodes(kind);
+-- Optional: for case-insensitive sort/search, keep a normalized column (e.g., name_ci)
+-- and index it. Collations can be expensive on ORDER BY.
+
+-- Run once:
+CREATE VIEW hive_api.v_dentries AS SELECT * FROM hive_meta.dentries;
+CREATE VIEW hive_api.v_inodes   AS SELECT * FROM hive_meta.inodes;
+CREATE VIEW hive_api.v_roots    AS SELECT * FROM hive_meta.root_dentries;
+-- Grant permissions to the API user only on hive_api.*.
+
+ 
 
 -- =========================
 -- PROCEDURES (in hive_meta)
