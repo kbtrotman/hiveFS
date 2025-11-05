@@ -84,6 +84,22 @@ DATABASES = {
         'PASSWORD': 'hiveadmin',
         'HOST': 'localhost',  # Or the IP/hostname of your MariaDB server
         'PORT': '3306',       # Default MariaDB port
+    },
+    'meta': {
+        'ENGINE': 'django.db.backends.mysql',
+        'NAME': 'hive_meta',
+        'USER': 'hiveadmin',
+        'PASSWORD': 'hiveadmin',
+        'HOST': 'localhost',  # Or the IP/hostname of your MariaDB server
+        'PORT': '3306',       # Default MariaDB port
+    },
+    'data': {
+        'ENGINE': 'django.db.backends.mysql',
+        'NAME': 'hive_data',
+        'USER': 'hiveadmin',
+        'PASSWORD': 'hiveadmin',
+        'HOST': 'localhost',  # Or the IP/hostname of your MariaDB server
+        'PORT': '3306',       # Default MariaDB port
     }
 }
 

@@ -734,6 +734,26 @@
           "id": "y4JrLNP2TA3b",
           "name": "image 16",
           "filePath": "../public/plasmic/hive_admin/images/image16.svg"
+        },
+        {
+          "id": "ktEn5llv2zdC",
+          "name": "image 8",
+          "filePath": "../public/plasmic/hive_admin/images/image8.png"
+        },
+        {
+          "id": "-B9fR5XzHYH5",
+          "name": "image 9",
+          "filePath": "../public/plasmic/hive_admin/images/image9.png"
+        },
+        {
+          "id": "Qc012h9UcGcU",
+          "name": "image 10",
+          "filePath": "../public/plasmic/hive_admin/images/image10.png"
+        },
+        {
+          "id": "oDxUemV9IViH",
+          "name": "image 17",
+          "filePath": "../public/plasmic/hive_admin/images/image17.png"
         }
       ],
       "indirect": false,
@@ -753,6 +773,36 @@
           "name": "Fetcher",
           "displayName": "plasmic-data-source-fetcher",
           "componentImportPath": "@plasmicapp/react-web/lib/data-sources"
+        }
+      ],
+      "customFunctions": []
+    },
+    {
+      "projectId": "YUiM7yqBWAqsh8KSnrdj7",
+      "projectApiToken": "yLKpJOE8mD6HqoNCSWF3Em8ut0LBzL7qb3QPqNeOLPjQsSBSc12yhYovnSRSekzgt1xjjbugBGDjOMLGMK4w",
+      "projectName": "plasmic-query",
+      "version": ">0.0.0",
+      "cssFilePath": "plasmic/plasmic_query/plasmic.module.css",
+      "components": [],
+      "icons": [],
+      "images": [],
+      "indirect": true,
+      "globalContextsFilePath": "",
+      "splitsProviderFilePath": "",
+      "styleTokensProviderFilePath": "plasmic/plasmic_query/PlasmicStyleTokensProvider.tsx",
+      "projectModuleFilePath": "plasmic/plasmic_query/plasmic.tsx",
+      "codeComponents": [
+        {
+          "id": "ae7V86eNoXA",
+          "name": "DataFetcher",
+          "displayName": "hostless-plasmic-query-data-fetcher",
+          "componentImportPath": "@plasmicpkgs/plasmic-query"
+        },
+        {
+          "id": "0DrxdjD45dkx",
+          "name": "GraphqlFetcher",
+          "displayName": "hostless-plasmic-query-graphql-fetcher",
+          "componentImportPath": "@plasmicpkgs/plasmic-query"
         }
       ],
       "customFunctions": []
