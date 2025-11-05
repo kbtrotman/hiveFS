@@ -6,7 +6,6 @@ CREATE DATABASE IF NOT EXISTS hive_meta;
 CREATE DATABASE IF NOT EXISTS hive_data;
 
 
-
 -- =========================
 -- META SCHEMA (hive_meta)
 -- =========================
@@ -240,6 +239,100 @@ CREATE VIEW hive_api.v_dentries AS SELECT * FROM hive_meta.dentries;
 CREATE VIEW hive_api.v_inodes   AS SELECT * FROM hive_meta.inodes;
 CREATE VIEW hive_api.v_roots    AS SELECT * FROM hive_meta.root_dentries;
 -- Grant permissions to the API user only on hive_api.*.
+
+ 
+
+ -- Virtual nodes for GUI (folders and mount points)
+CREATE TABLE IF NOT EXISTS hive_api.ui_virtual_node (
+  id           BIGINT PRIMARY KEY AUTO_INCREMENT,
+  parent_id    BIGINT NULL,                  -- NULL for global root
+  name         VARCHAR(255) NOT NULL,
+  node_kind    ENUM('virtual','mount') NOT NULL,
+  target_type  ENUM('none','host','dentry') NOT NULL DEFAULT 'none',
+  target_host  VARCHAR(128) NULL,            -- if mounting a host's root by host id/name
+  target_dentry BIGINT NULL,                 -- if mounting a shared subtree by physical dentry id
+  sort_order   INT DEFAULT 0,
+  UNIQUE KEY uk_ui_virtual_parent_name (parent_id, name),
+  KEY idx_ui_virtual_parent (parent_id),
+  KEY idx_ui_virtual_kind (node_kind)
+) ENGINE=InnoDB;
+
+-- Map a host ID to its physical root dentry (for host mounts)
+CREATE TABLE IF NOT EXISTS hive_api.ui_host_map (
+  host_id      VARCHAR(128) PRIMARY KEY,
+  root_dentry  BIGINT NOT NULL,
+  KEY idx_ui_host_root (root_dentry)
+) ENGINE=InnoDB;
+
+
+-- 1) Helper view: mount -> physical root dentry
+CREATE OR REPLACE VIEW hive_api.v_mounts AS
+SELECT
+  v.id AS mount_id,
+  CASE
+    WHEN v.target_type = 'dentry' THEN v.target_dentry
+    WHEN v.target_type = 'host'   THEN hm.root_dentry
+    ELSE NULL
+  END AS root_dentry
+FROM hive_api.ui_virtual_node v
+LEFT JOIN hive_api.ui_host_map hm=
+  ON v.target_type = 'host' AND v.target_host = hm.host_id
+WHERE v.node_kind = 'mount';
+ 
+
+-- 2) Unified tree view (virtual + physical, cross-schema)
+CREATE OR REPLACE VIEW hive_api.v_unified_tree AS
+
+-- A) Virtual/UI nodes (including mounts)
+SELECT
+  CAST(CONCAT('v:', v.id) AS CHAR(64)) AS node_id,
+  CASE
+    WHEN v.parent_id IS NULL THEN NULL
+    ELSE CAST(CONCAT('v:', v.parent_id) AS CHAR(64))
+  END AS parent_node_id,
+  v.name,
+  'virtual' AS node_kind,           -- display type
+  NULL     AS inode_id,
+  NULL     AS dentry_id,
+  v.id     AS virtual_id,           -- handy for joins to ACLs, etc.
+  NULL     AS mount_id,
+  (
+    EXISTS (SELECT 1 FROM hive_api.ui_virtual_node c WHERE c.parent_id = v.id LIMIT 1)
+    OR EXISTS (
+      SELECT 1
+      FROM hive_api.v_mounts mm
+      WHERE mm.mount_id = v.id
+        AND EXISTS (SELECT 1 FROM hive_meta.dentries d WHERE d.parent_id = mm.root_dentry LIMIT 1)
+    )
+  ) AS has_children
+FROM hive_api.ui_virtual_node v
+UNION ALL
+
+-- B) Physical FS nodes (exclude physical roots; reparent direct children of roots to virtual mount)
+SELECT
+  CAST(CONCAT('d:', d.id) AS CHAR(64)) AS node_id,
+  CASE
+    WHEN mm.mount_id IS NOT NULL THEN CAST(CONCAT('v:', mm.mount_id) AS CHAR(64))
+    ELSE CAST(CONCAT('d:', d.parent_id) AS CHAR(64))
+  END AS parent_node_id,
+  d.name,
+  i.kind AS node_kind,              -- e.g., 'dir','file','symlink'
+  d.inode_id,
+  d.id  AS dentry_id,
+  NULL  AS virtual_id,
+  mm.mount_id,
+  EXISTS (SELECT 1 FROM hive_meta.dentries c WHERE c.parent_id = d.id LIMIT 1) AS has_children
+FROM hive_meta.dentries d
+JOIN hive_meta.inodes i ON i.id = d.inode_id
+LEFT JOIN hive_api.v_mounts mm
+  ON d.parent_id = mm.root_dentry
+WHERE d.parent_id IS NOT NULL;
+
+ 
+-- hive_api
+CREATE INDEX IF NOT EXISTS idx_ui_virtual_parent ON hive_api.ui_virtual_node(parent_id);
+CREATE INDEX IF NOT EXISTS idx_ui_virtual_kind   ON hive_api.ui_virtual_node(node_kind);
+CREATE INDEX IF NOT EXISTS idx_ui_host_root      ON hive_api.ui_host_map(root_dentry);
 
  
 
