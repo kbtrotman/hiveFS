@@ -55,7 +55,7 @@
 #define HIFS_MAX_CMD_SIZE 50 // MAX_CMD_SIZE is the maximum size of a command
 #define HIFS_MAX_NAME_SIZE 256 //MAX NAME SIZE is the maximum size of a file name, dir name, or other name in FS.
 
-#define HIFS_COMM_DEVICE_NAME "hivefs_ctl"
+#define HIFS_COMM_DEVICE_NAME "hivefs"
 #define HIFS_CMD_RING_CAPACITY 128
 #define HIFS_DATA_RING_CAPACITY 128
 #define HIFS_DATA_MAX  5120 // Max data size in a data frame
@@ -200,6 +200,9 @@ extern struct hifs_link hifs_user_link;
 /******************************
  * END Queue Management Structures
  ******************************/
+
+#define HIFS_IO_WAIT_DEFAULT_MS 1000U
+#define HIFS_IO_WAIT_MAX_MS     (5U * 60U * 1000U) /* 5 minutes cap */
 
 
 /***********************

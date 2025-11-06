@@ -16,7 +16,7 @@
 
 static void print_usage(const char *prog)
 {
-    fprintf(stderr, "Usage: %s [--device /dev/hivefs_ctl]\n", prog);
+    fprintf(stderr, "Usage: %s [--device /dev/%s]\n", prog, HIFS_COMM_DEVICE_NAME);
 }
 
 int main(int argc, char **argv)

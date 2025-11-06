@@ -10,8 +10,12 @@
 #include "hifs_shared_defs.h"
 #include "hifs.h"
 
+#include <linux/device.h>
+#include <linux/jiffies.h>
 #include <linux/kfifo.h>
+#include <linux/kstrtox.h>
 #include <linux/miscdevice.h>
+#include <linux/minmax.h>
 #include <linux/poll.h>
 #include <linux/spinlock.h>
 #include <linux/string.h>
@@ -32,6 +36,96 @@ static DECLARE_WAIT_QUEUE_HEAD(hifs_cmd_wait);
 static DECLARE_WAIT_QUEUE_HEAD(hifs_data_wait);
 static DECLARE_WAIT_QUEUE_HEAD(hifs_cmd_in_wait);
 static DECLARE_WAIT_QUEUE_HEAD(hifs_data_in_wait);
+
+static atomic_long_t hifs_sysfs_timeout_override = ATOMIC_LONG_INIT(-1);
+static unsigned int hifs_mount_timeout_ms = HIFS_IO_WAIT_DEFAULT_MS;
+
+unsigned int hifs_get_io_timeout_ms(void)
+{
+    long override = atomic_long_read(&hifs_sysfs_timeout_override);
+
+    if (override >= 0)
+        return clamp_t(unsigned int, (unsigned int)override, 0U, HIFS_IO_WAIT_MAX_MS);
+
+    return clamp_t(unsigned int, READ_ONCE(hifs_mount_timeout_ms), 0U, HIFS_IO_WAIT_MAX_MS);
+}
+
+void hifs_set_mount_io_timeout(unsigned int timeout_ms)
+{
+    timeout_ms = clamp_t(unsigned int, timeout_ms, 0U, HIFS_IO_WAIT_MAX_MS);
+    WRITE_ONCE(hifs_mount_timeout_ms, timeout_ms);
+}
+
+static void hifs_set_sysfs_timeout_override(long timeout_ms)
+{
+    if (timeout_ms < 0)
+        atomic_long_set(&hifs_sysfs_timeout_override, -1);
+    else {
+        timeout_ms = clamp_t(long, timeout_ms, 0L, (long)HIFS_IO_WAIT_MAX_MS);
+        atomic_long_set(&hifs_sysfs_timeout_override, timeout_ms);
+    }
+}
+
+static unsigned int hifs_wait_jiffies(unsigned int timeout_ms)
+{
+    if (!timeout_ms)
+        return 0;
+    return msecs_to_jiffies(timeout_ms);
+}
+
+#define HIFS_DEFINE_FIFO_POP(storage, fn_name, fifo_var, lock_var, wait_var, type) \
+storage int fn_name(type *msg, bool nonblock)                                     \
+{                                                                                \
+    unsigned long flags;                                                         \
+                                                                                 \
+    if (!msg)                                                                    \
+        return -EINVAL;                                                          \
+                                                                                 \
+    for (;;) {                                                                   \
+        unsigned int copied;                                                     \
+                                                                                 \
+        spin_lock_irqsave(&(lock_var), flags);                                   \
+        if (!kfifo_is_empty(&(fifo_var))) {                                      \
+            copied = kfifo_out(&(fifo_var), msg, 1);                             \
+            spin_unlock_irqrestore(&(lock_var), flags);                          \
+            return (copied == 1) ? 0 : -EFAULT;                                  \
+        }                                                                        \
+        spin_unlock_irqrestore(&(lock_var), flags);                              \
+                                                                                 \
+        if (nonblock) {                                                          \
+            unsigned int timeout_ms = hifs_get_io_timeout_ms();                  \
+            int ret;                                                             \
+                                                                                 \
+            if (!timeout_ms)                                                     \
+                return -EAGAIN;                                                  \
+                                                                                 \
+            ret = wait_event_interruptible_timeout((wait_var),                   \
+                                                   !kfifo_is_empty(&(fifo_var)), \
+                                                   hifs_wait_jiffies(timeout_ms));\
+            if (ret > 0)                                                         \
+                continue;                                                        \
+            if (ret == 0)                                                        \
+                return -EAGAIN;                                                  \
+            return ret;                                                          \
+        }                                                                        \
+                                                                                 \
+        {                                                                        \
+            int ret = wait_event_interruptible((wait_var),                       \
+                                               !kfifo_is_empty(&(fifo_var)));    \
+            if (ret)                                                             \
+                return ret;                                                      \
+        }                                                                        \
+    }                                                                            \
+}
+
+HIFS_DEFINE_FIFO_POP(static, hifs_cmd_fifo_out_pop, hifs_cmd_fifo,
+                     hifs_cmd_lock, hifs_cmd_wait, struct hifs_cmds);
+HIFS_DEFINE_FIFO_POP(static, hifs_data_fifo_out_pop, hifs_data_fifo,
+                     hifs_data_lock, hifs_data_wait, struct hifs_data_frame);
+HIFS_DEFINE_FIFO_POP( , hifs_cmd_fifo_in_pop, hifs_cmd_in_fifo,
+                     hifs_cmd_in_lock, hifs_cmd_in_wait, struct hifs_cmds);
+HIFS_DEFINE_FIFO_POP( , hifs_data_fifo_in_pop, hifs_data_in_fifo,
+                     hifs_data_in_lock, hifs_data_in_wait, struct hifs_data_frame);
 
 static unsigned int hifs_cmd_fifo_in_len(void)
 {
@@ -116,25 +210,28 @@ int hifs_cmd_fifo_out_push_cstr(const char *command)
 
 /* Helper removed: variable-length data FIFO supersedes inode-specific path. */
 
-static int hifs_cmd_fifo_out_pop(struct hifs_cmds *msg, bool nonblock)
+static ssize_t timeout_inms_show(struct device *dev,
+                                 struct device_attribute *attr, char *buf)
 {
-    return hifs_fifo_pop_locked(&hifs_cmd_fifo, &hifs_cmd_lock, hifs_cmd_wait, msg, nonblock);
+    return scnprintf(buf, PAGE_SIZE, "%u\n", hifs_get_io_timeout_ms());
 }
 
-static int hifs_data_fifo_out_pop(struct hifs_data_frame *frame, bool nonblock)
+static ssize_t timeout_inms_store(struct device *dev,
+                                  struct device_attribute *attr,
+                                  const char *buf, size_t count)
 {
-    return hifs_fifo_pop_locked(&hifs_data_fifo, &hifs_data_lock, hifs_data_wait, frame, nonblock);
+    long val;
+    int ret;
+
+    ret = kstrtol(buf, 0, &val);
+    if (ret)
+        return ret;
+
+    hifs_set_sysfs_timeout_override(val);
+    return count;
 }
 
-int hifs_cmd_fifo_in_pop(struct hifs_cmds *msg, bool nonblock)
-{
-    return hifs_fifo_pop_locked(&hifs_cmd_in_fifo, &hifs_cmd_in_lock, hifs_cmd_in_wait, msg, nonblock);
-}
-
-int hifs_data_fifo_in_pop(struct hifs_data_frame *frame, bool nonblock)
-{
-    return hifs_fifo_pop_locked(&hifs_data_in_fifo, &hifs_data_in_lock, hifs_data_in_wait, frame, nonblock);
-}
+static DEVICE_ATTR_RW(timeout_inms);
 
 static long hifs_comm_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
@@ -269,17 +366,32 @@ int hifs_fifo_init(void)
     INIT_KFIFO(hifs_data_in_fifo);
 
     ret = misc_register(&hifs_comm_device);
-    if (ret)
+    if (ret) {
         hifs_err("Failed to register comm device\n");
+        return ret;
+    }
 
-    return ret;
+    ret = device_create_file(hifs_comm_device.this_device, &dev_attr_timeout_inms);
+    if (ret) {
+        hifs_err("Failed to create timeout_inms attribute: %d", ret);
+        misc_deregister(&hifs_comm_device);
+        return ret;
+    }
+
+    return 0;
 }
 
 void hifs_fifo_exit(void)
 {
 	unsigned long flags;
 
-	misc_deregister(&hifs_comm_device);
+    if (hifs_comm_device.this_device) {
+        device_remove_file(hifs_comm_device.this_device, &dev_attr_timeout_inms);
+    }
+
+    misc_deregister(&hifs_comm_device);
+    atomic_long_set(&hifs_sysfs_timeout_override, -1);
+    hifs_set_mount_io_timeout(HIFS_IO_WAIT_DEFAULT_MS);
 
 	spin_lock_irqsave(&hifs_cmd_lock, flags);
 	kfifo_reset(&hifs_cmd_fifo);

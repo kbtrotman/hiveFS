@@ -437,21 +437,28 @@ int hifs_handshake_superblock(struct super_block *sb)
     {
         int tries;
         for (tries = 0; tries < 20; tries++) {
+            int pop_ret;
+
             memset(frame, 0, sizeof(*frame));
-            if (!hifs_cmd_fifo_in_pop(&cmd, true)) {
-                if (cmd_equals(&cmd, HIFS_Q_PROTO_CMD_SB_RECV)) {
-                    ret = hifs_data_fifo_in_pop(frame, false);
-                    if (ret)
-                        goto out;
-                    if (frame->len != sizeof(*msg_remote)) {
-                        ret = -EINVAL;
-                        goto out;
-                    }
-                    memcpy(msg_remote, frame->data, sizeof(*msg_remote));
-                    break;
-                }
+            pop_ret = hifs_cmd_fifo_in_pop(&cmd, true);
+            if (pop_ret == -ERESTARTSYS) {
+                ret = pop_ret;
+                goto out;
             }
-            schedule_timeout_interruptible(msecs_to_jiffies(50));
+            if (pop_ret)
+                continue;
+
+            if (cmd_equals(&cmd, HIFS_Q_PROTO_CMD_SB_RECV)) {
+                ret = hifs_data_fifo_in_pop(frame, false);
+                if (ret)
+                    goto out;
+                if (frame->len != sizeof(*msg_remote)) {
+                    ret = -EINVAL;
+                    goto out;
+                }
+                memcpy(msg_remote, frame->data, sizeof(*msg_remote));
+                break;
+            }
         }
         if (tries == 20) {
             ret = 0; /* No response; assume local is fine */
@@ -522,21 +529,28 @@ int hifs_handshake_rootdentry(struct super_block *sb)
     {
         int tries;
         for (tries = 0; tries < 20; tries++) {
+            int pop_ret;
+
             memset(frame, 0, sizeof(*frame));
-            if (!hifs_cmd_fifo_in_pop(&cmd, true)) {
-                if (cmd_equals(&cmd, HIFS_Q_PROTO_CMD_ROOT_RECV)) {
-                    ret = hifs_data_fifo_in_pop(frame, false);
-                    if (ret)
-                        goto out;
-                    if (frame->len != sizeof(*msg_remote)) {
-                        ret = -EINVAL;
-                        goto out;
-                    }
-                    memcpy(msg_remote, frame->data, sizeof(*msg_remote));
-                    break;
-                }
+            pop_ret = hifs_cmd_fifo_in_pop(&cmd, true);
+            if (pop_ret == -ERESTARTSYS) {
+                ret = pop_ret;
+                goto out;
             }
-            schedule_timeout_interruptible(msecs_to_jiffies(50));
+            if (pop_ret)
+                continue;
+
+            if (cmd_equals(&cmd, HIFS_Q_PROTO_CMD_ROOT_RECV)) {
+                ret = hifs_data_fifo_in_pop(frame, false);
+                if (ret)
+                    goto out;
+                if (frame->len != sizeof(*msg_remote)) {
+                    ret = -EINVAL;
+                    goto out;
+                }
+                memcpy(msg_remote, frame->data, sizeof(*msg_remote));
+                break;
+            }
         }
         if (tries == 20) {
             ret = 0;
@@ -620,21 +634,28 @@ int hifs_publish_dentry(struct super_block *sb, uint64_t parent_ino, uint64_t ch
     {
         int tries;
         for (tries = 0; tries < 20; tries++) {
+            int pop_ret;
+
             memset(frame, 0, sizeof(*frame));
-            if (!hifs_cmd_fifo_in_pop(&cmd, true)) {
-                if (cmd_equals(&cmd, HIFS_Q_PROTO_CMD_DENTRY_RECV)) {
-                    ret = hifs_data_fifo_in_pop(frame, false);
-                    if (ret)
-                        goto out;
-                    if (frame->len != sizeof(*msg_remote)) {
-                        ret = -EINVAL;
-                        goto out;
-                    }
-                    memcpy(msg_remote, frame->data, sizeof(*msg_remote));
-                    break;
-                }
+            pop_ret = hifs_cmd_fifo_in_pop(&cmd, true);
+            if (pop_ret == -ERESTARTSYS) {
+                ret = pop_ret;
+                goto out;
             }
-            schedule_timeout_interruptible(msecs_to_jiffies(50));
+            if (pop_ret)
+                continue;
+
+            if (cmd_equals(&cmd, HIFS_Q_PROTO_CMD_DENTRY_RECV)) {
+                ret = hifs_data_fifo_in_pop(frame, false);
+                if (ret)
+                    goto out;
+                if (frame->len != sizeof(*msg_remote)) {
+                    ret = -EINVAL;
+                    goto out;
+                }
+                memcpy(msg_remote, frame->data, sizeof(*msg_remote));
+                break;
+            }
         }
         if (tries == 20) {
             ret = 0;
@@ -717,21 +738,28 @@ int hifs_publish_inode(struct super_block *sb, const struct hifs_inode *hii,
     {
         int tries;
         for (tries = 0; tries < 20; tries++) {
+            int pop_ret;
+
             memset(frame, 0, sizeof(*frame));
-            if (!hifs_cmd_fifo_in_pop(&cmd, true)) {
-                if (cmd_equals(&cmd, HIFS_Q_PROTO_CMD_INODE_RECV)) {
-                    ret = hifs_data_fifo_in_pop(frame, false);
-                    if (ret)
-                        goto out;
-                    if (frame->len != sizeof(*msg_remote)) {
-                        ret = -EINVAL;
-                        goto out;
-                    }
-                    memcpy(msg_remote, frame->data, sizeof(*msg_remote));
-                    break;
-                }
+            pop_ret = hifs_cmd_fifo_in_pop(&cmd, true);
+            if (pop_ret == -ERESTARTSYS) {
+                ret = pop_ret;
+                goto out;
             }
-            schedule_timeout_interruptible(msecs_to_jiffies(50));
+            if (pop_ret)
+                continue;
+
+            if (cmd_equals(&cmd, HIFS_Q_PROTO_CMD_INODE_RECV)) {
+                ret = hifs_data_fifo_in_pop(frame, false);
+                if (ret)
+                    goto out;
+                if (frame->len != sizeof(*msg_remote)) {
+                    ret = -EINVAL;
+                    goto out;
+                }
+                memcpy(msg_remote, frame->data, sizeof(*msg_remote));
+                break;
+            }
         }
         if (tries == 20) {
             ret = 0;
@@ -819,51 +847,61 @@ int hifs_publish_block(struct super_block *sb, uint64_t block_no,
     {
         int tries;
         for (tries = 0; tries < 20; tries++) {
-            memset(frame, 0, sizeof(*frame));
-            if (!hifs_cmd_fifo_in_pop(&cmd, true)) {
-                if (cmd_equals(&cmd, HIFS_Q_PROTO_CMD_BLOCK_RECV)) {
-                    struct hifs_data_frame *data_frame = NULL;
-                    u32 r_len;
+            int pop_ret;
 
-                    ret = hifs_data_fifo_in_pop(frame, false);
-                    if (ret)
+            memset(frame, 0, sizeof(*frame));
+            pop_ret = hifs_cmd_fifo_in_pop(&cmd, true);
+            if (pop_ret == -ERESTARTSYS) {
+                ret = pop_ret;
+                goto out;
+            }
+            if (pop_ret)
+                continue;
+
+            if (cmd_equals(&cmd, HIFS_Q_PROTO_CMD_BLOCK_RECV)) {
+                struct hifs_data_frame *data_frame = NULL;
+                u32 r_len;
+
+                ret = hifs_data_fifo_in_pop(frame, false);
+                if (ret)
+                    goto out;
+
+                memset(msg_remote, 0, sizeof(*msg_remote));
+                if (frame->len != sizeof(*msg_remote)) {
+                    ret = -EINVAL;
+                    goto out;
+                }
+
+                memcpy(msg_remote, frame->data, sizeof(*msg_remote));
+                r_len = le32_to_cpu(msg_remote->data_len);
+                if (r_len > 0) {
+                    data_frame = kmalloc(sizeof(*data_frame), GFP_KERNEL);
+                    if (!data_frame) {
+                        ret = -ENOMEM;
                         goto out;
-                    memset(msg_remote, 0, sizeof(*msg_remote));
-                    if (frame->len != sizeof(*msg_remote)) {
+                    }
+                    ret = hifs_data_fifo_in_pop(data_frame, false);
+                    if (ret) {
+                        kfree(data_frame);
+                        goto out;
+                    }
+                    if (data_frame->len != r_len) {
+                        kfree(data_frame);
                         ret = -EINVAL;
                         goto out;
                     }
-                    memcpy(msg_remote, frame->data, sizeof(*msg_remote));
-                    r_len = le32_to_cpu(msg_remote->data_len);
-                    if (r_len > 0) {
-                        data_frame = kmalloc(sizeof(*data_frame), GFP_KERNEL);
-                        if (!data_frame) {
-                            ret = -ENOMEM;
-                            goto out;
-                        }
-                        ret = hifs_data_fifo_in_pop(data_frame, false);
-                        if (ret) {
-                            kfree(data_frame);
-                            goto out;
-                        }
-                        if (data_frame->len != r_len) {
-                            kfree(data_frame);
-                            ret = -EINVAL;
-                            goto out;
-                        }
-                        ret = hifs_apply_remote_block(sb, le64_to_cpu(msg_remote->block_no),
-                                                       data_frame->data, r_len);
-                        kfree(data_frame);
-                        if (!ret) {
-                            ret = 1;
-                            goto out;
-                        }
+                    ret = hifs_apply_remote_block(sb,
+                                                  le64_to_cpu(msg_remote->block_no),
+                                                  data_frame->data, r_len);
+                    kfree(data_frame);
+                    if (!ret) {
+                        ret = 1;
                         goto out;
                     }
-                    break;
+                    goto out;
                 }
+                break;
             }
-            schedule_timeout_interruptible(msecs_to_jiffies(50));
         }
         if (tries == 20) {
             ret = 0;
