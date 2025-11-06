@@ -16,5 +16,6 @@ share/
 src/
 include/
 node_modules/
+*pycache*
 .codex
 _deps

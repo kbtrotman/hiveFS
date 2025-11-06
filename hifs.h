@@ -156,6 +156,8 @@ int hifs_cmd_fifo_in_push(const struct hifs_cmds *msg);
 int hifs_data_fifo_in_push_buf(const void *buf, size_t len);
 int hifs_cmd_fifo_in_pop(struct hifs_cmds *msg, bool nonblock);
 int hifs_data_fifo_in_pop(struct hifs_data_frame *frame, bool nonblock);
+unsigned int hifs_get_io_timeout_ms(void);
+void hifs_set_mount_io_timeout(unsigned int timeout_ms);
 
 /* hifs_volume_superblock.c */
 void hifs_save_sb(struct super_block *sb);
@@ -322,6 +324,8 @@ struct hifs_sb_info
     struct delayed_work cache_sync_work;
     unsigned long cache_flush_interval;
     atomic_t cache_dirty;
+    unsigned int io_wait_ms;
+    bool io_wait_mount_override;
 };
 
 /* Return pointer to cached on-disk super in sb->s_fs_info (may be NULL). */

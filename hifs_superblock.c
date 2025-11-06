@@ -15,6 +15,16 @@
 #include <linux/time64.h>
 #include <linux/limits.h>
 #include <linux/string.h>
+#include <linux/slab.h>
+#include <linux/kstrtox.h>
+#include <linux/minmax.h>
+
+struct hifs_mount_options {
+	uint64_t volume_id;
+	bool volume_specified;
+	unsigned int io_wait_ms;
+	bool io_wait_specified;
+};
 
 static u64 hifs_merge_lohi(__le32 lo, __le32 hi)
 {
@@ -159,33 +169,69 @@ static struct buffer_head *hifs_bread_at(struct super_block *sb, u64 byte_offset
 	return sb_bread(sb, block);
 }
 
-/* Parse volume ID from mount data (if any). */
-static uint64_t hifs_parse_volume_id(void *data)
+static void hifs_parse_mount_options(void *data, struct hifs_mount_options *opts)
 {
-    uint64_t id = HIFS_VOLUME_CACHE_ID;
-    const char *s = data ? (const char *)data : NULL;
-    char *end = NULL;
+	const char *raw = data ? (const char *)data : NULL;
+	char *options;
+	char *cursor;
+	char *token;
 
-    if (!s || !*s)
-        return id;
+	if (!opts)
+		return;
 
-    if (!strncasecmp(s, "cache", strlen("cache")))
-        return HIFS_VOLUME_CACHE_ID;
+	opts->volume_id = HIFS_VOLUME_CACHE_ID;
+	opts->volume_specified = false;
+	opts->io_wait_ms = HIFS_IO_WAIT_DEFAULT_MS;
+	opts->io_wait_specified = false;
 
-    if (!strncmp(s, "volume=", strlen("volume=")))
-        s += strlen("volume=");
-    else if (!strncmp(s, "remote=", strlen("remote=")))
-        s += strlen("remote=");
+	if (!raw || !*raw)
+		return;
 
-    if (!*s)
-        return id;
+	options = kstrdup(raw, GFP_KERNEL);
+	if (!options)
+		return;
 
-    {
-        unsigned long long v = simple_strtoull(s, &end, 0);
-        if (end && end != s)
-            id = v;
-    }
-    return id;
+	cursor = options;
+	while ((token = strsep(&cursor, ",")) != NULL) {
+		char *value = NULL;
+
+		token = strim(token);
+		if (!*token)
+			continue;
+
+		if (!strcmp(token, "cache")) {
+			opts->volume_id = HIFS_VOLUME_CACHE_ID;
+			opts->volume_specified = true;
+			continue;
+		}
+
+		if (!strncmp(token, "io_wait=", strlen("io_wait="))) {
+			value = token + strlen("io_wait=");
+			if (value && *value) {
+				unsigned int parsed;
+				if (!kstrtouint(value, 0, &parsed)) {
+					opts->io_wait_ms = parsed;
+					opts->io_wait_specified = true;
+				}
+			}
+			continue;
+		}
+
+		if (!strncmp(token, "volume=", strlen("volume=")))
+			value = token + strlen("volume=");
+		else if (!strncmp(token, "remote=", strlen("remote=")))
+			value = token + strlen("remote=");
+
+		if (value && *value) {
+			unsigned long long parsed;
+			if (!kstrtoull(value, 0, &parsed)) {
+				opts->volume_id = parsed;
+				opts->volume_specified = true;
+			}
+		}
+	}
+
+	kfree(options);
 }
 
 /* Load the cache's superblock from disk and initialize the in-memory structures. */
@@ -260,9 +306,25 @@ int hifs_get_super(struct super_block *sb, void *data, int silent)
     if (ret)
         goto out;
 
-    /* Determine volume id (from mount data, if provided) and load/create entry */
-	/* This structure holds the local cache volume and all virtual volumes equally.*/
-    sb_info->volume_id = hifs_parse_volume_id(data);
+    /* Determine volume id and per-mount overrides (if any) */
+    {
+        struct hifs_mount_options opts;
+
+        hifs_parse_mount_options(data, &opts);
+        sb_info->volume_id = opts.volume_id;
+        sb_info->io_wait_ms = hifs_get_io_timeout_ms();
+        sb_info->io_wait_mount_override = false;
+
+        if (opts.io_wait_specified) {
+            sb_info->io_wait_ms = clamp_t(unsigned int, opts.io_wait_ms,
+                                          0U, HIFS_IO_WAIT_MAX_MS);
+            sb_info->io_wait_mount_override = true;
+            hifs_set_mount_io_timeout(sb_info->io_wait_ms);
+        }
+        sb_info->io_wait_ms = hifs_get_io_timeout_ms();
+    }
+
+    /* This structure holds the local cache volume and all virtual volumes equally.*/
     sb_info->is_cache_volume = (sb_info->volume_id == HIFS_VOLUME_CACHE_ID);
     sb_info->is_remote_volume = !sb_info->is_cache_volume;
     ret = hifs_volume_load(sb, sb_info, true);
