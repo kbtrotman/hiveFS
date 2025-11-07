@@ -1,17 +1,16 @@
--- Optional: keep things strict
+-- Optional: strict mode
 -- SET sql_mode='STRICT_ALL_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION';
 
 CREATE DATABASE IF NOT EXISTS hive_api;
 CREATE DATABASE IF NOT EXISTS hive_meta;
 CREATE DATABASE IF NOT EXISTS hive_data;
 
-
 -- =========================
 -- META SCHEMA (hive_meta)
 -- =========================
 USE hive_meta;
 
-CREATE TABLE inodes (
+CREATE TABLE IF NOT EXISTS inodes (
   inode_id       BIGINT UNSIGNED NOT NULL PRIMARY KEY AUTO_INCREMENT,
   iname          VARCHAR(255)    NOT NULL,
   iuid           INT UNSIGNED,
@@ -28,8 +27,7 @@ CREATE TABLE inodes (
   UNIQUE KEY u_iname (iname)
 ) ENGINE=InnoDB;
 
--- Mapping inode -> blocks (for FK safety, keep InnoDB)
-CREATE TABLE inode_to_blocks (
+CREATE TABLE IF NOT EXISTS inode_to_blocks (
   inode_id       BIGINT UNSIGNED NOT NULL,
   block_order    INT UNSIGNED    NOT NULL,
   block_no       BIGINT UNSIGNED NOT NULL,
@@ -43,7 +41,7 @@ CREATE TABLE inode_to_blocks (
     REFERENCES inodes(inode_id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
-CREATE TABLE host (
+CREATE TABLE IF NOT EXISTS host (
   serial               VARCHAR(100) NOT NULL PRIMARY KEY,
   name                 VARCHAR(100),
   host_id              VARCHAR(50),
@@ -56,23 +54,21 @@ CREATE TABLE host (
   ldap_member          BOOLEAN
 ) ENGINE=InnoDB;
 
--- Known/approved hosts
-CREATE TABLE host_auth (
+CREATE TABLE IF NOT EXISTS host_auth (
   id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
-  machine_uid VARCHAR(128) NOT NULL UNIQUE,   -- durable ID (e.g., UUID)
+  machine_uid VARCHAR(128) NOT NULL UNIQUE,
   name VARCHAR(255),
   serial VARCHAR(255),
-  intended_ip VARBINARY(16) NULL,             -- IPv4/IPv6 in binary
-  claims JSON,                                -- arbitrary facts (CPU, TPM EK, etc.)
+  intended_ip VARBINARY(16) NULL,
+  claims JSON,
   status ENUM('pending','approved','revoked') NOT NULL DEFAULT 'pending',
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   approved_at TIMESTAMP NULL,
   approved_by VARCHAR(128) NULL
 ) ENGINE=InnoDB;
 
--- One-time tokens for first contact
-CREATE TABLE host_tokens (
-  token CHAR(64) PRIMARY KEY,                 -- 256-bit hex
+CREATE TABLE IF NOT EXISTS host_tokens (
+  token CHAR(64) PRIMARY KEY,
   machine_uid VARCHAR(128) NOT NULL,
   expires_at DATETIME NOT NULL,
   used BOOLEAN NOT NULL DEFAULT 0,
@@ -82,8 +78,7 @@ CREATE TABLE host_tokens (
     REFERENCES host_auth(machine_uid) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
--- Volume metadata (superblock mirror)
-CREATE TABLE volume_superblocks (
+CREATE TABLE IF NOT EXISTS volume_superblocks (
   volume_id              BIGINT UNSIGNED NOT NULL PRIMARY KEY,
   s_magic                INT UNSIGNED NOT NULL,
   s_blocksize            INT UNSIGNED NOT NULL,
@@ -105,8 +100,28 @@ CREATE TABLE volume_superblocks (
                          ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
 
--- Root dentry mirror
-CREATE TABLE volume_root_dentries (
+-- NEW: dentry_id surrogate PK + uniqueness on (volume_id, de_parent, de_name)
+CREATE TABLE IF NOT EXISTS volume_dentries (
+  dentry_id   BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  volume_id   BIGINT UNSIGNED NOT NULL,
+  de_parent   BIGINT UNSIGNED NOT NULL,  -- parent inode number
+  de_inode    BIGINT UNSIGNED NOT NULL,  -- this entry's inode number
+  de_epoch    INT UNSIGNED NOT NULL,
+  de_type     INT UNSIGNED NOT NULL,
+  de_name_len INT UNSIGNED NOT NULL,
+  de_name     VARBINARY(256) NOT NULL,
+  updated_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+              ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (dentry_id),
+  UNIQUE KEY uk_vol_parent_name (volume_id, de_parent, de_name),
+  KEY idx_volume_inode (volume_id, de_inode),   -- reverse lookup by inode
+  -- idx_volume_parent is redundant with the unique key’s left prefix,
+  -- so we omit it to save space/write amplification.
+  CONSTRAINT fk_volume_dentry FOREIGN KEY (volume_id)
+    REFERENCES volume_superblocks(volume_id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS volume_root_dentries (
   volume_id             BIGINT UNSIGNED NOT NULL PRIMARY KEY,
   rd_inode              BIGINT UNSIGNED NOT NULL,
   rd_mode               INT UNSIGNED NOT NULL,
@@ -127,30 +142,11 @@ CREATE TABLE volume_root_dentries (
     REFERENCES volume_superblocks(volume_id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
--- Directory entries
-CREATE TABLE volume_dentries (
-  volume_id    BIGINT UNSIGNED NOT NULL,
-  de_parent    BIGINT UNSIGNED NOT NULL,
-  de_inode     BIGINT UNSIGNED NOT NULL,
-  de_epoch     INT UNSIGNED NOT NULL,
-  de_type      INT UNSIGNED NOT NULL,
-  de_name_len  INT UNSIGNED NOT NULL,
-  de_name      VARBINARY(256) NOT NULL,
-  updated_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-               ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (volume_id, de_parent, de_name),
-  KEY idx_volume_inode (volume_id, de_inode),
-  KEY idx_volume_parent (volume_id, de_parent), -- list directory children
-  CONSTRAINT fk_volume_dentry FOREIGN KEY (volume_id)
-    REFERENCES volume_superblocks(volume_id) ON DELETE CASCADE
-) ENGINE=InnoDB;
-
--- Inodes per volume (wire struct payload)
-CREATE TABLE volume_inodes (
+CREATE TABLE IF NOT EXISTS volume_inodes (
   volume_id    BIGINT UNSIGNED NOT NULL,
   inode        BIGINT UNSIGNED NOT NULL,
-  inode_blob   BLOB NOT NULL,                 -- future-proof vs. VARBINARY(4096)
-  epoch        BIGINT UNSIGNED NOT NULL,      -- POSIX seconds, safe past 2106
+  inode_blob   BLOB NOT NULL,
+  epoch        BIGINT UNSIGNED NOT NULL,
   updated_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
                ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (volume_id, inode),
@@ -158,8 +154,7 @@ CREATE TABLE volume_inodes (
     REFERENCES volume_superblocks(volume_id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
--- Per-volume block fingerprint mapping (dedupe aware)
-CREATE TABLE volume_block_mappings (
+CREATE TABLE IF NOT EXISTS volume_block_mappings (
   volume_id    BIGINT UNSIGNED NOT NULL,
   block_no     BIGINT UNSIGNED NOT NULL,
   hash_algo    TINYINT UNSIGNED NOT NULL,
@@ -172,8 +167,7 @@ CREATE TABLE volume_block_mappings (
     REFERENCES volume_superblocks(volume_id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
--- CSR mailbox (client writes CSR; controller writes cert)
-CREATE TABLE csr_queue (
+CREATE TABLE IF NOT EXISTS csr_queue (
   id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
   machine_uid VARCHAR(128) NOT NULL,
   token CHAR(64) NOT NULL,
@@ -181,9 +175,9 @@ CREATE TABLE csr_queue (
   submitted_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   status ENUM('received','approved','rejected','issued') NOT NULL DEFAULT 'received',
   status_msg VARCHAR(255) NULL,
-  cert_pem MEDIUMTEXT NULL,       -- controller fills
-  ca_chain_pem MEDIUMTEXT NULL,   -- controller fills
-  cert_serial VARCHAR(128) NULL,  -- controller fills
+  cert_pem MEDIUMTEXT NULL,
+  ca_chain_pem MEDIUMTEXT NULL,
+  cert_serial VARCHAR(128) NULL,
   not_before DATETIME NULL,
   not_after DATETIME NULL,
   UNIQUE KEY u_machine_open (machine_uid, status),
@@ -191,8 +185,7 @@ CREATE TABLE csr_queue (
     REFERENCES host_auth(machine_uid) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
--- Issued certs log
-CREATE TABLE machine_identities (
+CREATE TABLE IF NOT EXISTS machine_identities (
   id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
   machine_uid VARCHAR(128) NOT NULL,
   cert_serial VARCHAR(128) NOT NULL,
@@ -212,61 +205,48 @@ CREATE TABLE machine_identities (
 -- =========================
 USE hive_data;
 
--- Requires MyRocks; if unavailable, change to ENGINE=InnoDB.
--- Composite PK prevents collisions if different algorithms yield same 32-byte digest.
-CREATE TABLE blocks (
-  hash_algo      TINYINT UNSIGNED NOT NULL DEFAULT 1,   -- HIFS_HASH_ALGO_*
-  block_hash     VARBINARY(32) NOT NULL,                 -- SHA-256 (or similar)
+CREATE TABLE IF NOT EXISTS blocks (
+  hash_algo      TINYINT UNSIGNED NOT NULL DEFAULT 1,
+  block_hash     VARBINARY(32) NOT NULL,
   block_data     VARBINARY(4096) NOT NULL,
   block_bck_hash VARBINARY(16) NULL,
   PRIMARY KEY (hash_algo, block_hash)
 ) ENGINE=ROCKSDB
   COMMENT='rocksdb_cf=block_data';
 
+-- =========================
+-- API SCHEMA (hive_api)
+-- =========================
+USE hive_api;
 
+CREATE OR REPLACE VIEW v_dentries AS SELECT * FROM hive_meta.volume_dentries;
+CREATE OR REPLACE VIEW v_inodes   AS SELECT * FROM hive_meta.inodes;
+CREATE OR REPLACE VIEW v_roots    AS SELECT * FROM hive_meta.volume_root_dentries;
 
-use hive_api;
--- Fast child listing and name uniqueness in a dir
-CREATE INDEX idx_dentries_parent_name ON hive_meta.dentries(parent_id, name);
-CREATE INDEX idx_dentries_parent ON hive_meta.dentries(parent_id);
-CREATE INDEX idx_dentries_inode ON hive_meta.dentries(inode_id);
-CREATE INDEX idx_inodes_kind ON hive_meta.inodes(kind);
--- Optional: for case-insensitive sort/search, keep a normalized column (e.g., name_ci)
--- and index it. Collations can be expensive on ORDER BY.
-
--- Run once:
-CREATE VIEW hive_api.v_dentries AS SELECT * FROM hive_meta.dentries;
-CREATE VIEW hive_api.v_inodes   AS SELECT * FROM hive_meta.inodes;
-CREATE VIEW hive_api.v_roots    AS SELECT * FROM hive_meta.root_dentries;
--- Grant permissions to the API user only on hive_api.*.
-
- 
-
- -- Virtual nodes for GUI (folders and mount points)
-CREATE TABLE IF NOT EXISTS hive_api.ui_virtual_node (
-  id           BIGINT PRIMARY KEY AUTO_INCREMENT,
-  parent_id    BIGINT NULL,                  -- NULL for global root
-  name         VARCHAR(255) NOT NULL,
-  node_kind    ENUM('virtual','mount') NOT NULL,
-  target_type  ENUM('none','host','dentry') NOT NULL DEFAULT 'none',
-  target_host  VARCHAR(128) NULL,            -- if mounting a host's root by host id/name
-  target_dentry BIGINT NULL,                 -- if mounting a shared subtree by physical dentry id
-  sort_order   INT DEFAULT 0,
+-- Virtual nodes for GUI
+CREATE TABLE IF NOT EXISTS ui_virtual_node (
+  id            BIGINT PRIMARY KEY AUTO_INCREMENT,
+  parent_id     BIGINT NULL,
+  name          VARCHAR(255) NOT NULL,
+  node_kind     ENUM('virtual','mount') NOT NULL,
+  target_type   ENUM('none','host','dentry') NOT NULL DEFAULT 'none',
+  target_host   VARCHAR(128) NULL,
+  target_dentry BIGINT NULL,         -- references hive_meta.volume_dentries.dentry_id (logical)
+  sort_order    INT DEFAULT 0,
   UNIQUE KEY uk_ui_virtual_parent_name (parent_id, name),
   KEY idx_ui_virtual_parent (parent_id),
   KEY idx_ui_virtual_kind (node_kind)
 ) ENGINE=InnoDB;
 
--- Map a host ID to its physical root dentry (for host mounts)
-CREATE TABLE IF NOT EXISTS hive_api.ui_host_map (
-  host_id      VARCHAR(128) PRIMARY KEY,
-  root_dentry  BIGINT NOT NULL,
+-- Map a host to a physical root dentry (by surrogate id)
+CREATE TABLE IF NOT EXISTS ui_host_map (
+  host_id     VARCHAR(128) PRIMARY KEY,
+  root_dentry BIGINT NOT NULL,       -- hive_meta.volume_dentries.dentry_id
   KEY idx_ui_host_root (root_dentry)
 ) ENGINE=InnoDB;
 
-
--- 1) Helper view: mount -> physical root dentry
-CREATE OR REPLACE VIEW hive_api.v_mounts AS
+-- Mount -> physical root dentry
+CREATE OR REPLACE VIEW v_mounts AS
 SELECT
   v.id AS mount_id,
   CASE
@@ -275,15 +255,13 @@ SELECT
     ELSE NULL
   END AS root_dentry
 FROM hive_api.ui_virtual_node v
-LEFT JOIN hive_api.ui_host_map hm=
+LEFT JOIN hive_api.ui_host_map hm
   ON v.target_type = 'host' AND v.target_host = hm.host_id
 WHERE v.node_kind = 'mount';
- 
 
--- 2) Unified tree view (virtual + physical, cross-schema)
-CREATE OR REPLACE VIEW hive_api.v_unified_tree AS
-
--- A) Virtual/UI nodes (including mounts)
+-- Unified tree (virtual + physical using dentry_id)
+CREATE OR REPLACE VIEW v_unified_tree AS
+-- A) Virtual/UI nodes
 SELECT
   CAST(CONCAT('v:', v.id) AS CHAR(64)) AS node_id,
   CASE
@@ -291,53 +269,64 @@ SELECT
     ELSE CAST(CONCAT('v:', v.parent_id) AS CHAR(64))
   END AS parent_node_id,
   v.name,
-  'virtual' AS node_kind,           -- display type
+  'virtual' AS node_kind,
   NULL     AS inode_id,
   NULL     AS dentry_id,
-  v.id     AS virtual_id,           -- handy for joins to ACLs, etc.
-  NULL     AS mount_id,
+  v.id     AS virtual_id,
+  m.mount_id IS NOT NULL AS is_mount,
   (
     EXISTS (SELECT 1 FROM hive_api.ui_virtual_node c WHERE c.parent_id = v.id LIMIT 1)
     OR EXISTS (
       SELECT 1
       FROM hive_api.v_mounts mm
+      JOIN hive_meta.volume_dentries d ON d.dentry_id = mm.root_dentry
       WHERE mm.mount_id = v.id
-        AND EXISTS (SELECT 1 FROM hive_meta.dentries d WHERE d.parent_id = mm.root_dentry LIMIT 1)
+      LIMIT 1
     )
   ) AS has_children
 FROM hive_api.ui_virtual_node v
+LEFT JOIN hive_api.v_mounts m ON m.mount_id = v.id
+
 UNION ALL
 
--- B) Physical FS nodes (exclude physical roots; reparent direct children of roots to virtual mount)
+-- B) Physical FS nodes. Parent is resolved by linking the parent inode to its dentry row.
 SELECT
-  CAST(CONCAT('d:', d.id) AS CHAR(64)) AS node_id,
+  CAST(CONCAT('d:', d.dentry_id) AS CHAR(64)) AS node_id,
   CASE
-    WHEN mm.mount_id IS NOT NULL THEN CAST(CONCAT('v:', mm.mount_id) AS CHAR(64))
-    ELSE CAST(CONCAT('d:', d.parent_id) AS CHAR(64))
+    WHEN mm.mount_id IS NOT NULL
+      AND d.de_parent = p.de_inode
+      AND p.dentry_id = mm.root_dentry
+    THEN CAST(CONCAT('v:', mm.mount_id) AS CHAR(64))
+    ELSE CAST(CONCAT('d:', p.dentry_id) AS CHAR(64))
   END AS parent_node_id,
-  d.name,
-  i.kind AS node_kind,              -- e.g., 'dir','file','symlink'
-  d.inode_id,
-  d.id  AS dentry_id,
-  NULL  AS virtual_id,
-  mm.mount_id,
-  EXISTS (SELECT 1 FROM hive_meta.dentries c WHERE c.parent_id = d.id LIMIT 1) AS has_children
-FROM hive_meta.dentries d
-JOIN hive_meta.inodes i ON i.id = d.inode_id
+  CONVERT(d.de_name USING utf8mb4) AS name,
+  CASE i.type WHEN 'd' THEN 'dir'
+              WHEN 'l' THEN 'symlink'
+              WHEN 'f' THEN 'file'
+              ELSE 'node' END AS node_kind,
+  i.inode_id AS inode_id,
+  d.dentry_id AS dentry_id,
+  NULL AS virtual_id,
+  (mm.mount_id IS NOT NULL) AS is_mount,
+  EXISTS (
+    SELECT 1
+    FROM hive_meta.volume_dentries c
+    WHERE c.volume_id = d.volume_id
+      AND c.de_parent = d.de_inode
+    LIMIT 1
+  ) AS has_children
+FROM hive_meta.volume_dentries d
+LEFT JOIN hive_meta.inodes i
+  ON i.inode_id = d.de_inode
+LEFT JOIN hive_meta.volume_dentries p
+  ON p.volume_id = d.volume_id
+ AND p.de_inode  = d.de_parent
 LEFT JOIN hive_api.v_mounts mm
-  ON d.parent_id = mm.root_dentry
-WHERE d.parent_id IS NOT NULL;
-
- 
--- hive_api
-CREATE INDEX IF NOT EXISTS idx_ui_virtual_parent ON hive_api.ui_virtual_node(parent_id);
-CREATE INDEX IF NOT EXISTS idx_ui_virtual_kind   ON hive_api.ui_virtual_node(node_kind);
-CREATE INDEX IF NOT EXISTS idx_ui_host_root      ON hive_api.ui_host_map(root_dentry);
-
- 
+  ON mm.root_dentry = p.dentry_id
+WHERE d.de_parent IS NOT NULL;
 
 -- =========================
--- PROCEDURES (in hive_meta)
+-- PROCEDURES (hive_meta)
 -- =========================
 USE hive_meta;
 DELIMITER //
@@ -349,7 +338,6 @@ CREATE PROCEDURE sp_bootstrap_begin(
   IN p_claims JSON
 )
 BEGIN
-  -- Validate token
   IF NOT EXISTS (
     SELECT 1 FROM hive_meta.host_tokens
     WHERE token = p_token
@@ -360,24 +348,19 @@ BEGIN
     SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='Invalid or expired token';
   END IF;
 
-  -- Upsert host claims (machine may already exist in 'pending')
   INSERT INTO hive_meta.host_auth (machine_uid, status, claims)
     VALUES (p_machine_uid, 'pending', p_claims)
   ON DUPLICATE KEY UPDATE claims = COALESCE(p_claims, claims);
 
-  -- Place CSR in queue
   INSERT INTO hive_meta.csr_queue (machine_uid, token, csr_pem, status)
     VALUES (p_machine_uid, p_token, p_csr_pem, 'received');
 
-  -- Mark token as used
   UPDATE hive_meta.host_tokens
      SET used = 1, used_at = NOW()
    WHERE token = p_token AND machine_uid = p_machine_uid;
 END//
 
-CREATE PROCEDURE sp_bootstrap_poll(
-  IN p_machine_uid VARCHAR(128)
-)
+CREATE PROCEDURE sp_bootstrap_poll(IN p_machine_uid VARCHAR(128))
 BEGIN
   SELECT id, status, status_msg, cert_pem, ca_chain_pem, cert_serial, not_before, not_after
     FROM hive_meta.csr_queue
@@ -386,9 +369,7 @@ BEGIN
    LIMIT 1;
 END//
 
-CREATE PROCEDURE sp_bootstrap_finish(
-  IN p_machine_uid VARCHAR(128)
-)
+CREATE PROCEDURE sp_bootstrap_finish(IN p_machine_uid VARCHAR(128))
 BEGIN
   UPDATE hive_meta.host_auth
      SET status='approved', approved_at = NOW()

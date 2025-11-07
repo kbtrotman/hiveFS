@@ -1,8 +1,8 @@
 from rest_framework.response import Response
-from rest_framework.views import APIView
+from rest_framework.viewsets import ViewSet
 
 
-class TenantRootView(APIView):
+class TenantRootView(ViewSet):
     """Placeholder endpoint for tenant APIs."""
 
     def get(self, request):

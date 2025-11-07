@@ -28,10 +28,10 @@ router = DefaultRouter()
 router.register(r'accounts', AccountsRootView, basename='accounts')
 #router.register(r'groups', GroupViewSet, basename='group')
 router.register(r'tree', TreeNodeViewSet, basename='tree')
-router.register(r'settings', SettingsRootView, basename='tree')
-router.register(r'audit', AuditRootView, basename='tree')
-router.register(r'monitor', MonitorRootView, basename='tree')
-router.register(r'tenant', TenantRootView, basename='tree')
+router.register(r'settings', SettingsRootView, basename='settings')
+router.register(r'audit', AuditRootView, basename='audit')
+router.register(r'monitor', MonitorRootView, basename='monitor')
+router.register(r'tenant', TenantRootView, basename='tenant')
 
 
 urlpatterns = [

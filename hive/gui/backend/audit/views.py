@@ -1,8 +1,8 @@
 from rest_framework.response import Response
-from rest_framework.views import APIView
+from rest_framework.viewsets import ViewSet
 
 
-class AuditRootView(APIView):
+class AuditRootView(ViewSet):
     """Placeholder endpoint for audit APIs."""
 
     def get(self, request):
