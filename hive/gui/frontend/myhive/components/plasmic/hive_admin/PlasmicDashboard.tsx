@@ -61,18 +61,11 @@ import {
 import * as plasmicAuth from "@plasmicapp/react-web/lib/auth";
 
 import { usePlasmicDataSourceContext } from "@plasmicapp/data-sources-context";
-import {
-  executePlasmicDataOp,
-  usePlasmicDataOp,
-  usePlasmicInvalidate
-} from "@plasmicapp/react-web/lib/data-sources";
 
 import TextField from "../../TextField"; // plasmic-import: OfVdG6fCBlg2/component
 import { AntdButton } from "@plasmicpkgs/antd5/skinny/registerButton";
 import { RichTable } from "@plasmicpkgs/plasmic-rich-components/skinny/rich-table";
 import { tableHelpers as RichTable_Helpers } from "@plasmicpkgs/plasmic-rich-components/skinny/rich-table";
-import { AntdDirectoryTree } from "@plasmicpkgs/antd5/skinny/registerTree";
-import { treeHelpers as AntdDirectoryTree_Helpers } from "@plasmicpkgs/antd5/skinny/registerTree";
 import { AntdSelect } from "@plasmicpkgs/antd5/skinny/registerSelect";
 import { Fetcher } from "@plasmicapp/react-web/lib/data-sources";
 import { _useGlobalVariants } from "./plasmic"; // plasmic-import: c8gT28iq7v39gxBJ6CcbGP/projectModule
@@ -101,7 +94,6 @@ export type PlasmicDashboard__OverridesType = {
   textField?: Flex__<typeof TextField>;
   svg?: Flex__<"svg">;
   table?: Flex__<typeof RichTable>;
-  directoryTree?: Flex__<typeof AntdDirectoryTree>;
   select?: Flex__<typeof AntdSelect>;
 };
 
@@ -150,80 +142,8 @@ function PlasmicDashboard__RenderFunc(props: {
 
   const currentUser = useCurrentUser?.() || {};
 
-  let [$queries, setDollarQueries] = React.useState<
-    Record<string, ReturnType<typeof usePlasmicDataOp>>
-  >({});
   const stateSpecs: Parameters<typeof useDollarState>[0] = React.useMemo(
     () => [
-      {
-        path: "directoryTree.checkedKeys",
-        type: "private",
-        variableType: "array",
-        initFunc: ({ $props, $state, $queries, $ctx }) => undefined,
-
-        onMutate: generateOnMutateForSpec(
-          "checkedKeys",
-          AntdDirectoryTree_Helpers
-        )
-      },
-      {
-        path: "directoryTree.checkedNodes",
-        type: "private",
-        variableType: "array",
-        initFunc: ({ $props, $state, $queries, $ctx }) => [],
-
-        onMutate: generateOnMutateForSpec(
-          "checkedNodes",
-          AntdDirectoryTree_Helpers
-        )
-      },
-      {
-        path: "directoryTree.checkedDetails",
-        type: "private",
-        variableType: "object",
-        initFunc: ({ $props, $state, $queries, $ctx }) => ({
-          checkedNodesPositions: [],
-          halfCheckedKeys: []
-        }),
-
-        onMutate: generateOnMutateForSpec(
-          "checkedDetails",
-          AntdDirectoryTree_Helpers
-        )
-      },
-      {
-        path: "directoryTree.selectedKeys",
-        type: "private",
-        variableType: "array",
-        initFunc: ({ $props, $state, $queries, $ctx }) => undefined,
-
-        onMutate: generateOnMutateForSpec(
-          "selectedKeys",
-          AntdDirectoryTree_Helpers
-        )
-      },
-      {
-        path: "directoryTree.selectedNodes",
-        type: "private",
-        variableType: "array",
-        initFunc: ({ $props, $state, $queries, $ctx }) => [],
-
-        onMutate: generateOnMutateForSpec(
-          "selectedNodes",
-          AntdDirectoryTree_Helpers
-        )
-      },
-      {
-        path: "directoryTree.expandedKeys",
-        type: "private",
-        variableType: "array",
-        initFunc: ({ $props, $state, $queries, $ctx }) => undefined,
-
-        onMutate: generateOnMutateForSpec(
-          "expandedKeys",
-          AntdDirectoryTree_Helpers
-        )
-      },
       {
         path: "textField.value",
         type: "private",
@@ -274,219 +194,9 @@ function PlasmicDashboard__RenderFunc(props: {
   const $state = useDollarState(stateSpecs, {
     $props,
     $ctx,
-    $queries: $queries,
+    $queries: {},
     $refs
   });
-
-  const new$Queries: Record<string, ReturnType<typeof usePlasmicDataOp>> = {
-    totalUsersByMonthCustomRange: usePlasmicDataOp(() => {
-      return {
-        sourceId: "mnVdpedBCHqQTtLdFhEqBS",
-        opId: "677646ae-cf34-488b-b206-34a10994cc83",
-        userArgs: {
-          query: [$state.start.value]
-        },
-        cacheKey: `plasmic.$.677646ae-cf34-488b-b206-34a10994cc83.$.`,
-        invalidatedKeys: null,
-        roleId: null
-      };
-    }),
-    totalOrdersByDateRange: usePlasmicDataOp(() => {
-      return {
-        sourceId: "mnVdpedBCHqQTtLdFhEqBS",
-        opId: "b264dc17-b566-4df0-83a2-ab9388183165",
-        userArgs: {
-          query: [$state.start.value, $state.start.value]
-        },
-        cacheKey: `plasmic.$.b264dc17-b566-4df0-83a2-ab9388183165.$.`,
-        invalidatedKeys: null,
-        roleId: null
-      };
-    }),
-    currentRevenue: usePlasmicDataOp(() => {
-      return {
-        sourceId: "mnVdpedBCHqQTtLdFhEqBS",
-        opId: "f3936a30-8785-49d2-a5ff-e533ea73d961",
-        userArgs: {
-          query: [$state.start.value, $state.start.value]
-        },
-        cacheKey: `plasmic.$.f3936a30-8785-49d2-a5ff-e533ea73d961.$.`,
-        invalidatedKeys: null,
-        roleId: null
-      };
-    }),
-    currentTotalCustomers: usePlasmicDataOp(() => {
-      return {
-        sourceId: "mnVdpedBCHqQTtLdFhEqBS",
-        opId: "dcb524d7-464b-4c79-bf25-1565b6400786",
-        userArgs: {},
-        cacheKey: `plasmic.$.dcb524d7-464b-4c79-bf25-1565b6400786.$.`,
-        invalidatedKeys: null,
-        roleId: null
-      };
-    }),
-    _12MonthRevenue: usePlasmicDataOp(() => {
-      return {
-        sourceId: "mnVdpedBCHqQTtLdFhEqBS",
-        opId: "f53b1060-4fb6-42f8-88d1-ee4226cd97a3",
-        userArgs: {
-          query: [$state.start.value]
-        },
-        cacheKey: `plasmic.$.f53b1060-4fb6-42f8-88d1-ee4226cd97a3.$.`,
-        invalidatedKeys: null,
-        roleId: null
-      };
-    }),
-    moMUserGrowth: usePlasmicDataOp(() => {
-      return {
-        sourceId: "mnVdpedBCHqQTtLdFhEqBS",
-        opId: "7e51db6e-00e4-4875-a459-8ba3f10b6948",
-        userArgs: {
-          query: [
-            $state.start.value,
-
-            $state.start.value,
-
-            $state.start.value,
-
-            $state.start.value
-          ]
-        },
-        cacheKey: `plasmic.$.7e51db6e-00e4-4875-a459-8ba3f10b6948.$.`,
-        invalidatedKeys: null,
-        roleId: null
-      };
-    }),
-    moMOrderGrowth: usePlasmicDataOp(() => {
-      return {
-        sourceId: "mnVdpedBCHqQTtLdFhEqBS",
-        opId: "94811363-b732-4daa-b535-1fa376c4b8d6",
-        userArgs: {
-          query: [
-            $state.start.value,
-
-            $state.start.value,
-
-            $state.start.value,
-
-            $state.start.value
-          ]
-        },
-        cacheKey: `plasmic.$.94811363-b732-4daa-b535-1fa376c4b8d6.$.`,
-        invalidatedKeys: null,
-        roleId: null
-      };
-    }),
-    moMAvgOrderGrowth: usePlasmicDataOp(() => {
-      return {
-        sourceId: "mnVdpedBCHqQTtLdFhEqBS",
-        opId: "798b2a5a-6de0-46e3-9eec-151c3eae3d7c",
-        userArgs: {
-          query: [
-            $state.start.value,
-
-            $state.start.value,
-
-            $state.start.value,
-
-            $state.start.value
-          ]
-        },
-        cacheKey: `plasmic.$.798b2a5a-6de0-46e3-9eec-151c3eae3d7c.$.`,
-        invalidatedKeys: null,
-        roleId: null
-      };
-    }),
-    moMRevenueGrowth: usePlasmicDataOp(() => {
-      return {
-        sourceId: "mnVdpedBCHqQTtLdFhEqBS",
-        opId: "5163246d-39cd-4028-b386-14704292e23b",
-        userArgs: {
-          query: [
-            $state.start.value,
-
-            $state.start.value,
-
-            $state.start.value,
-
-            $state.start.value
-          ]
-        },
-        cacheKey: `plasmic.$.5163246d-39cd-4028-b386-14704292e23b.$.`,
-        invalidatedKeys: null,
-        roleId: null
-      };
-    }),
-    currentAvgOrder: usePlasmicDataOp(() => {
-      return {
-        sourceId: "mnVdpedBCHqQTtLdFhEqBS",
-        opId: "bd5d448d-2ef9-48d6-b53b-338a537e93c1",
-        userArgs: {
-          query: [$state.start.value, $state.start.value]
-        },
-        cacheKey: `plasmic.$.bd5d448d-2ef9-48d6-b53b-338a537e93c1.$.`,
-        invalidatedKeys: null,
-        roleId: null
-      };
-    }),
-    topCountriesByRevenue: usePlasmicDataOp(() => {
-      return {
-        sourceId: "mnVdpedBCHqQTtLdFhEqBS",
-        opId: "1c2b498d-688c-4bb0-8aea-9db5ccb9d052",
-        userArgs: {},
-        cacheKey: `plasmic.$.1c2b498d-688c-4bb0-8aea-9db5ccb9d052.$.`,
-        invalidatedKeys: null,
-        roleId: null
-      };
-    }),
-    topProductsByQuantitySold: usePlasmicDataOp(() => {
-      return {
-        sourceId: "mnVdpedBCHqQTtLdFhEqBS",
-        opId: "667cf2da-35c3-4d28-aebb-2cc54fde4394",
-        userArgs: {
-          query: [$state.start.value, $state.start.value]
-        },
-        cacheKey: `plasmic.$.667cf2da-35c3-4d28-aebb-2cc54fde4394.$.`,
-        invalidatedKeys: null,
-        roleId: null
-      };
-    }),
-    totalProductsSold: usePlasmicDataOp(() => {
-      return {
-        sourceId: "mnVdpedBCHqQTtLdFhEqBS",
-        opId: "7ad34511-f176-4bf8-b44e-da14621e75fe",
-        userArgs: {},
-        cacheKey: `plasmic.$.7ad34511-f176-4bf8-b44e-da14621e75fe.$.`,
-        invalidatedKeys: null,
-        roleId: null
-      };
-    }),
-    topCategoriesByOrders: usePlasmicDataOp(() => {
-      return {
-        sourceId: "mnVdpedBCHqQTtLdFhEqBS",
-        opId: "dadf63f0-2634-4ed6-b43f-43e7fcfe4a98",
-        userArgs: {
-          query: [
-            $state.start.value,
-
-            $state.start.value,
-
-            $state.start.value,
-
-            $state.start.value
-          ]
-        },
-        cacheKey: `plasmic.$.dadf63f0-2634-4ed6-b43f-43e7fcfe4a98.$.`,
-        invalidatedKeys: null,
-        roleId: null
-      };
-    })
-  };
-  if (Object.keys(new$Queries).some(k => new$Queries[k] !== $queries[k])) {
-    setDollarQueries(new$Queries);
-
-    $queries = new$Queries;
-  }
 
   const styleTokensClassNames = _useStyleTokens();
 
@@ -854,137 +564,6 @@ function PlasmicDashboard__RenderFunc(props: {
           <div className={classNames(projectcss.all, sty.freeBox__apTkU)} />
 
           <div className={classNames(projectcss.all, sty.freeBox__lg0Jy)}>
-            {(() => {
-              const child$Props = {
-                autoExpandParent: true,
-                checkable: false,
-                checkedKeys: generateStateValueProp($state, [
-                  "directoryTree",
-                  "checkedKeys"
-                ]),
-                className: classNames("__wab_instance", sty.directoryTree),
-                defaultExpandAll: true,
-                expandedKeys: generateStateValueProp($state, [
-                  "directoryTree",
-                  "expandedKeys"
-                ]),
-                onCheck: async (...eventArgs: any) => {
-                  generateStateOnChangePropForCodeComponents(
-                    $state,
-                    "checkedKeys",
-                    ["directoryTree", "checkedKeys"],
-                    AntdDirectoryTree_Helpers
-                  ).apply(null, eventArgs);
-                  generateStateOnChangePropForCodeComponents(
-                    $state,
-                    "checkedNodes",
-                    ["directoryTree", "checkedNodes"],
-                    AntdDirectoryTree_Helpers
-                  ).apply(null, eventArgs);
-                  generateStateOnChangePropForCodeComponents(
-                    $state,
-                    "checkedDetails",
-                    ["directoryTree", "checkedDetails"],
-                    AntdDirectoryTree_Helpers
-                  ).apply(null, eventArgs);
-                },
-                onExpand: async (...eventArgs: any) => {
-                  generateStateOnChangePropForCodeComponents(
-                    $state,
-                    "expandedKeys",
-                    ["directoryTree", "expandedKeys"],
-                    AntdDirectoryTree_Helpers
-                  ).apply(null, eventArgs);
-                },
-                onSelect: async (...eventArgs: any) => {
-                  generateStateOnChangePropForCodeComponents(
-                    $state,
-                    "selectedKeys",
-                    ["directoryTree", "selectedKeys"],
-                    AntdDirectoryTree_Helpers
-                  ).apply(null, eventArgs);
-                  generateStateOnChangePropForCodeComponents(
-                    $state,
-                    "selectedNodes",
-                    ["directoryTree", "selectedNodes"],
-                    AntdDirectoryTree_Helpers
-                  ).apply(null, eventArgs);
-                },
-                selectedKeys: generateStateValueProp($state, [
-                  "directoryTree",
-                  "selectedKeys"
-                ]),
-                treeData: [
-                  {
-                    title: "Node 0",
-                    key: "0",
-                    children: [
-                      {
-                        title: "Node 0-0",
-                        key: "0-0",
-                        children: [
-                          {
-                            title: "Node 0-0-0",
-                            key: "0-0-0",
-                            disableCheckbox: true
-                          },
-                          { title: "Node 0-0-1", key: "0-0-1", disabled: true },
-                          { title: "Node 0-0-2", key: "0-0-2" }
-                        ]
-                      },
-                      {
-                        title: "Node 0-1",
-                        key: "0-1",
-                        children: [
-                          { title: "Node 0-1-0", key: "0-1-0" },
-                          { title: "Node 0-1-1", key: "0-1-1" }
-                        ]
-                      }
-                    ]
-                  }
-                ]
-              };
-              initializeCodeComponentStates(
-                $state,
-                [
-                  {
-                    name: "checkedKeys",
-                    plasmicStateName: "directoryTree.checkedKeys"
-                  },
-                  {
-                    name: "checkedNodes",
-                    plasmicStateName: "directoryTree.checkedNodes"
-                  },
-                  {
-                    name: "checkedDetails",
-                    plasmicStateName: "directoryTree.checkedDetails"
-                  },
-                  {
-                    name: "selectedKeys",
-                    plasmicStateName: "directoryTree.selectedKeys"
-                  },
-                  {
-                    name: "selectedNodes",
-                    plasmicStateName: "directoryTree.selectedNodes"
-                  },
-                  {
-                    name: "expandedKeys",
-                    plasmicStateName: "directoryTree.expandedKeys"
-                  }
-                ],
-                [],
-                AntdDirectoryTree_Helpers ?? {},
-                child$Props
-              );
-
-              return (
-                <AntdDirectoryTree
-                  data-plasmic-name={"directoryTree"}
-                  data-plasmic-override={overrides.directoryTree}
-                  {...child$Props}
-                />
-              );
-            })()}
             <AntdSelect
               data-plasmic-name={"select"}
               data-plasmic-override={overrides.select}
@@ -1045,18 +624,10 @@ function PlasmicDashboard__RenderFunc(props: {
 }
 
 const PlasmicDescendants = {
-  dashboard: [
-    "dashboard",
-    "textField",
-    "svg",
-    "table",
-    "directoryTree",
-    "select"
-  ],
+  dashboard: ["dashboard", "textField", "svg", "table", "select"],
   textField: ["textField"],
   svg: ["svg"],
   table: ["table"],
-  directoryTree: ["directoryTree"],
   select: ["select"]
 } as const;
 type NodeNameType = keyof typeof PlasmicDescendants;
@@ -1067,7 +638,6 @@ type NodeDefaultElementType = {
   textField: typeof TextField;
   svg: "svg";
   table: typeof RichTable;
-  directoryTree: typeof AntdDirectoryTree;
   select: typeof AntdSelect;
 };
 
@@ -1161,7 +731,6 @@ export const PlasmicDashboard = Object.assign(
     textField: makeNodeComponent("textField"),
     svg: makeNodeComponent("svg"),
     table: makeNodeComponent("table"),
-    directoryTree: makeNodeComponent("directoryTree"),
     select: makeNodeComponent("select"),
 
     // Metadata about props expected for PlasmicDashboard

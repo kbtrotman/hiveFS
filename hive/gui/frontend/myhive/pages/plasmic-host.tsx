@@ -1,14 +1,18 @@
-import * as React from 'react';
-import { PlasmicCanvasHost, registerComponent } from '@plasmicapp/react-web/lib/host';
+// pages/plasmic-host.tsx  ← or keep your name, but match it in Plasmic settings
+import * as React from "react";
+import { PlasmicCanvasHost, registerComponent } from "@plasmicapp/host";
 
-// You can register any code components that you want to use here; see
-// https://docs.plasmic.app/learn/code-components-ref/
-// And configure your Plasmic project to use the host url pointing at
-// the /plasmic-host page of your nextjs app (for example,
-// http://localhost:3000/plasmic-host).  See
-// https://docs.plasmic.app/learn/app-hosting/#set-a-plasmic-project-to-use-your-app-host
+import HiveDirectoryTree from "../components/HiveDirectoryTree";
 
-// registerComponent(...)
+registerComponent(HiveDirectoryTree, {
+  name: "DirectoryTree",
+  props: {
+    endpoint: { type: "string", defaultValue: "http://localhost:8000/api/v1/tree" },
+    authToken: { type: "string", defaultValueHint: "Optional Bearer token" },
+    rootParentParam: { type: "string", defaultValueHint: "" },
+    className: { type: "class" }, // <-- important
+  },
+});
 
 export default function PlasmicHost() {
   return <PlasmicCanvasHost />;
