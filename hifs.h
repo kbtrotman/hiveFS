@@ -24,6 +24,7 @@
 #include <linux/buffer_head.h>
 #include <linux/time.h>
 #include <linux/ktime.h>
+#include <linux/jiffies.h>
 #include <linux/sched.h>
 #include <linux/wait.h>
 #include <linux/kthread.h>
@@ -158,6 +159,8 @@ int hifs_cmd_fifo_in_pop(struct hifs_cmds *msg, bool nonblock);
 int hifs_data_fifo_in_pop(struct hifs_data_frame *frame, bool nonblock);
 unsigned int hifs_get_io_timeout_ms(void);
 void hifs_set_mount_io_timeout(unsigned int timeout_ms);
+unsigned int hifs_get_cache_flush_interval_ms(void);
+void hifs_cache_update_flush_interval_all(unsigned long interval_jiffies);
 
 /* hifs_volume_superblock.c */
 void hifs_save_sb(struct super_block *sb);
@@ -295,7 +298,7 @@ extern const struct super_operations hifs_sb_operations;
  **/
 extern struct kmem_cache *hifs_inode_cache;
 
-#define HIFS_CACHE_FLUSH_INTERVAL_DEFAULT (5 * HZ)
+#define HIFS_CACHE_FLUSH_INTERVAL_DEFAULT msecs_to_jiffies(HIFS_CACHE_FLUSH_INTERVAL_DEFAULT_MS)
 
 
 struct hifs_sb_info 
