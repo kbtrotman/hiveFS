@@ -203,6 +203,8 @@ extern struct hifs_link hifs_user_link;
 
 #define HIFS_IO_WAIT_DEFAULT_MS 1000U
 #define HIFS_IO_WAIT_MAX_MS     (5U * 60U * 1000U) /* 5 minutes cap */
+#define HIFS_CACHE_FLUSH_INTERVAL_DEFAULT_MS 5000U        /* 5 seconds */
+#define HIFS_CACHE_FLUSH_INTERVAL_MAX_MS     (60U * 60U * 1000U) /* 1 hour cap */
 
 
 /***********************
