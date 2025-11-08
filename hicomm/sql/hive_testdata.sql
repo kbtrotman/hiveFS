@@ -9,8 +9,6 @@ SET @root_size := 0;
 SET @root_blocks := 0;
 SET @root_links := 2;
 SET @now := UNIX_TIMESTAMP();
-SET @empty_fingerprints := REPEAT('00', 128 * 24);
-SET @empty_inode_blob := REPEAT('00', 3440 * 2);
 
 -- ----- meta: superblock -----
 INSERT INTO hive_meta.volume_superblocks (
@@ -38,10 +36,25 @@ INSERT INTO hive_meta.volume_root_dentries (
 
 -- ----- meta: volume inode (root) -----
 INSERT INTO hive_meta.volume_inodes (
-  volume_id, inode, inode_blob, epoch
+  volume_id, inode, i_msg_flags, i_version, i_flags, i_mode, i_ino, i_uid, i_gid,
+  i_hrd_lnk, i_atime, i_mtime, i_ctime, i_size, i_name,
+  i_addrb0, i_addrb1, i_addrb2, i_addrb3,
+  i_addre0, i_addre1, i_addre2, i_addre3,
+  i_blocks, i_bytes, i_links, i_hash_count, i_hash_reserved, epoch
 ) VALUES (
-  @volume_id, @root_inode, UNHEX(@empty_inode_blob), @now
-) ON DUPLICATE KEY UPDATE epoch = VALUES(epoch);
+  @volume_id, @root_inode,
+  0, 1, 0, @root_mode, @root_inode, 0, 0,
+  @root_links, @now, @now, @now, 0,
+  UNHEX(CONCAT('2f', REPEAT('00', (256 - 1)))),
+  0, 0, 0, 0,
+  0, 0, 0, 0,
+  0, 0, @root_links, 0, 0, @now
+) ON DUPLICATE KEY UPDATE
+  i_mtime = VALUES(i_mtime),
+  epoch = VALUES(epoch);
+
+DELETE FROM hive_meta.volume_inode_fingerprints
+ WHERE volume_id = @volume_id AND inode = @root_inode;
 
 -- ----- meta: convenience inodes row -----
 INSERT INTO hive_meta.inodes (

@@ -15,6 +15,7 @@
 #include <linux/math64.h>
 #include <linux/ktime.h>
 #include <linux/sort.h>
+#include <linux/mount.h>
 
 /*
    <<<HiveFS Cache Management>>>
@@ -511,7 +512,7 @@ void hifs_cache_sync_init(struct super_block *sb, struct hifs_sb_info *info)
 
     info->sb = sb;
     atomic_set(&info->cache_dirty, 0);
-    info->cache_flush_interval = HIFS_CACHE_FLUSH_INTERVAL_DEFAULT;
+    info->cache_flush_interval = msecs_to_jiffies(hifs_get_cache_flush_interval_ms());
     INIT_DELAYED_WORK(&info->cache_sync_work, hifs_cache_sync_workfn);
 }
 
@@ -533,6 +534,33 @@ void hifs_cache_request_flush(struct super_block *sb, bool immediate)
     atomic_set(&info->cache_dirty, 1);
     delay = immediate ? 0 : info->cache_flush_interval;
     mod_delayed_work(system_long_wq, &info->cache_sync_work, delay);
+}
+
+struct hifs_flush_interval_ctx {
+    unsigned long interval;
+};
+
+static void hifs_cache_apply_flush_interval(struct super_block *sb, void *data)
+{
+    struct hifs_flush_interval_ctx *ctx = data;
+    struct hifs_sb_info *info;
+
+    if (!sb || sb->s_type != &hifs_type)
+        return;
+
+    info = sb->s_fs_info;
+    if (!info)
+        return;
+
+    info->cache_flush_interval = ctx->interval;
+    mod_delayed_work(system_long_wq, &info->cache_sync_work, ctx->interval);
+}
+
+void hifs_cache_update_flush_interval_all(unsigned long interval)
+{
+    struct hifs_flush_interval_ctx ctx = { .interval = interval };
+
+    iterate_supers_type(&hifs_type, hifs_cache_apply_flush_interval, &ctx);
 }
 
 /* Copy bitmap under spinlock and flush it to disk without holding the lock. */

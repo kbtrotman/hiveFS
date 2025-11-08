@@ -506,9 +506,6 @@ void hifs_put_super(struct super_block *sb)
         sync_blockdev(sb->s_bdev);
     }
 
-	/* Then flush the dirty cache items in cache related to that virtual FS to user space */
-	hifs_flush_dirty_cache_items();
-
 	/* Finally, free the superblock info structure. */
 	hifs_dedupe_shutdown(info);
 
