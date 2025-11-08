@@ -4,10 +4,10 @@ CC = gcc
 INCS = -I../
 
 # Libraries
-LIBS = -L/usr/lib -L/usr/lib/x86_64-linux-gnu
+LIBS = -L/usr/lib -L/usr/lib/x86_64-linux-gnu $(shell pkg-config --libs erasurecode)
 
 # Define any compile-time flags
-CFLAGS = -std=gnu11 -Wall -Wextra -g $(INCS)
+CFLAGS = -std=gnu11 -Wall -Wextra -g $(INCS) -Wextra $(shell pkg-config --cflags erasurecode)
 LDFLAGS = $(LIBS)
 
 MYSQL_CONFIG := $(shell command -v mysql_config 2>/dev/null)
