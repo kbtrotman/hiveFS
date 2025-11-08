@@ -33,6 +33,18 @@
 
 void hicomm_log(int level, const char *fmt, ...);
 
+
+// Erasure Encoding context
+typedef struct {
+    int desc;           // liberasurecode instance handle
+    size_t k;
+    size_t m;
+    size_t w;
+    int checksum;       // CHKSUM_*
+    int initialized;
+} ec_ctx_t;
+// Erasure Encoding context
+
 /* Convenience macros mirroring the kernel names */
 #define hifs_emerg(fmt, ...)   hicomm_log(LOG_EMERG,   "hivefs: " fmt, ##__VA_ARGS__)
 #define hifs_alert(fmt, ...)   hicomm_log(LOG_ALERT,   "hivefs: " fmt, ##__VA_ARGS__)
