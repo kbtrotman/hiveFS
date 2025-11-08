@@ -11,6 +11,7 @@
 #include "sql/hi_command_sql.h"
 
 #include <arpa/inet.h>
+#include <stdlib.h>
 #include <endian.h>
 #include <netdb.h>
 #include <sys/utsname.h>
@@ -72,6 +73,16 @@ static bool hex_to_bytes(const char *hex, size_t hex_len, uint8_t *dst, size_t d
 	if (dst_len > hex_len / 2)
 		memset(dst + hex_len / 2, 0, dst_len - hex_len / 2);
 	return true;
+}
+
+static uint32_t sql_to_u32(const char *s)
+{
+	return s ? (uint32_t)strtoul(s, NULL, 10) : 0;
+}
+
+static uint64_t sql_to_u64(const char *s)
+{
+	return s ? strtoull(s, NULL, 10) : 0ULL;
 }
 
 
@@ -772,16 +783,18 @@ bool hifs_volume_inode_load(uint64_t volume_id, uint64_t inode,
 				 struct hifs_inode_wire *out)
 {
 	char sql_query[MAX_QUERY_SIZE];
-	MYSQL_RES *res;
+	MYSQL_RES *res = NULL;
 	MYSQL_ROW row;
 	unsigned long *lengths;
 	bool ok = false;
+	int idx = 0;
 
 	if (!sqldb.sql_init || !sqldb.conn || !out)
 		return false;
 
-    snprintf(sql_query, sizeof(sql_query), SQL_VOLUME_INODE_SELECT,
-             (unsigned long long)volume_id, (unsigned long long)inode);
+	snprintf(sql_query, sizeof(sql_query), SQL_VOLUME_INODE_SELECT,
+		 (unsigned long long)volume_id,
+		 (unsigned long long)inode);
 
 	res = hifs_execute_sql(sql_query);
 	if (!res)
@@ -795,15 +808,83 @@ bool hifs_volume_inode_load(uint64_t volume_id, uint64_t inode,
 	if (!row || !lengths)
 		goto out;
 
-	if (!row[0] || !hex_to_bytes(row[0], lengths[0],
-				      (uint8_t *)out, sizeof(*out)))
+	memset(out, 0, sizeof(*out));
+
+	out->i_msg_flags = htole32(sql_to_u32(row[idx++]));
+	out->i_version = row[idx] ? (uint8_t)strtoul(row[idx], NULL, 10) : 0;
+	idx++;
+	out->i_flags = row[idx] ? (uint8_t)strtoul(row[idx], NULL, 10) : 0;
+	idx++;
+	out->i_mode = htole32(sql_to_u32(row[idx++]));
+	out->i_ino = htole64(sql_to_u64(row[idx++]));
+	out->i_uid = htole16((uint16_t)sql_to_u32(row[idx++]));
+	out->i_gid = htole16((uint16_t)sql_to_u32(row[idx++]));
+	out->i_hrd_lnk = htole16((uint16_t)sql_to_u32(row[idx++]));
+	out->i_atime = htole32(sql_to_u32(row[idx++]));
+	out->i_mtime = htole32(sql_to_u32(row[idx++]));
+	out->i_ctime = htole32(sql_to_u32(row[idx++]));
+	out->i_size = htole32(sql_to_u32(row[idx++]));
+
+	if (!row[idx] || !hex_to_bytes(row[idx], lengths[idx],
+				       out->i_name, sizeof(out->i_name)))
 		goto out;
+	idx++;
+
+	out->i_addrb[0] = htole32(sql_to_u32(row[idx++]));
+	out->i_addrb[1] = htole32(sql_to_u32(row[idx++]));
+	out->i_addrb[2] = htole32(sql_to_u32(row[idx++]));
+	out->i_addrb[3] = htole32(sql_to_u32(row[idx++]));
+	out->i_addre[0] = htole32(sql_to_u32(row[idx++]));
+	out->i_addre[1] = htole32(sql_to_u32(row[idx++]));
+	out->i_addre[2] = htole32(sql_to_u32(row[idx++]));
+	out->i_addre[3] = htole32(sql_to_u32(row[idx++]));
+	out->i_blocks = htole32(sql_to_u32(row[idx++]));
+	out->i_bytes = htole32(sql_to_u32(row[idx++]));
+	out->i_links = row[idx] ? (uint8_t)strtoul(row[idx], NULL, 10) : 0;
+	idx++;
+	out->i_hash_count = htole16((uint16_t)sql_to_u32(row[idx++]));
+	out->i_hash_reserved = htole16((uint16_t)sql_to_u32(row[idx++]));
+
+	/* Load fingerprints */
+	{
+		MYSQL_RES *fp_res = NULL;
+		MYSQL_ROW fp_row;
+		unsigned long *fp_lens;
+
+		snprintf(sql_query, sizeof(sql_query), SQL_VOLUME_INODE_FP_SELECT,
+			 (unsigned long long)volume_id,
+			 (unsigned long long)inode);
+		fp_res = hifs_execute_sql(sql_query);
+		if (fp_res) {
+			while ((fp_row = mysql_fetch_row(fp_res)) != NULL) {
+				fp_lens = mysql_fetch_lengths(fp_res);
+				if (!fp_lens)
+					break;
+				unsigned int fp_idx = sql_to_u32(fp_row[0]);
+				if (fp_idx >= HIFS_MAX_BLOCK_HASHES)
+					continue;
+				out->i_block_fingerprints[fp_idx].block_no =
+					htole32(sql_to_u32(fp_row[1]));
+				out->i_block_fingerprints[fp_idx].hash_algo =
+					fp_row[2] ? (uint8_t)strtoul(fp_row[2], NULL, 10) : 0;
+				if (!fp_row[3] ||
+				    !hex_to_bytes(fp_row[3], fp_lens[3],
+						  out->i_block_fingerprints[fp_idx].hash,
+						  sizeof(out->i_block_fingerprints[fp_idx].hash)))
+					continue;
+			}
+			mysql_free_result(fp_res);
+			sqldb.last_query = NULL;
+		}
+	}
 
 	ok = true;
 
 out:
-	mysql_free_result(res);
-	sqldb.last_query = NULL;
+	if (res) {
+		mysql_free_result(res);
+		sqldb.last_query = NULL;
+	}
 	return ok;
 }
 
@@ -811,22 +892,52 @@ bool hifs_volume_inode_store(uint64_t volume_id,
 			 const struct hifs_inode_wire *inode)
 {
 	char *sql_query = NULL;
-	char blob_hex[sizeof(*inode) * 2 + 1];
+	char name_hex[HIFS_MAX_NAME_SIZE * 2 + 1];
 	uint32_t epoch;
 	uint64_t ino_host;
+	uint32_t msg_flags, mode, atime, mtime, ctime, size;
+	uint32_t addrb[HIFS_INODE_TSIZE];
+	uint32_t addre[HIFS_INODE_TSIZE];
+	uint32_t blocks, bytes;
+	uint16_t uid, gid, hrd_lnk, hash_count, hash_reserved;
+	uint8_t version, flags, links;
 
 	if (!sqldb.sql_init || !sqldb.conn || !inode)
 		return false;
 
-	bytes_to_hex((const uint8_t *)inode, sizeof(*inode), blob_hex);
+	msg_flags = le32toh(inode->i_msg_flags);
+	version = inode->i_version;
+	flags = inode->i_flags;
+	mode = le32toh(inode->i_mode);
 	ino_host = le64toh(inode->i_ino);
-	epoch = le32toh(inode->i_ctime);
+	uid = le16toh(inode->i_uid);
+	gid = le16toh(inode->i_gid);
+	hrd_lnk = le16toh(inode->i_hrd_lnk);
+	atime = le32toh(inode->i_atime);
+	mtime = le32toh(inode->i_mtime);
+	ctime = le32toh(inode->i_ctime);
+	size = le32toh(inode->i_size);
+	bytes_to_hex((const uint8_t *)inode->i_name, sizeof(inode->i_name), name_hex);
+	for (size_t i = 0; i < HIFS_INODE_TSIZE; ++i) {
+		addrb[i] = le32toh(inode->i_addrb[i]);
+		addre[i] = le32toh(inode->i_addre[i]);
+	}
+	blocks = le32toh(inode->i_blocks);
+	bytes = le32toh(inode->i_bytes);
+	links = inode->i_links;
+	hash_count = le16toh(inode->i_hash_count);
+	hash_reserved = le16toh(inode->i_hash_reserved);
+	epoch = ctime;
 
 	size_t sql_len = snprintf(NULL, 0, SQL_VOLUME_INODE_UPSERT,
-				   (unsigned long long)volume_id,
-				   (unsigned long long)ino_host,
-				   blob_hex,
-				   epoch) + 1;
+				  (unsigned long long)volume_id,
+				  (unsigned long long)ino_host,
+				  msg_flags, version, flags, mode,
+				  (unsigned long long)ino_host, uid, gid,
+				  hrd_lnk, atime, mtime, ctime, size, name_hex,
+				  addrb[0], addrb[1], addrb[2], addrb[3],
+				  addre[0], addre[1], addre[2], addre[3],
+				  blocks, bytes, links, hash_count, hash_reserved, epoch) + 1;
 	sql_query = malloc(sql_len);
 	if (!sql_query)
 		return false;
@@ -834,14 +945,44 @@ bool hifs_volume_inode_store(uint64_t volume_id,
 	snprintf(sql_query, sql_len, SQL_VOLUME_INODE_UPSERT,
 		 (unsigned long long)volume_id,
 		 (unsigned long long)ino_host,
-		 blob_hex,
-		 epoch);
+		 msg_flags, version, flags, mode,
+		 (unsigned long long)ino_host, uid, gid,
+		 hrd_lnk, atime, mtime, ctime, size, name_hex,
+		 addrb[0], addrb[1], addrb[2], addrb[3],
+		 addre[0], addre[1], addre[2], addre[3],
+		 blocks, bytes, links, hash_count, hash_reserved, epoch);
 
-	{
-		bool ok = hifs_insert_sql(sql_query);
+	if (!hifs_insert_sql(sql_query)) {
 		free(sql_query);
-		return ok;
+		return false;
 	}
+	free(sql_query);
+
+	/* Refresh fingerprints */
+	char sql_tmp[MAX_QUERY_SIZE];
+	snprintf(sql_tmp, sizeof(sql_tmp), SQL_VOLUME_INODE_FP_DELETE,
+		 (unsigned long long)volume_id,
+		 (unsigned long long)ino_host);
+	if (!hifs_insert_sql(sql_tmp))
+		return false;
+
+	for (uint16_t i = 0; i < hash_count && i < HIFS_MAX_BLOCK_HASHES; ++i) {
+		const struct hifs_block_fingerprint_wire *fp =
+			&inode->i_block_fingerprints[i];
+		uint32_t block_no = le32toh(fp->block_no);
+		if (block_no == 0 && fp->hash_algo == 0)
+			continue;
+		char hash_hex[HIFS_BLOCK_HASH_SIZE * 2 + 1];
+		bytes_to_hex(fp->hash, HIFS_BLOCK_HASH_SIZE, hash_hex);
+		snprintf(sql_tmp, sizeof(sql_tmp), SQL_VOLUME_INODE_FP_REPLACE,
+			 (unsigned long long)volume_id,
+			 (unsigned long long)ino_host,
+			 i, block_no, fp->hash_algo, hash_hex);
+		if (!hifs_insert_sql(sql_tmp))
+			return false;
+	}
+
+	return true;
 }
 
 bool hifs_volume_block_load(uint64_t volume_id, uint64_t block_no,

@@ -123,8 +123,6 @@ static int hifs_sync_fs(struct super_block *sb, int wait)
     if (!ret)
         atomic_set(&info->cache_dirty, 0);
 
-    hifs_flush_dirty_cache_items();
-
     if (atomic_read(&info->cache_dirty))
         hifs_cache_request_flush(sb, false);
 

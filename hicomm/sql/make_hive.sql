@@ -143,15 +143,52 @@ CREATE TABLE IF NOT EXISTS volume_root_dentries (
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS volume_inodes (
-  volume_id    BIGINT UNSIGNED NOT NULL,
-  inode        BIGINT UNSIGNED NOT NULL,
-  inode_blob   BLOB NOT NULL,
-  epoch        BIGINT UNSIGNED NOT NULL,
-  updated_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-               ON UPDATE CURRENT_TIMESTAMP,
+  volume_id     BIGINT UNSIGNED NOT NULL,
+  inode         BIGINT UNSIGNED NOT NULL,
+  i_msg_flags   INT UNSIGNED NOT NULL,
+  i_version     TINYINT UNSIGNED NOT NULL,
+  i_flags       TINYINT UNSIGNED NOT NULL,
+  i_mode        INT UNSIGNED NOT NULL,
+  i_ino         BIGINT UNSIGNED NOT NULL,
+  i_uid         INT UNSIGNED NOT NULL,
+  i_gid         INT UNSIGNED NOT NULL,
+  i_hrd_lnk     INT UNSIGNED NOT NULL,
+  i_atime       INT UNSIGNED NOT NULL,
+  i_mtime       INT UNSIGNED NOT NULL,
+  i_ctime       INT UNSIGNED NOT NULL,
+  i_size        INT UNSIGNED NOT NULL,
+  i_name        VARBINARY(256) NOT NULL,
+  i_addrb0      INT UNSIGNED NOT NULL,
+  i_addrb1      INT UNSIGNED NOT NULL,
+  i_addrb2      INT UNSIGNED NOT NULL,
+  i_addrb3      INT UNSIGNED NOT NULL,
+  i_addre0      INT UNSIGNED NOT NULL,
+  i_addre1      INT UNSIGNED NOT NULL,
+  i_addre2      INT UNSIGNED NOT NULL,
+  i_addre3      INT UNSIGNED NOT NULL,
+  i_blocks      INT UNSIGNED NOT NULL,
+  i_bytes       INT UNSIGNED NOT NULL,
+  i_links       TINYINT UNSIGNED NOT NULL,
+  i_hash_count  SMALLINT UNSIGNED NOT NULL,
+  i_hash_reserved SMALLINT UNSIGNED NOT NULL,
+  epoch         BIGINT UNSIGNED NOT NULL,
+  updated_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (volume_id, inode),
   CONSTRAINT fk_volume_inode FOREIGN KEY (volume_id)
     REFERENCES volume_superblocks(volume_id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS volume_inode_fingerprints (
+  volume_id    BIGINT UNSIGNED NOT NULL,
+  inode        BIGINT UNSIGNED NOT NULL,
+  fp_index     INT UNSIGNED NOT NULL,
+  block_no     INT UNSIGNED NOT NULL,
+  hash_algo    TINYINT UNSIGNED NOT NULL,
+  block_hash   VARBINARY(32) NOT NULL,
+  PRIMARY KEY (volume_id, inode, fp_index),
+  CONSTRAINT fk_volume_inode_fp FOREIGN KEY (volume_id, inode)
+    REFERENCES volume_inodes(volume_id, inode) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS volume_block_mappings (

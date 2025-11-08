@@ -38,7 +38,11 @@ static DECLARE_WAIT_QUEUE_HEAD(hifs_cmd_in_wait);
 static DECLARE_WAIT_QUEUE_HEAD(hifs_data_in_wait);
 
 static atomic_long_t hifs_sysfs_timeout_override = ATOMIC_LONG_INIT(-1);
+static atomic_long_t hifs_sysfs_flush_override = ATOMIC_LONG_INIT(-1);
 static unsigned int hifs_mount_timeout_ms = HIFS_IO_WAIT_DEFAULT_MS;
+static unsigned int hifs_mount_flush_interval_ms = HIFS_CACHE_FLUSH_INTERVAL_DEFAULT_MS;
+static bool hifs_timeout_attr_created;
+static bool hifs_flush_attr_created;
 
 unsigned int hifs_get_io_timeout_ms(void)
 {
@@ -63,6 +67,31 @@ static void hifs_set_sysfs_timeout_override(long timeout_ms)
     else {
         timeout_ms = clamp_t(long, timeout_ms, 0L, (long)HIFS_IO_WAIT_MAX_MS);
         atomic_long_set(&hifs_sysfs_timeout_override, timeout_ms);
+    }
+}
+
+static unsigned int hifs_clamp_flush_interval_ms(unsigned int val)
+{
+    return clamp_t(unsigned int, val, 0U, HIFS_CACHE_FLUSH_INTERVAL_MAX_MS);
+}
+
+unsigned int hifs_get_cache_flush_interval_ms(void)
+{
+    long override = atomic_long_read(&hifs_sysfs_flush_override);
+
+    if (override >= 0)
+        return hifs_clamp_flush_interval_ms((unsigned int)override);
+
+    return hifs_clamp_flush_interval_ms(READ_ONCE(hifs_mount_flush_interval_ms));
+}
+
+static void hifs_set_sysfs_flush_override(long interval_ms)
+{
+    if (interval_ms < 0)
+        atomic_long_set(&hifs_sysfs_flush_override, -1);
+    else {
+        interval_ms = clamp_t(long, interval_ms, 0L, (long)HIFS_CACHE_FLUSH_INTERVAL_MAX_MS);
+        atomic_long_set(&hifs_sysfs_flush_override, interval_ms);
     }
 }
 
@@ -233,6 +262,33 @@ static ssize_t timeout_inms_store(struct device *dev,
 
 static DEVICE_ATTR_RW(timeout_inms);
 
+static ssize_t cache_flush_interval_inms_show(struct device *dev,
+                                              struct device_attribute *attr,
+                                              char *buf)
+{
+    return scnprintf(buf, PAGE_SIZE, "%u\n",
+                     hifs_get_cache_flush_interval_ms());
+}
+
+static ssize_t cache_flush_interval_inms_store(struct device *dev,
+                                               struct device_attribute *attr,
+                                               const char *buf, size_t count)
+{
+    long val;
+    int ret;
+
+    ret = kstrtol(buf, 0, &val);
+    if (ret)
+        return ret;
+
+    hifs_set_sysfs_flush_override(val);
+    hifs_cache_update_flush_interval_all(
+        msecs_to_jiffies(hifs_get_cache_flush_interval_ms()));
+    return count;
+}
+
+static DEVICE_ATTR_RW(cache_flush_interval_inms);
+
 static long hifs_comm_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
 	void __user *user_ptr = (void __user *)arg;
@@ -377,6 +433,18 @@ int hifs_fifo_init(void)
         misc_deregister(&hifs_comm_device);
         return ret;
     }
+    hifs_timeout_attr_created = true;
+
+    ret = device_create_file(hifs_comm_device.this_device,
+                             &dev_attr_cache_flush_interval_inms);
+    if (ret) {
+        hifs_err("Failed to create cache_flush_interval_inms attribute: %d", ret);
+        device_remove_file(hifs_comm_device.this_device, &dev_attr_timeout_inms);
+        hifs_timeout_attr_created = false;
+        misc_deregister(&hifs_comm_device);
+        return ret;
+    }
+    hifs_flush_attr_created = true;
 
     return 0;
 }
@@ -386,12 +454,22 @@ void hifs_fifo_exit(void)
 	unsigned long flags;
 
     if (hifs_comm_device.this_device) {
-        device_remove_file(hifs_comm_device.this_device, &dev_attr_timeout_inms);
+        if (hifs_flush_attr_created)
+            device_remove_file(hifs_comm_device.this_device,
+                               &dev_attr_cache_flush_interval_inms);
+        if (hifs_timeout_attr_created)
+            device_remove_file(hifs_comm_device.this_device, &dev_attr_timeout_inms);
     }
+    hifs_flush_attr_created = false;
+    hifs_timeout_attr_created = false;
 
     misc_deregister(&hifs_comm_device);
     atomic_long_set(&hifs_sysfs_timeout_override, -1);
+    atomic_long_set(&hifs_sysfs_flush_override, -1);
     hifs_set_mount_io_timeout(HIFS_IO_WAIT_DEFAULT_MS);
+    hifs_mount_flush_interval_ms = HIFS_CACHE_FLUSH_INTERVAL_DEFAULT_MS;
+    hifs_cache_update_flush_interval_all(
+        msecs_to_jiffies(hifs_get_cache_flush_interval_ms()));
 
 	spin_lock_irqsave(&hifs_cmd_lock, flags);
 	kfifo_reset(&hifs_cmd_fifo);

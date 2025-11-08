@@ -121,12 +121,48 @@
 	"de_name=VALUES(de_name)"
 
 #define SQL_VOLUME_INODE_SELECT \
-	"SELECT HEX(inode_blob) FROM volume_inodes WHERE volume_id=%llu AND inode=%llu"
+	"SELECT i_msg_flags, i_version, i_flags, i_mode, i_ino, i_uid, i_gid, " \
+	"i_hrd_lnk, i_atime, i_mtime, i_ctime, i_size, HEX(i_name), " \
+	"i_addrb0, i_addrb1, i_addrb2, i_addrb3, " \
+	"i_addre0, i_addre1, i_addre2, i_addre3, " \
+	"i_blocks, i_bytes, i_links, i_hash_count, i_hash_reserved " \
+	"FROM volume_inodes WHERE volume_id=%llu AND inode=%llu"
 
 #define SQL_VOLUME_INODE_UPSERT \
-	"INSERT INTO volume_inodes (volume_id, inode, inode_blob, epoch) " \
-	"VALUES (%llu, %llu, UNHEX('%s'), %u) " \
-	"ON DUPLICATE KEY UPDATE inode_blob=VALUES(inode_blob), epoch=VALUES(epoch)"
+	"INSERT INTO volume_inodes " \
+	"(volume_id, inode, i_msg_flags, i_version, i_flags, i_mode, i_ino, i_uid, i_gid, " \
+	"i_hrd_lnk, i_atime, i_mtime, i_ctime, i_size, i_name, " \
+	"i_addrb0, i_addrb1, i_addrb2, i_addrb3, " \
+	"i_addre0, i_addre1, i_addre2, i_addre3, " \
+	"i_blocks, i_bytes, i_links, i_hash_count, i_hash_reserved, epoch) " \
+	"VALUES (%llu, %llu, %u, %u, %u, %u, %llu, %u, %u, %u, %u, %u, %u, %u, UNHEX('%s'), " \
+	"%u, %u, %u, %u, %u, %u, %u, %u, %u, %u, %u, %u, %u, %u) " \
+	"ON DUPLICATE KEY UPDATE " \
+	"i_msg_flags=VALUES(i_msg_flags), i_version=VALUES(i_version), " \
+	"i_flags=VALUES(i_flags), i_mode=VALUES(i_mode), i_ino=VALUES(i_ino), " \
+	"i_uid=VALUES(i_uid), i_gid=VALUES(i_gid), i_hrd_lnk=VALUES(i_hrd_lnk), " \
+	"i_atime=VALUES(i_atime), i_mtime=VALUES(i_mtime), i_ctime=VALUES(i_ctime), " \
+	"i_size=VALUES(i_size), i_name=VALUES(i_name), " \
+	"i_addrb0=VALUES(i_addrb0), i_addrb1=VALUES(i_addrb1), " \
+	"i_addrb2=VALUES(i_addrb2), i_addrb3=VALUES(i_addrb3), " \
+	"i_addre0=VALUES(i_addre0), i_addre1=VALUES(i_addre1), " \
+	"i_addre2=VALUES(i_addre2), i_addre3=VALUES(i_addre3), " \
+	"i_blocks=VALUES(i_blocks), i_bytes=VALUES(i_bytes), " \
+	"i_links=VALUES(i_links), i_hash_count=VALUES(i_hash_count), " \
+	"i_hash_reserved=VALUES(i_hash_reserved), epoch=VALUES(epoch)"
+
+#define SQL_VOLUME_INODE_FP_SELECT \
+	"SELECT fp_index, block_no, hash_algo, HEX(block_hash) " \
+	"FROM volume_inode_fingerprints WHERE volume_id=%llu AND inode=%llu " \
+	"ORDER BY fp_index"
+
+#define SQL_VOLUME_INODE_FP_DELETE \
+	"DELETE FROM volume_inode_fingerprints WHERE volume_id=%llu AND inode=%llu"
+
+#define SQL_VOLUME_INODE_FP_REPLACE \
+	"REPLACE INTO volume_inode_fingerprints " \
+	"(volume_id, inode, fp_index, block_no, hash_algo, block_hash) " \
+	"VALUES (%llu, %llu, %u, %u, %u, UNHEX('%s'))"
 
 #define SQL_VOLUME_BLOCK_MAP_SELECT \
     "SELECT hash_algo, HEX(block_hash) FROM volume_block_mappings " \
