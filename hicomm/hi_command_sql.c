@@ -986,134 +986,360 @@ bool hifs_volume_inode_store(uint64_t volume_id,
 }
 
 bool hifs_volume_block_load(uint64_t volume_id, uint64_t block_no,
-			 uint8_t *buf, uint32_t *len)
+                            uint8_t *buf, uint32_t *len)
 {
-	char sql_query[MAX_QUERY_SIZE];
-	MYSQL_RES *res = NULL;
-	MYSQL_ROW row;
-	unsigned long *lengths;
-	bool ok = false;
-	unsigned int hash_algo = 0;
-	char hash_hex[SHA256_DIGEST_LENGTH * 2 + 1];
+    char sql_query[MAX_QUERY_SIZE];
+    MYSQL_RES *res = NULL;
+    MYSQL_ROW row;
+    unsigned long *lengths;
+    bool ok = false;
 
-	if (!sqldb.sql_init || !sqldb.conn || !buf || !len)
-		return false;
+    unsigned int hash_algo = 0;
+    char hash_hex[SHA256_DIGEST_LENGTH * 2 + 1];
 
-	snprintf(sql_query, sizeof(sql_query), SQL_VOLUME_BLOCK_MAP_SELECT,
-		 (unsigned long long)volume_id,
-		 (unsigned long long)block_no);
+    if (!sqldb.sql_init || !sqldb.conn || !buf || !len)
+        return false;
 
-	res = hifs_execute_sql(sql_query);
-	if (!res)
-		return false;
+    /* ------------------------------------------------------------------
+     * 0) Ensure EC is initialized (cheap if already done)
+     * ------------------------------------------------------------------ */
+    if (hifs_ec_ensure_init() != 0) {
+        if (hifs_erasure_coding_init() != 0) {
+            hifs_warning("EC init failed in load");
+            return false;
+        }
+    }
 
-	if (mysql_num_rows(res) == 0)
-		goto out;
+    /* ------------------------------------------------------------------
+     * 1) volume_id+block_no -> (hash_algo, block_hash)
+     * ------------------------------------------------------------------ */
+    snprintf(sql_query, sizeof(sql_query), SQL_VOLUME_BLOCK_MAP_SELECT,
+             (unsigned long long)volume_id,
+             (unsigned long long)block_no);
 
-	row = mysql_fetch_row(res);
-	lengths = mysql_fetch_lengths(res);
-	if (!row || !lengths)
-		goto out;
+    res = hifs_execute_sql(sql_query);
+    if (!res) return false;
+    if (mysql_num_rows(res) == 0) goto out;
 
-	hash_algo = row[0] ? (unsigned int)strtoul(row[0], NULL, 10) : HIFS_HASH_ALGO_NONE;
-	if (!row[1] || lengths[1] == 0)
-		goto out;
+    row = mysql_fetch_row(res);
+    lengths = mysql_fetch_lengths(res);
+    if (!row || !lengths) goto out;
 
-	{
-		unsigned long hex_len = lengths[1];
-		if (hex_len >= sizeof(hash_hex))
-			hex_len = sizeof(hash_hex) - 1;
-		memcpy(hash_hex, row[1], hex_len);
-		hash_hex[hex_len] = '\0';
-	}
+    hash_algo = row[0] ? (unsigned int)strtoul(row[0], NULL, 10) : HIFS_HASH_ALGO_NONE;
+    if (!row[1] || lengths[1] == 0) goto out;
 
-	mysql_free_result(res);
-	sqldb.last_query = NULL;
-	res = NULL;
+    {
+        unsigned long hex_len = lengths[1];
+        if (hex_len >= sizeof(hash_hex))
+            hex_len = sizeof(hash_hex) - 1;
+        memcpy(hash_hex, row[1], hex_len);
+        hash_hex[hex_len] = '\0';
+    }
 
-	snprintf(sql_query, sizeof(sql_query), SQL_DATA_BLOCK_SELECT,
-		 hash_algo,
-		 hash_hex);
+    mysql_free_result(res);
+    sqldb.last_query = NULL;
+    res = NULL;
 
-	res = hifs_execute_sql(sql_query);
-	if (!res)
-		return false;
+    /* ------------------------------------------------------------------
+     * 2) block_hash -> 9 stripe IDs
+     * ------------------------------------------------------------------ */
+    snprintf(sql_query, sizeof(sql_query), SQL_HASH_TO_ESTRIPES_SELECT,
+             hash_algo, hash_hex);
 
-	if (mysql_num_rows(res) == 0)
-		goto out;
+    res = hifs_execute_sql(sql_query);
+    if (!res) return false;
+    if (mysql_num_rows(res) == 0) goto out;
 
-	row = mysql_fetch_row(res);
-	lengths = mysql_fetch_lengths(res);
-	if (!row || !lengths)
-		goto out;
+    row = mysql_fetch_row(res);
+    lengths = mysql_fetch_lengths(res);
+    if (!row || !lengths) goto out;
 
-	if (!row[0] || !hex_to_bytes(row[0], lengths[0], buf, HIFS_DEFAULT_BLOCK_SIZE))
-		goto out;
-	*len = lengths[0] / 2;
-	ok = true;
+    enum { NUM_DATA = HIFS_EC_K, NUM_PARITY = HIFS_EC_M, TOTAL = HIFS_EC_K + HIFS_EC_M };
+    uint64_t stripe_ids[TOTAL] = {0};
+
+    for (size_t i = 0; i < TOTAL; ++i) {
+        if (!row[i]) { stripe_ids[i] = 0; continue; }
+        stripe_ids[i] = (uint64_t)strtoull(row[i], NULL, 10);
+    }
+
+    mysql_free_result(res);
+    sqldb.last_query = NULL;
+    res = NULL;
+
+    /* ------------------------------------------------------------------
+     * 3) Load each stripe payload (hex) -> bytes
+     * ------------------------------------------------------------------ */
+    uint8_t *encoded_chunks[TOTAL] = {0};
+    size_t   frag_size = 0;          /* bytes per fragment */
+    size_t   found = 0;
+
+    for (size_t i = 0; i < TOTAL; ++i) {
+        if (stripe_ids[i] == 0)
+            continue; /* missing id; we'll try partial rebuild later */
+
+        snprintf(sql_query, sizeof(sql_query), SQL_ECBLOCK_SELECT,
+                 (unsigned long long)stripe_ids[i]);
+
+        res = hifs_execute_sql(sql_query);
+        if (!res) goto fail_chunks;
+
+        if (mysql_num_rows(res) == 0) {
+            mysql_free_result(res);
+            sqldb.last_query = NULL;
+            res = NULL;
+            continue; /* missing row; try partial rebuild later */
+        }
+
+        row = mysql_fetch_row(res);
+        lengths = mysql_fetch_lengths(res);
+        if (!row || !lengths) {
+            mysql_free_result(res);
+            sqldb.last_query = NULL;
+            res = NULL;
+            goto fail_chunks;
+        }
+
+        /* row[0] is HEX(ec_block). Convert to bytes. */
+        unsigned long hex_len = lengths[0];
+        if (!row[0] || hex_len == 0) {
+            mysql_free_result(res);
+            sqldb.last_query = NULL;
+            res = NULL;
+            continue;
+        }
+
+        size_t this_frag = hex_len / 2; /* 2 hex chars per byte */
+        if (frag_size == 0) {
+            frag_size = this_frag;
+        } else if (this_frag != frag_size) {
+            hifs_warning("Fragment size mismatch: expected %zu, got %zu", frag_size, this_frag);
+            mysql_free_result(res);
+            sqldb.last_query = NULL;
+            res = NULL;
+            goto fail_chunks;
+        }
+
+        encoded_chunks[i] = (uint8_t *)malloc(frag_size);
+        if (!encoded_chunks[i]) {
+            hifs_warning("OOM for fragment %zu", i);
+            mysql_free_result(res);
+            sqldb.last_query = NULL;
+            res = NULL;
+            goto fail_chunks;
+        }
+
+        if (!hex_to_bytes(row[0], hex_len, encoded_chunks[i], frag_size)) {
+            hifs_warning("hex_to_bytes failed for stripe %llu",
+                         (unsigned long long)stripe_ids[i]);
+            mysql_free_result(res);
+            sqldb.last_query = NULL;
+            res = NULL;
+            goto fail_chunks;
+        }
+
+        ++found;
+
+        mysql_free_result(res);
+        sqldb.last_query = NULL;
+        res = NULL;
+    }
+
+    if (frag_size == 0) {
+        hifs_warning("No EC fragments found for hash %s", hash_hex);
+        goto fail_chunks;
+    }
+
+    /* ------------------------------------------------------------------
+     * 4) Decode
+     *    - If all present: use decode()
+     *    - If some missing: (optional) try rebuild_from_partial()
+     * ------------------------------------------------------------------ */
+    {
+        size_t out_cap = (size_t)*len;   /* caller-provided capacity */
+        size_t out_len = out_cap;
+
+        int rc;
+        if (found == TOTAL) {
+            rc = hicomm_erasure_coding_decode(encoded_chunks, frag_size,
+                                              NUM_DATA, NUM_PARITY,
+                                              buf, &out_len);
+        } else {
+            /* Some stripes missing; if you prefer strictness, set rc=-1 here instead. */
+            rc = hicomm_erasure_coding_rebuild_from_partial(encoded_chunks, frag_size,
+                                                            NUM_DATA, NUM_PARITY,
+                                                            buf, &out_len);
+        }
+
+        if (rc == -2) {
+            /* Caller buffer too small; tell them how much is needed */
+            *len = (uint32_t)out_len;
+            hifs_warning("Insufficient buffer: need %zu bytes", out_len);
+            goto fail_chunks;
+        }
+        if (rc != 0) {
+            hifs_warning("EC decode failed (rc=%d) for %s", rc, hash_hex);
+            goto fail_chunks;
+        }
+
+        *len = (uint32_t)out_len;
+        ok = true;
+    }
+
+    /* ------------------------------------------------------------------
+     * 5) Cleanup and return
+     * ------------------------------------------------------------------ */
+fail_chunks:
+    for (size_t i = 0; i < TOTAL; ++i) {
+        free(encoded_chunks[i]);
+        encoded_chunks[i] = NULL;
+    }
 
 out:
-	if (res) {
-		mysql_free_result(res);
-		sqldb.last_query = NULL;
-	}
-	return ok;
+    if (res) {
+        mysql_free_result(res);
+        sqldb.last_query = NULL;
+    }
+    return ok;
 }
 
 bool hifs_volume_block_store(uint64_t volume_id, uint64_t block_no,
-				 const uint8_t *buf, uint32_t len)
+                             const uint8_t *buf, uint32_t len)
 {
-	char blob_hex[HIFS_DEFAULT_BLOCK_SIZE * 2 + 1];
-	char hash_hex[SHA256_DIGEST_LENGTH * 2 + 1];
-	const char *backup_expr = "NULL";
-	char *sql_data;
-	size_t sql_len;
+    /* Basic guards */
+    if (!sqldb.sql_init || !sqldb.conn || !buf || len > HIFS_DEFAULT_BLOCK_SIZE)
+        return false;
 
-	if (!sqldb.sql_init || !sqldb.conn || !buf || len > HIFS_DEFAULT_BLOCK_SIZE)
-		return false;
+    /* 1) Hash the logical block */
+    char hash_hex[SHA256_DIGEST_LENGTH * 2 + 1];
+    sha256_hex(buf, len, hash_hex);
 
-	bytes_to_hex(buf, len, blob_hex);
-	sha256_hex(buf, len, hash_hex);
+    /* 2) Make sure EC is ready (fast no-op if already initialized) */
+    if (hifs_ec_ensure_init() != 0) {
+        if (hifs_erasure_coding_init() != 0) {
+            hifs_warning("EC init failed in load");
+            return false;
+        }
+    }
+    /* 3) Encode block into EC stripes (use module constants) */
+    enum { NUM_DATA = HIFS_EC_K, NUM_PARITY = HIFS_EC_M, TOTAL = HIFS_EC_K + HIFS_EC_M };
+    uint8_t *encoded_chunks[TOTAL] = {0};
+    size_t   frag_size = 0;
 
-	/* Store/refresh the shared block payload in hive_data.blocks */
-	sql_len = snprintf(NULL, 0, SQL_DATA_BLOCK_UPSERT,
-			   hash_hex, HIFS_HASH_ALGO_SHA256,
-			   blob_hex, backup_expr) + 1;
-	sql_data = malloc(sql_len);
-	if (!sql_data)
-		return false;
+    if (hicomm_erasure_coding_encode(buf, len, encoded_chunks,
+                                     &frag_size, NUM_DATA, NUM_PARITY) != 0) {
+        hifs_warning("EC encode failed for hash %s", hash_hex);
+        /* nothing to clean yet */
+        return false;
+    }
 
-	snprintf(sql_data, sql_len, SQL_DATA_BLOCK_UPSERT,
-		 hash_hex, HIFS_HASH_ALGO_SHA256,
-		 blob_hex, backup_expr);
-	if (!hifs_insert_sql(sql_data))
-		hifs_warning("Failed to upsert block hash %s into hive_data.blocks", hash_hex);
-	free(sql_data);
+    /* 4) Store each stripe into hive_data.ecblocks using a macro-defined query */
+    uint64_t stripe_ids[TOTAL] = {0};
 
-	/* Record mapping between the volume's logical block and the dedup hash. */
-	sql_len = snprintf(NULL, 0, SQL_VOLUME_BLOCK_MAP_UPSERT,
-			   (unsigned long long)volume_id,
-			   (unsigned long long)block_no,
-			   HIFS_HASH_ALGO_SHA256,
-			   hash_hex) + 1;
-	sql_data = malloc(sql_len);
-	if (!sql_data)
-		return true; /* payload already written; mapping will be retried on next update */
+    /* Reuse a single hex buffer across iterations to avoid malloc/free churn */
+    char *stripe_hex = (char *)malloc(frag_size * 2 + 1);
+    if (!stripe_hex) {
+        hifs_warning("OOM: stripe_hex");
+        goto fail_cleanup_chunks;
+    }
 
-	snprintf(sql_data, sql_len, SQL_VOLUME_BLOCK_MAP_UPSERT,
-		 (unsigned long long)volume_id,
-		 (unsigned long long)block_no,
-		 HIFS_HASH_ALGO_SHA256,
-		 hash_hex);
-	if (!hifs_insert_sql(sql_data))
-		hifs_warning("Failed to map block %llu/%llu to hash %s",
-			     (unsigned long long)volume_id,
-			     (unsigned long long)block_no,
-			     hash_hex);
-	free(sql_data);
+    for (size_t i = 0; i < TOTAL; ++i) {
+        stripe_ids[i] = hifs_next_estripe_id();
 
-	return true;
+        bytes_to_hex(encoded_chunks[i], frag_size, stripe_hex);
+
+        /* Two-pass snprintf to allocate exact length (consistent with your style) */
+        size_t sql_len = (size_t)snprintf(NULL, 0, SQL_ECBLOCKS_UPSERT,
+                              (unsigned long long)stripe_ids[i], stripe_hex) + 1;
+
+        char *sql_data = (char *)malloc(sql_len);
+        if (!sql_data) {
+            hifs_warning("OOM: sql_data (ecblocks)");
+            goto fail_free_hex;
+        }
+
+        (void)snprintf(sql_data, sql_len, SQL_ECBLOCKS_UPSERT,
+                       (unsigned long long)stripe_ids[i], stripe_hex);
+
+        /* Execute (your adapter) */
+        if (!hifs_insert_sql(sql_data)) {
+            hifs_warning("Failed to upsert ecblock %llu",
+                         (unsigned long long)stripe_ids[i]);
+            free(sql_data);
+            goto fail_free_hex;
+        }
+        free(sql_data);
+    }
+
+    /* 5) Record hash → stripe_id mapping via macro-defined upsert */
+    {
+        size_t sql_len = (size_t)snprintf(NULL, 0, SQL_HASH_TO_ESTRIPES_UPSERT,
+                            HIFS_HASH_ALGO_SHA256, hash_hex,
+                            (unsigned long long)stripe_ids[0], (unsigned long long)stripe_ids[1],
+                            (unsigned long long)stripe_ids[2], (unsigned long long)stripe_ids[3],
+                            (unsigned long long)stripe_ids[4], (unsigned long long)stripe_ids[5],
+                            (unsigned long long)stripe_ids[6], (unsigned long long)stripe_ids[7],
+                            (unsigned long long)stripe_ids[8]) + 1;
+
+        char *sql_data = (char *)malloc(sql_len);
+        if (!sql_data) {
+            hifs_warning("OOM: sql_data (hash_to_estripes)");
+            goto fail_free_hex;
+        }
+
+        (void)snprintf(sql_data, sql_len, SQL_HASH_TO_ESTRIPES_UPSERT,
+                       HIFS_HASH_ALGO_SHA256, hash_hex,
+                       (unsigned long long)stripe_ids[0], (unsigned long long)stripe_ids[1],
+                       (unsigned long long)stripe_ids[2], (unsigned long long)stripe_ids[3],
+                       (unsigned long long)stripe_ids[4], (unsigned long long)stripe_ids[5],
+                       (unsigned long long)stripe_ids[6], (unsigned long long)stripe_ids[7],
+                       (unsigned long long)stripe_ids[8]);
+
+        if (!hifs_insert_sql(sql_data)) {
+            hifs_warning("Failed to record hash→estripes for %s", hash_hex);
+            free(sql_data);
+            goto fail_free_hex;
+        }
+        free(sql_data);
+    }
+
+    /* 6) Logical block → hash mapping (you already use a macro here) */
+    {
+        size_t sql_len = (size_t)snprintf(NULL, 0, SQL_VOLUME_BLOCK_MAP_UPSERT,
+                            (unsigned long long)volume_id,
+                            (unsigned long long)block_no,
+                            HIFS_HASH_ALGO_SHA256,
+                            hash_hex) + 1;
+
+        char *sql_data = (char *)malloc(sql_len);
+        if (!sql_data) {
+            hifs_warning("OOM: sql_data (block_map)");
+            goto fail_free_hex;
+        }
+
+        (void)snprintf(sql_data, sql_len, SQL_VOLUME_BLOCK_MAP_UPSERT,
+                       (unsigned long long)volume_id,
+                       (unsigned long long)block_no,
+                       HIFS_HASH_ALGO_SHA256,
+                       hash_hex);
+
+        (void)hifs_insert_sql(sql_data);
+        free(sql_data);
+    }
+
+    /* 7) Cleanup + success */
+    free(stripe_hex);
+    for (size_t i = 0; i < TOTAL; ++i) free(encoded_chunks[i]);
+    return true;
+
+/* ---- common failure cleanup ---- */
+fail_free_hex:
+    free(stripe_hex);
+fail_cleanup_chunks:
+    for (size_t i = 0; i < TOTAL; ++i) free(encoded_chunks[i]);
+    return false;
 }
+
+
 
 int save_binary_data(char *data_block, char *hash)
 {

@@ -6,6 +6,7 @@
  * License: GNU GPL as of 2023
  *
  */
+// hifs_erasure.c
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -18,22 +19,21 @@
 #include "hi_command.h"
 #include "sql/hi_command_sql.h"
 
-/* -------------------- module context -------------------- */
+
 static ec_ctx_t g_ec = { .desc = -1, .initialized = 0 };
 
+/* ======================= Internal helpers ======================= */
 
-/* -------------------- helpers -------------------- */
-
-static int ensure_initialized(size_t k, size_t m, size_t w, int checksum)
+static int hicomm_ec_ensure_initialized(size_t k, size_t m, size_t w, int checksum)
 {
     if (g_ec.initialized) {
-        // If already initialized with same params, reuse. Otherwise re-init.
+        /* Reuse if params match; otherwise re-init */
         if (g_ec.k == k && g_ec.m == m && g_ec.w == w && g_ec.checksum == checksum)
             return 0;
 
         liberasurecode_instance_destroy(g_ec.desc);
-        g_ec.initialized = 0;
         g_ec.desc = -1;
+        g_ec.initialized = 0;
     }
 
     ec_backend_id_t backend = EC_BACKEND_ISA_L_RS_VAND;
@@ -46,8 +46,8 @@ static int ensure_initialized(size_t k, size_t m, size_t w, int checksum)
     args.k  = (int)k;
     args.m  = (int)m;
     args.w  = (int)w;
-    args.hd = (int)m;       // RS codes: hd == m
-    args.ct = checksum;     // e.g., CHKSUM_CRC32
+    args.hd = (int)m;           /* RS codes: hd == m */
+    args.ct = checksum;
 
     int desc = liberasurecode_instance_create(backend, &args);
     if (desc <= 0) {
@@ -55,33 +55,31 @@ static int ensure_initialized(size_t k, size_t m, size_t w, int checksum)
         return -1;
     }
 
-    g_ec.desc = desc;
-    g_ec.k = k;
-    g_ec.m = m;
-    g_ec.w = w;
-    g_ec.checksum = checksum;
+    g_ec.desc      = desc;
+    g_ec.k         = k;
+    g_ec.m         = m;
+    g_ec.w         = w;
+    g_ec.checksum  = checksum;
     g_ec.initialized = 1;
     return 0;
 }
 
-/* -------------------- Erasure Encoding context API -------------------- */
-
-int hicommand_erasure_coding_init(void)
+/* One-liner that always initializes with the module's profile */
+static inline int hifs_ec_ensure_init(void)
 {
-    // Pick defaults you like; you can override per-encode call by passing num_*.
-    size_t k = 6, m = 3, w = 8;
-    int checksum = CHKSUM_CRC32;
-
-    if (ensure_initialized(k, m, w, checksum) != 0)
-        return 1;
-
-    return 0;
+    return hicomm_ec_ensure_initialized(HIFS_EC_K, HIFS_EC_M, HIFS_EC_W, HIFS_EC_CHECKSUM);
 }
 
-int hicommand_erasure_coding_cleanup(void)
+/* ======================= Public API ======================= */
+
+int hicomm_erasure_coding_init(void)
+{
+    return hifs_ec_ensure_init();
+}
+
+int hicomm_erasure_coding_cleanup(void)
 {
     if (!g_ec.initialized) return 0;
-
     liberasurecode_instance_destroy(g_ec.desc);
     g_ec.desc = -1;
     g_ec.initialized = 0;
@@ -90,27 +88,28 @@ int hicommand_erasure_coding_cleanup(void)
 
 /*
  * ENCODE:
- * - Caller must provide:
- *     - num_data_chunks (=k) and num_parity_chunks (=m)
- *     - encoded_chunks: an array of pointers of size k+m (we will malloc each [i])
+ * - Caller supplies:
+ *     - num_data_chunks (=k) and num_parity_chunks (=m) — validated against module profile
+ *     - encoded_chunks: array of size k+m (we malloc() each element)
  * - We set:
- *     - *chunk_size to the per-fragment size (including metadata)
- * - Return 0 on success.
+ *     - *chunk_size to per-fragment size (including metadata)
+ * - Returns 0 on success; negative on error.
  */
-int hicommand_erasure_coding_encode(const uint8_t *data, size_t data_len,
-                                    uint8_t **encoded_chunks, size_t *chunk_size,
-                                    size_t num_data_chunks, size_t num_parity_chunks)
+int hicomm_erasure_coding_encode(const uint8_t *data, size_t data_len,
+                                 uint8_t **encoded_chunks, size_t *chunk_size,
+                                 size_t num_data_chunks, size_t num_parity_chunks)
 {
     if (!data || !encoded_chunks || !chunk_size) return -1;
 
-    const size_t k = num_data_chunks;
-    const size_t m = num_parity_chunks;
-    const size_t w = 8;
-    const int checksum = CHKSUM_CRC32;
+    /* Enforce single profile to avoid mismatches and needless re-inits */
+    if (num_data_chunks != HIFS_EC_K || num_parity_chunks != HIFS_EC_M) {
+        fprintf(stderr, "encode: (k,m) mismatch (got %zu,%zu; expected %d,%d)\n",
+                num_data_chunks, num_parity_chunks, HIFS_EC_K, HIFS_EC_M);
+        return -1;
+    }
 
-    if (ensure_initialized(k, m, w, checksum) != 0) return -1;
+    if (hifs_ec_ensure_init() != 0) return -1;
 
-    // Encode
     char **data_frags = NULL, **parity_frags = NULL;
     uint64_t frag_len = 0;
 
@@ -122,59 +121,49 @@ int hicommand_erasure_coding_encode(const uint8_t *data, size_t data_len,
         return -1;
     }
 
-    // Copy out to caller-owned buffers and report fragment size
-    const size_t total = k + m;
+    const size_t total = HIFS_EC_K + HIFS_EC_M;
     for (size_t i = 0; i < total; ++i) {
-        const char *src = (i < k) ? data_frags[i] : parity_frags[i - k];
+        const char *src = (i < HIFS_EC_K) ? data_frags[i] : parity_frags[i - HIFS_EC_K];
         encoded_chunks[i] = (uint8_t *)malloc(frag_len);
         if (!encoded_chunks[i]) {
             fprintf(stderr, "malloc failed for fragment %zu\n", i);
-            // free what we've allocated so far
             for (size_t j = 0; j < i; ++j) { free(encoded_chunks[j]); encoded_chunks[j] = NULL; }
             liberasurecode_encode_cleanup(g_ec.desc, data_frags, parity_frags);
             return -1;
         }
-        memcpy(encoded_chunks[i], src, frag_len);
+        memcpy(encoded_chunks[i], src, (size_t)frag_len);
     }
     *chunk_size = (size_t)frag_len;
 
-    // Free the library-owned fragment arrays/buffers
     liberasurecode_encode_cleanup(g_ec.desc, data_frags, parity_frags);
     return 0;
 }
 
 /*
- * DECODE (normal, all fragments present):
- * - Caller provides:
- *     - encoded_chunks: array of size k+m, none are NULL
- *     - chunk_size: size of each fragment (as returned by encode)
- *     - num_data_chunks (=k), num_parity_chunks (=m)
- *     - decoded_data: destination buffer (caller-allocated)
- *     - *data_len: on input, capacity of decoded_data; on output, actual length
- * - Returns 0 on success, or -2 if capacity is too small (and sets *data_len to required size).
+ * DECODE (all fragments present)
+ * - encoded_chunks: array of size k+m, none NULL
+ * - chunk_size: size returned by encode
+ * - decoded_data: caller buffer
+ * - *data_len: in=capacity, out=actual size; returns -2 if capacity too small (and sets required size)
  */
-int hicommand_erasure_coding_decode(uint8_t **encoded_chunks, size_t chunk_size,
-                                    size_t num_data_chunks, size_t num_parity_chunks,
-                                    uint8_t *decoded_data, size_t *data_len)
+int hicomm_erasure_coding_decode(uint8_t **encoded_chunks, size_t chunk_size,
+                                 size_t num_data_chunks, size_t num_parity_chunks,
+                                 uint8_t *decoded_data, size_t *data_len)
 {
     if (!encoded_chunks || !decoded_data || !data_len) return -1;
+    if (num_data_chunks != HIFS_EC_K || num_parity_chunks != HIFS_EC_M) {
+        fprintf(stderr, "decode: (k,m) mismatch (got %zu,%zu; expected %d,%d)\n",
+                num_data_chunks, num_parity_chunks, HIFS_EC_K, HIFS_EC_M);
+        return -1;
+    }
+    if (hifs_ec_ensure_init() != 0) return -1;
 
-    const size_t k = num_data_chunks;
-    const size_t m = num_parity_chunks;
-    const size_t w = 8;
-    const int checksum = CHKSUM_CRC32;
+    const size_t total = HIFS_EC_K + HIFS_EC_M;
 
-    if (ensure_initialized(k, m, w, checksum) != 0) return -1;
-
-    const size_t total = k + m;
-
-    // Build the "available" array expected by liberasurecode
+    /* Build "available" array (library expects char** of length k+m) */
     char **available = (char **)calloc(total, sizeof(char *));
     if (!available) return -1;
-    for (size_t i = 0; i < total; ++i) {
-        // All present in "normal" decode
-        available[i] = (char *)encoded_chunks[i];
-    }
+    for (size_t i = 0; i < total; ++i) available[i] = (char *)encoded_chunks[i];
 
     char *decoded = NULL;
     uint64_t decoded_len = 0;
@@ -191,10 +180,9 @@ int hicommand_erasure_coding_decode(uint8_t **encoded_chunks, size_t chunk_size,
     }
 
     if ((size_t)decoded_len > *data_len) {
-        // Tell caller how much they need
         *data_len = (size_t)decoded_len;
         liberasurecode_decode_cleanup(g_ec.desc, decoded);
-        return -2; // insufficient capacity
+        return -2; /* insufficient capacity */
     }
 
     memcpy(decoded_data, decoded, (size_t)decoded_len);
@@ -205,33 +193,29 @@ int hicommand_erasure_coding_decode(uint8_t **encoded_chunks, size_t chunk_size,
 }
 
 /*
- * REBUILD from partial (some fragments missing):
- * - Pass in encoded_chunks of size k+m where missing entries are NULL.
- * - We’ll attempt to recover the original payload.
- * - Same return conventions as normal decode.
+ * REBUILD from partial (some fragments missing: pass NULLs)
+ * - same return rules as normal decode
  */
-int hicommand_erasure_coding_rebuild_from_partial(uint8_t **encoded_chunks, size_t chunk_size,
-                                                  size_t num_data_chunks, size_t num_parity_chunks,
-                                                  uint8_t *decoded_data, size_t *data_len)
+int hicomm_erasure_coding_rebuild_from_partial(uint8_t **encoded_chunks, size_t chunk_size,
+                                               size_t num_data_chunks, size_t num_parity_chunks,
+                                               uint8_t *decoded_data, size_t *data_len)
 {
     if (!encoded_chunks || !decoded_data || !data_len) return -1;
+    if (num_data_chunks != HIFS_EC_K || num_parity_chunks != HIFS_EC_M) {
+        fprintf(stderr, "rebuild: (k,m) mismatch (got %zu,%zu; expected %d,%d)\n",
+                num_data_chunks, num_parity_chunks, HIFS_EC_K, HIFS_EC_M);
+        return -1;
+    }
+    if (hifs_ec_ensure_init() != 0) return -1;
 
-    const size_t k = num_data_chunks;
-    const size_t m = num_parity_chunks;
-    const size_t w = 8;
-    const int checksum = CHKSUM_CRC32;
-
-    if (ensure_initialized(k, m, w, checksum) != 0) return -1;
-
-    const size_t total = k + m;
+    const size_t total = HIFS_EC_K + HIFS_EC_M;
     char **available = (char **)calloc(total, sizeof(char *));
     if (!available) return -1;
-    for (size_t i = 0; i < total; ++i) {
-        available[i] = (char *)encoded_chunks[i]; // may be NULL
-    }
+    for (size_t i = 0; i < total; ++i) available[i] = (char *)encoded_chunks[i]; /* may be NULL */
 
     char *decoded = NULL;
     uint64_t decoded_len = 0;
+
     int rc = liberasurecode_decode(g_ec.desc, available, (int)total,
                                    (uint64_t)chunk_size,
                                    /*force_metadata_checks=*/1,
