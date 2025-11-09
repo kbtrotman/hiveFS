@@ -33,17 +33,19 @@
 
 void hicomm_log(int level, const char *fmt, ...);
 
+/* ======================= EC profile (single source of truth) ======================= */
+#define HIFS_EC_K         6
+#define HIFS_EC_M         3
+#define HIFS_EC_W         8
+#define HIFS_EC_CHECKSUM  CHKSUM_CRC32
 
-// Erasure Encoding context
+/* ======================= Erasure Coding Module context ======================= */
 typedef struct {
-    int desc;           // liberasurecode instance handle
-    size_t k;
-    size_t m;
-    size_t w;
-    int checksum;       // CHKSUM_*
-    int initialized;
+    int     desc;        /* liberasurecode instance handle */
+    size_t  k, m, w;     /* profile in use */
+    int     checksum;    /* CHKSUM_* */
+    int     initialized; /* 0/1 */
 } ec_ctx_t;
-// Erasure Encoding context
 
 /* Convenience macros mirroring the kernel names */
 #define hifs_emerg(fmt, ...)   hicomm_log(LOG_EMERG,   "hivefs: " fmt, ##__VA_ARGS__)
@@ -70,6 +72,19 @@ void hicomm_safe_cleanup(void);
 /* hi_command_prot.c */
 int hicomm_handle_command(int fd, const struct hifs_cmds *cmd);
 void hicomm_print_inode(const struct hifs_inode *inode);
+
+/* hi_command_erasure_encoding.c */
+static inline int hifs_ec_ensure_init(void);
+int hicomm_erasure_coding_init(void);
+int hicomm_erasure_coding_encode(const uint8_t *data, size_t data_len,
+                                 uint8_t **encoded_chunks, size_t *chunk_size,
+                                 size_t num_data_chunks, size_t num_parity_chunks);
+int hicomm_erasure_coding_decode(uint8_t **encoded_chunks, size_t chunk_size,
+                                 size_t num_data_chunks, size_t num_parity_chunks,
+                                 uint8_t *decoded_data, size_t *data_len);
+int hicomm_erasure_coding_rebuild_from_partial(uint8_t **encoded_chunks, size_t chunk_size,
+                                 size_t num_data_chunks, size_t num_parity_chunks,
+                                 uint8_t *decoded_data, size_t *data_len);
 
 /* Utility */
 const char *hifs_link_state_string(enum hifs_link_state state);

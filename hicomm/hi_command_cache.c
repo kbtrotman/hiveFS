@@ -123,8 +123,3 @@ block *block_cache_search(cache *c, char *hash) {
     return NULL;
 }
 
-// Now we still need functions to write the two lists out when elements are added to each.
-// Also functions to delete the last in the list. But to do this, we need configurable
-// values for size of memory and size of disk we want to use.
-
-// Speaking of which, need a configuration ability too.....and a TODO list.

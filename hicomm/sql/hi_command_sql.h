@@ -173,14 +173,36 @@
     "VALUES (%llu, %llu, %u, UNHEX('%s')) " \
     "ON DUPLICATE KEY UPDATE hash_algo=VALUES(hash_algo), block_hash=VALUES(block_hash)"
 
-#define SQL_DATA_BLOCK_UPSERT \
-    "INSERT INTO hive_data.blocks (block_hash, hash_algo, block_data, block_bck_hash) " \
-    "VALUES (UNHEX('%s'), %u, UNHEX('%s'), %s) " \
-    "ON DUPLICATE KEY UPDATE hash_algo=VALUES(hash_algo), " \
-    "block_data=VALUES(block_data), block_bck_hash=VALUES(block_bck_hash)"
+	/* Insert/Upsert a single EC stripe payload */
+#define SQL_ECBLOCKS_UPSERT \
+    "INSERT INTO hive_data.ecblocks (estripe_id, ec_block) " \
+    "VALUES (%llu, UNHEX('%s')) " \
+    "ON DUPLICATE KEY UPDATE ec_block=VALUES(ec_block)"
 
-#define SQL_DATA_BLOCK_SELECT \
-    "SELECT HEX(block_data) FROM hive_data.blocks WHERE hash_algo=%u AND block_hash=UNHEX('%s')"
+/* Map block hash → all 6 data stripes + 3 parity stripes */
+#define SQL_HASH_TO_ESTRIPES_UPSERT \
+    "INSERT INTO hive_data.hash_to_estripes " \
+    "(hash_algo, block_hash, " \
+    "estripe_1_id, estripe_2_id, estripe_3_id, estripe_4_id, estripe_5_id, estripe_6_id, " \
+    "estripe_p1_id, estripe_p2_id, estripe_p3_id, block_bck_hash) " \
+    "VALUES (%u, UNHEX('%s'), %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, NULL) " \
+    "ON DUPLICATE KEY UPDATE " \
+    "estripe_1_id=VALUES(estripe_1_id), estripe_2_id=VALUES(estripe_2_id), " \
+    "estripe_3_id=VALUES(estripe_3_id), estripe_4_id=VALUES(estripe_4_id), " \
+    "estripe_5_id=VALUES(estripe_5_id), estripe_6_id=VALUES(estripe_6_id), " \
+    "estripe_p1_id=VALUES(estripe_p1_id), estripe_p2_id=VALUES(estripe_p2_id), " \
+    "estripe_p3_id=VALUES(estripe_p3_id)"
+
+	/* 9-way stripe id lookup by block hash */
+#define SQL_HASH_TO_ESTRIPES_SELECT \
+    "SELECT estripe_1_id, estripe_2_id, estripe_3_id, estripe_4_id, estripe_5_id, estripe_6_id, " \
+    "estripe_p1_id, estripe_p2_id, estripe_p3_id " \
+    "FROM hive_data.hash_to_estripes " \
+    "WHERE hash_algo=%u AND block_hash=UNHEX('%s')"
+
+/* Fetch a single EC stripe payload (hex) */
+#define SQL_ECBLOCK_SELECT \
+    "SELECT HEX(ec_block) FROM hive_data.ecblocks WHERE estripe_id=%llu"
 
 /* Prototypes */
 void init_hive_link(void);

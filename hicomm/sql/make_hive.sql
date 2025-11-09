@@ -237,17 +237,33 @@ CREATE TABLE IF NOT EXISTS machine_identities (
     REFERENCES host_auth(machine_uid) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
+CREATE TABLE IF NOT EXISTS hash_to_estripes (
+  hash_algo    TINYINT UNSIGNED NOT NULL,
+  block_hash   VARBINARY(32) NOT NULL,
+  estripe_1_id   BIGINT UNSIGNED NOT NULL,
+  estripe_2_id   BIGINT UNSIGNED NOT NULL,
+  estripe_3_id   BIGINT UNSIGNED NOT NULL,
+  estripe_4_id   BIGINT UNSIGNED NOT NULL,
+  estripe_5_id   BIGINT UNSIGNED NOT NULL,
+  estripe_6_id   BIGINT UNSIGNED NOT NULL,
+  estripe_p1_id   BIGINT UNSIGNED NOT NULL,
+  estripe_p2_id   BIGINT UNSIGNED NOT NULL,
+  estripe_p3_id   BIGINT UNSIGNED NOT NULL,
+  block_bck_hash VARBINARY(16) NULL,
+  PRIMARY KEY (hash_algo, block_hash),
+  KEY idx_hash (hash_algo, block_hash)
+) ENGINE=InnoDB;
+
+
 -- =========================
 -- DATA SCHEMA (hive_data)
 -- =========================
 USE hive_data;
 
-CREATE TABLE IF NOT EXISTS blocks (
-  hash_algo      TINYINT UNSIGNED NOT NULL DEFAULT 1,
-  block_hash     VARBINARY(32) NOT NULL,
-  block_data     VARBINARY(4096) NOT NULL,
-  block_bck_hash VARBINARY(16) NULL,
-  PRIMARY KEY (hash_algo, block_hash)
+CREATE TABLE IF NOT EXISTS ecblocks (
+  estripe_id   BIGINT UNSIGNED NOT NULL,
+  ec_block     VARBINARY(683) NOT NULL,
+  PRIMARY KEY (estripe_id)
 ) ENGINE=ROCKSDB
   COMMENT='rocksdb_cf=block_data';
 
