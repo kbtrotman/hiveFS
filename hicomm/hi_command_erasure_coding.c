@@ -65,7 +65,7 @@ static int hicomm_ec_ensure_initialized(size_t k, size_t m, size_t w, int checks
 }
 
 /* One-liner that always initializes with the module's profile */
-static inline int hifs_ec_ensure_init(void)
+int hifs_ec_ensure_init(void)
 {
     return hicomm_ec_ensure_initialized(HIFS_EC_K, HIFS_EC_M, HIFS_EC_W, HIFS_EC_CHECKSUM);
 }

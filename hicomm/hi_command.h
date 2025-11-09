@@ -74,7 +74,7 @@ int hicomm_handle_command(int fd, const struct hifs_cmds *cmd);
 void hicomm_print_inode(const struct hifs_inode *inode);
 
 /* hi_command_erasure_encoding.c */
-static inline int hifs_ec_ensure_init(void);
+int hifs_ec_ensure_init(void);
 int hicomm_erasure_coding_init(void);
 int hicomm_erasure_coding_encode(const uint8_t *data, size_t data_len,
                                  uint8_t **encoded_chunks, size_t *chunk_size,
