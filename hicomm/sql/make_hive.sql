@@ -196,6 +196,7 @@ CREATE TABLE IF NOT EXISTS volume_block_mappings (
   block_no     BIGINT UNSIGNED NOT NULL,
   hash_algo    TINYINT UNSIGNED NOT NULL,
   block_hash   VARBINARY(32) NOT NULL,
+  block_bck_hash VARBINARY(32) NULL,
   updated_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
                ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (volume_id, block_no),
@@ -237,21 +238,23 @@ CREATE TABLE IF NOT EXISTS machine_identities (
     REFERENCES host_auth(machine_uid) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
+-- Mapping: content hash -> 6 data + 3 parity stripe IDs
 CREATE TABLE IF NOT EXISTS hash_to_estripes (
-  hash_algo    TINYINT UNSIGNED NOT NULL,
-  block_hash   VARBINARY(32) NOT NULL,
+  hash_algo      TINYINT UNSIGNED NOT NULL,   -- e.g., 1 = SHA-256
+  block_hash     VARBINARY(32) NOT NULL,      -- 32 bytes for SHA-256
   estripe_1_id   BIGINT UNSIGNED NOT NULL,
   estripe_2_id   BIGINT UNSIGNED NOT NULL,
   estripe_3_id   BIGINT UNSIGNED NOT NULL,
   estripe_4_id   BIGINT UNSIGNED NOT NULL,
   estripe_5_id   BIGINT UNSIGNED NOT NULL,
   estripe_6_id   BIGINT UNSIGNED NOT NULL,
-  estripe_p1_id   BIGINT UNSIGNED NOT NULL,
-  estripe_p2_id   BIGINT UNSIGNED NOT NULL,
-  estripe_p3_id   BIGINT UNSIGNED NOT NULL,
-  block_bck_hash VARBINARY(16) NULL,
+  estripe_p1_id  BIGINT UNSIGNED NOT NULL,
+  estripe_p2_id  BIGINT UNSIGNED NOT NULL,
+  estripe_p3_id  BIGINT UNSIGNED NOT NULL,
+  block_bck_hash VARBINARY(32) NULL,          -- or VARBINARY(32) if SHA-256
   PRIMARY KEY (hash_algo, block_hash),
   KEY idx_hash (hash_algo, block_hash)
+  -- (Optional) add individual indexes on estripe_*_id if you need reverse lookups
 ) ENGINE=InnoDB;
 
 
@@ -260,9 +263,10 @@ CREATE TABLE IF NOT EXISTS hash_to_estripes (
 -- =========================
 USE hive_data;
 
+-- Stripe payloads (one row per fragment)
 CREATE TABLE IF NOT EXISTS ecblocks (
-  estripe_id   BIGINT UNSIGNED NOT NULL,
-  ec_block     VARBINARY(683) NOT NULL,
+  estripe_id BIGINT UNSIGNED NOT NULL,      -- generate this id in code
+  ec_block   BLOB NOT NULL,
   PRIMARY KEY (estripe_id)
 ) ENGINE=ROCKSDB
   COMMENT='rocksdb_cf=block_data';

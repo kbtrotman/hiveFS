@@ -164,45 +164,43 @@
 	"(volume_id, inode, fp_index, block_no, hash_algo, block_hash) " \
 	"VALUES (%llu, %llu, %u, %u, %u, UNHEX('%s'))"
 
-#define SQL_VOLUME_BLOCK_MAP_SELECT \
-    "SELECT hash_algo, HEX(block_hash) FROM volume_block_mappings " \
-    "WHERE volume_id=%llu AND block_no=%llu"
-
 #define SQL_VOLUME_BLOCK_MAP_UPSERT \
-    "INSERT INTO volume_block_mappings (volume_id, block_no, hash_algo, block_hash) " \
-    "VALUES (%llu, %llu, %u, UNHEX('%s')) " \
-    "ON DUPLICATE KEY UPDATE hash_algo=VALUES(hash_algo), block_hash=VALUES(block_hash)"
+  "INSERT INTO volume_block_mappings (volume_id, block_no, hash_algo, block_hash) " \
+  "VALUES (?,?,?,?) " \
+  "ON DUPLICATE KEY UPDATE hash_algo=VALUES(hash_algo), block_hash=VALUES(block_hash)"
 
-	/* Insert/Upsert a single EC stripe payload */
-#define SQL_ECBLOCKS_UPSERT \
-    "INSERT INTO hive_data.ecblocks (estripe_id, ec_block) " \
-    "VALUES (%llu, UNHEX('%s')) " \
-    "ON DUPLICATE KEY UPDATE ec_block=VALUES(ec_block)"
+#define SQL_VOLUME_BLOCK_MAP_SELECT \
+  "SELECT hash_algo, block_hash FROM volume_block_mappings WHERE volume_id=? AND block_no=?"
 
-/* Map block hash → all 6 data stripes + 3 parity stripes */
+/* Upsert a single EC stripe payload as binary */
+#define SQL_ECBLOCKS_UPSERT_BIN \
+  "INSERT INTO hive_data.ecblocks (estripe_id, ec_block) VALUES (?, ?) " \
+  "ON DUPLICATE KEY UPDATE ec_block=VALUES(ec_block)"
+
+/* Select a stripe payload as binary (no HEX) */
+#define SQL_ECBLOCK_SELECT_BIN \
+  "SELECT ec_block FROM hive_data.ecblocks WHERE estripe_id=?"
+
+/* 9-way mapping, block_hash is VARBINARY(32) */
 #define SQL_HASH_TO_ESTRIPES_UPSERT \
-    "INSERT INTO hive_data.hash_to_estripes " \
-    "(hash_algo, block_hash, " \
-    "estripe_1_id, estripe_2_id, estripe_3_id, estripe_4_id, estripe_5_id, estripe_6_id, " \
-    "estripe_p1_id, estripe_p2_id, estripe_p3_id, block_bck_hash) " \
-    "VALUES (%u, UNHEX('%s'), %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, NULL) " \
-    "ON DUPLICATE KEY UPDATE " \
-    "estripe_1_id=VALUES(estripe_1_id), estripe_2_id=VALUES(estripe_2_id), " \
-    "estripe_3_id=VALUES(estripe_3_id), estripe_4_id=VALUES(estripe_4_id), " \
-    "estripe_5_id=VALUES(estripe_5_id), estripe_6_id=VALUES(estripe_6_id), " \
-    "estripe_p1_id=VALUES(estripe_p1_id), estripe_p2_id=VALUES(estripe_p2_id), " \
-    "estripe_p3_id=VALUES(estripe_p3_id)"
+  "INSERT INTO hive_data.hash_to_estripes (" \
+  " hash_algo, block_hash," \
+  " estripe_1_id, estripe_2_id, estripe_3_id, estripe_4_id, estripe_5_id, estripe_6_id," \
+  " estripe_p1_id, estripe_p2_id, estripe_p3_id, block_bck_hash) " \
+  "VALUES (?,?,?,?,?,?,?,?,?,?,?,?) " \
+  "ON DUPLICATE KEY UPDATE " \
+  " estripe_1_id=VALUES(estripe_1_id), estripe_2_id=VALUES(estripe_2_id)," \
+  " estripe_3_id=VALUES(estripe_3_id), estripe_4_id=VALUES(estripe_4_id)," \
+  " estripe_5_id=VALUES(estripe_5_id), estripe_6_id=VALUES(estripe_6_id)," \
+  " estripe_p1_id=VALUES(estripe_p1_id), estripe_p2_id=VALUES(estripe_p2_id)," \
+  " estripe_p3_id=VALUES(estripe_p3_id)"
 
-	/* 9-way stripe id lookup by block hash */
+/* Lookup the 9 stripe ids by binary block hash */
 #define SQL_HASH_TO_ESTRIPES_SELECT \
-    "SELECT estripe_1_id, estripe_2_id, estripe_3_id, estripe_4_id, estripe_5_id, estripe_6_id, " \
-    "estripe_p1_id, estripe_p2_id, estripe_p3_id " \
-    "FROM hive_data.hash_to_estripes " \
-    "WHERE hash_algo=%u AND block_hash=UNHEX('%s')"
+  "SELECT estripe_1_id, estripe_2_id, estripe_3_id, estripe_4_id, estripe_5_id, estripe_6_id," \
+  "       estripe_p1_id, estripe_p2_id, estripe_p3_id " \
+  "FROM hive_data.hash_to_estripes WHERE hash_algo=? AND block_hash=?"
 
-/* Fetch a single EC stripe payload (hex) */
-#define SQL_ECBLOCK_SELECT \
-    "SELECT HEX(ec_block) FROM hive_data.ecblocks WHERE estripe_id=%llu"
 
 /* Prototypes */
 void init_hive_link(void);
