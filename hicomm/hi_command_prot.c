@@ -55,7 +55,7 @@ static int hifs_compare_dentry_newer(const struct hifs_volume_dentry *a,
 	return 0;
 }
 
-static void bin_to_hex(const uint8_t *src, size_t len, char *dst)
+static void bin_to_hex(const char *src, size_t len, char *dst)
 {
 	static const char hexdigits[] = "0123456789abcdef";
 	for (size_t i = 0; i < len; ++i) {

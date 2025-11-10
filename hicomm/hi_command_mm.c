@@ -55,8 +55,9 @@ static int hifs_comm_ioctl_common(int fd, unsigned long request, void *arg)
 	if (target < 0)
 		return -EINVAL;
 
-	if (ioctl(target, request, arg) == -1)
+	if (ioctl(target, request, arg) == -1) {
 		return -errno;
+	}
 
 	return 0;
 }
@@ -85,8 +86,9 @@ int hicomm_comm_recv_data(int fd, struct hifs_data_frame *frame, bool nonblock)
 {
     int target = resolve_fd(fd);
 
-    if (target < 0 || !frame)
+    if (target < 0 || !frame) {
         return -EINVAL;
+	}
 
 	if (nonblock) {
 		int flags = fcntl(target, F_GETFL, 0);

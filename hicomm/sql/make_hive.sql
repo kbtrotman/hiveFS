@@ -265,7 +265,7 @@ USE hive_data;
 
 -- Stripe payloads (one row per fragment)
 CREATE TABLE IF NOT EXISTS ecblocks (
-  estripe_id BIGINT UNSIGNED NOT NULL,      -- generate this id in code
+  estripe_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,  -- generate this id then push back in code
   ec_block   BLOB NOT NULL,
   PRIMARY KEY (estripe_id)
 ) ENGINE=ROCKSDB
