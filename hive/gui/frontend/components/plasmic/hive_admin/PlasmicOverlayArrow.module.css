@@ -8,36 +8,16 @@
   width: 10px;
   height: 10px;
   transform: translate3d(0px, 3px, 0px);
-  transform-style: preserve-3d;
-}
-.svg * {
-  transform-style: preserve-3d;
 }
 .root[data-placement="top"] .svg {
   transform: translate3d(0px, -3px, 0px) rotate3d(0, 0, 1, 180deg);
-  transform-style: preserve-3d;
-}
-.root[data-placement="top"] .svg * {
-  transform-style: preserve-3d;
 }
 .root[data-placement="left"] .svg {
   transform: translate3d(-3px, 0px, 0px) rotate3d(0, 0, 1, 90deg);
-  transform-style: preserve-3d;
-}
-.root[data-placement="left"] .svg * {
-  transform-style: preserve-3d;
 }
 .root[data-placement="right"] .svg {
   transform: translate3d(3px, 0px, 0px) rotate3d(0, 0, 1, -90deg);
-  transform-style: preserve-3d;
-}
-.root[data-placement="right"] .svg * {
-  transform-style: preserve-3d;
 }
 .svgdark {
   color: var(--token-_KfeqfHy0HCk);
-  transform-style: preserve-3d;
-}
-.svgdark * {
-  transform-style: preserve-3d;
 }

@@ -65,22 +65,14 @@
   transition-timing-function: ease-out;
   transform: skew(0deg, 0deg);
   box-shadow: 0px 0px 3px 0px #00000040;
-  transform-style: preserve-3d;
   flex-shrink: 0;
   -webkit-transition-property: all;
   -webkit-transition-timing-function: ease-out;
   -webkit-transition-duration: 0.1s;
   border-radius: 99px;
 }
-.thumb * {
-  transform-style: preserve-3d;
-}
 .ariaSwitch[data-selected] .thumb {
   transform: translate3d(12px, 0px, 0px);
-  transform-style: preserve-3d;
-}
-.ariaSwitch[data-selected] .thumb * {
-  transform-style: preserve-3d;
 }
 .description:global(.__wab_instance):global(.__wab_instance) {
   max-width: 100%;
