@@ -10,25 +10,11 @@
   transition-property: all;
   transition-duration: 1s;
   transform: skew(0deg, 0deg);
-  transform-style: preserve-3d;
   min-width: 0;
   min-height: 0;
   -webkit-transition-property: all;
   -webkit-transition-duration: 1s;
   padding: 0px;
-}
-.dashboard * {
-  transform-style: preserve-3d;
-}
-@media (min-width: 0px) and (max-width: 768px) {
-  .dashboard {
-    transform-style: preserve-3d;
-  }
-}
-@media (min-width: 0px) and (max-width: 768px) {
-  .dashboard * {
-    transform-style: preserve-3d;
-  }
 }
 .freeBox___7XcWx {
   display: block;
@@ -295,13 +281,9 @@
   transition-property: all;
   transition-duration: 1s;
   color: var(--token-EaloSj03TePG);
-  transform-style: preserve-3d;
   -webkit-transition-property: all;
   -webkit-transition-duration: 1s;
   padding: 16px;
-}
-.table * {
-  transform-style: preserve-3d;
 }
 .freeBox__apTkU {
   display: block;
