@@ -1,8 +1,7 @@
 CC = gcc
 
 # ---- Sources ----
-SRCS = hi_command.c hi_command_mm.c hi_command_prot.c hi_command_sql.c \
-       hifs_erasure_coding.c         
+SRCS = hi_command.c hi_command_mm.c hi_command_prot.c hi_command_tcp_coms.c        
 
 
 OBJS = $(SRCS:.c=.o)

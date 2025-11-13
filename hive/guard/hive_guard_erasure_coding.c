@@ -16,8 +16,8 @@
 
 #include <liberasurecode/erasurecode.h>
 
-#include "hi_command.h"
-#include "sql/hi_command_sql.h"
+#include "hive_guard.h"
+#include "hive_guard_sql.h"
 
 
 static ec_ctx_t g_ec = { .desc = -1, .initialized = 0 };

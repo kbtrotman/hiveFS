@@ -9,7 +9,6 @@
 #pragma once
 
 #define _GNU_SOURCE
-
 #include <errno.h>
 #include <fcntl.h>
 #include <stdbool.h>
@@ -26,8 +25,16 @@
 #include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <netinet/tcp.h>
+#include <sys/socket.h>
+
 
 #include "../hifs_shared_defs.h"
+
+#define HIFS_GUARD_HOST 127.0.0.1
+#define HIFS_GUARD_PORT_STR 6060
 
 #define HIFS_COMM_DEVICE_PATH "/dev/" HIFS_COMM_DEVICE_NAME
 
