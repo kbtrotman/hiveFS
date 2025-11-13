@@ -26906,20 +26906,6 @@
       "cssFilePath": "plasmic/hive_admin/plasmic.module.css",
       "components": [
         {
-          "id": "PylZ-UK7gSPz",
-          "name": "Dashboard",
-          "type": "managed",
-          "projectId": "c8gT28iq7v39gxBJ6CcbGP",
-          "renderModuleFilePath": "plasmic/hive_admin/PlasmicDashboard.tsx",
-          "importSpec": {
-            "modulePath": "../pages/index.tsx"
-          },
-          "cssFilePath": "plasmic/hive_admin/PlasmicDashboard.module.css",
-          "scheme": "blackbox",
-          "componentType": "page",
-          "path": "/"
-        },
-        {
           "id": "lkzOxuWEvA2X",
           "name": "PageLayout",
           "type": "managed",
@@ -27323,6 +27309,20 @@
           "cssFilePath": "plasmic/hive_admin/PlasmicTooltip.module.css",
           "scheme": "blackbox",
           "componentType": "component"
+        },
+        {
+          "id": "PylZ-UK7gSPz",
+          "name": "FilesystemConfig",
+          "type": "managed",
+          "projectId": "c8gT28iq7v39gxBJ6CcbGP",
+          "renderModuleFilePath": "plasmic/hive_admin/PlasmicFilesystemConfig.tsx",
+          "importSpec": {
+            "modulePath": "../pages/index.tsx"
+          },
+          "cssFilePath": "plasmic/hive_admin/PlasmicFilesystemConfig.module.css",
+          "scheme": "blackbox",
+          "componentType": "page",
+          "path": "/"
         }
       ],
       "icons": [
@@ -27481,6 +27481,12 @@
           "name": "Fetcher",
           "displayName": "plasmic-data-source-fetcher",
           "componentImportPath": "@plasmicapp/react-web/lib/data-sources"
+        },
+        {
+          "id": "lDT68TVAGwod",
+          "name": "TreeBrowser",
+          "displayName": "TreeBrowser",
+          "componentImportPath": "@/components/TreeBrowser"
         }
       ],
       "customFunctions": []
