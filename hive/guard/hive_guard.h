@@ -40,3 +40,10 @@ static const char* ENV_MDB_USER     = "WRAP_MARIADB_USER";  // default root
 static const char* ENV_MDB_PASS     = "WRAP_MARIADB_PASS";  // default ""
 static const char* ENV_MDB_DB       = "WRAP_MARIADB_DB";    // default storage
  
+
+/* ======================= EC profile (single source of truth) ======================= */
+#define HIFS_EC_K         6
+#define HIFS_EC_M         3
+#define HIFS_EC_W         8
+#define HIFS_EC_CHECKSUM  CHKSUM_CRC32
+/* ======================= Erasure Coding Module context ======================= */

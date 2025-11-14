@@ -33,20 +33,14 @@
 
 #include "../hifs_shared_defs.h"
 
-#define HIFS_GUARD_HOST 127.0.0.1
-#define HIFS_GUARD_PORT_STR 6060
+#define HIFS_GUARD_HOST "127.0.0.1"
+#define HIFS_GUARD_PORT_STR "6060"
 
 #define HIFS_COMM_DEVICE_PATH "/dev/" HIFS_COMM_DEVICE_NAME
 
 void hicomm_log(int level, const char *fmt, ...);
 
-/* ======================= EC profile (single source of truth) ======================= */
-#define HIFS_EC_K         6
-#define HIFS_EC_M         3
-#define HIFS_EC_W         8
-#define HIFS_EC_CHECKSUM  CHKSUM_CRC32
 
-/* ======================= Erasure Coding Module context ======================= */
 typedef struct {
     int     desc;        /* liberasurecode instance handle */
     size_t  k, m, w;     /* profile in use */

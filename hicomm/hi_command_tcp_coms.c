@@ -1,9 +1,871 @@
+/**
+ * HiveFS
+ *
+ * TCP/JSON client for the hive_guard service.  This replaces the older
+ * direct-to-MariaDB implementation so that all metadata/locking logic can
+ * be centralised inside hive_guard.
+ */
 
 #include "hi_command.h"
+#include "sql/hi_command_sql.h"
 
+#include <arpa/inet.h>
+#include <ctype.h>
+#include <netdb.h>
+#include <netinet/tcp.h>
+#include <openssl/sha.h>
+#include <stdarg.h>
+#include <sys/socket.h>
+#include <sys/uio.h>
+#include <sys/utsname.h>
 
+#ifndef ARRAY_SIZE
+#define ARRAY_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
+#endif
 
-static int g_guard_fd = -1;
+#ifndef MIN
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
+#endif
+
+struct SQLDB sqldb; /* still referenced throughout the legacy code */
+
+/* -------------------------------------------------------------------------- */
+/* Helper types                                                                */
+/* -------------------------------------------------------------------------- */
+
+struct guard_client {
+	int      fd;
+	uint64_t session_id;
+	char    *rx_buf;
+	size_t   rx_cap;
+};
+
+static struct guard_client g_guard = {
+	.fd = -1,
+	.session_id = 0,
+	.rx_buf = NULL,
+	.rx_cap = 0,
+};
+
+/* -------------------------------------------------------------------------- */
+/* Minimal JSON helper (borrowed from hive_guard server implementation)       */
+/* -------------------------------------------------------------------------- */
+
+typedef struct JVal JVal;
+typedef struct JField JField;
+
+struct JVal {
+	enum { JT_NULL, JT_BOOL, JT_NUM, JT_STR, JT_OBJ, JT_ARR } t;
+	double num;
+	int boolean;
+	char *str;
+	JField *obj;
+	size_t obj_len;
+	JVal **arr;
+	size_t arr_len;
+};
+
+struct JField {
+	char *key;
+	JVal *val;
+};
+
+static void *jmalloc(size_t n)
+{
+	void *p = malloc(n);
+	if (!p) {
+		perror("malloc");
+		exit(EXIT_FAILURE);
+	}
+	return p;
+}
+
+static char *jstrdup(const char *s)
+{
+	size_t n = strlen(s);
+	char *d = jmalloc(n + 1);
+	memcpy(d, s, n + 1);
+	return d;
+}
+
+static void jfree(JVal *v)
+{
+	if (!v)
+		return;
+	if (v->t == JT_STR && v->str)
+		free(v->str);
+	if (v->t == JT_OBJ) {
+		for (size_t i = 0; i < v->obj_len; ++i) {
+			free(v->obj[i].key);
+			jfree(v->obj[i].val);
+		}
+		free(v->obj);
+	}
+	if (v->t == JT_ARR) {
+		for (size_t i = 0; i < v->arr_len; ++i)
+			jfree(v->arr[i]);
+		free(v->arr);
+	}
+	free(v);
+}
+
+typedef struct {
+	const char *s;
+	size_t i;
+	size_t n;
+} JTok;
+
+static void jskip_ws(JTok *t)
+{
+	while (t->i < t->n && isspace((unsigned char)t->s[t->i]))
+		++t->i;
+}
+
+static int jpeek(JTok *t)
+{
+	return t->i < t->n ? t->s[t->i] : 0;
+}
+
+static int jget(JTok *t)
+{
+	return t->i < t->n ? t->s[t->i++] : 0;
+}
+
+static char *jparse_string(JTok *t)
+{
+	if (jget(t) != '"')
+		return NULL;
+	char *out = jmalloc(1);
+	size_t cap = 1, len = 0;
+	out[0] = '\0';
+	while (1) {
+		if (t->i >= t->n)
+			return NULL;
+		int c = jget(t);
+		if (c == '"')
+			break;
+		if (c == '\\') {
+			if (t->i >= t->n)
+				return NULL;
+			c = jget(t);
+			switch (c) {
+			case 'n': c = '\n'; break;
+			case 't': c = '\t'; break;
+			case 'r': c = '\r'; break;
+			case '\\': case '"': break;
+			default: break;
+			}
+		}
+		if (len + 1 >= cap) {
+			cap = cap ? cap * 2 : 4;
+			out = realloc(out, cap);
+		}
+		out[len++] = (char)c;
+		out[len] = '\0';
+	}
+	return out;
+}
+
+static JVal *jparse_value(JTok *t);
+
+static JVal *jparse_object(JTok *t)
+{
+	if (jget(t) != '{')
+		return NULL;
+	JField *fields = NULL;
+	size_t flen = 0, fcap = 0;
+	jskip_ws(t);
+	if (jpeek(t) == '}') {
+		jget(t);
+		JVal *v = jmalloc(sizeof(*v));
+		v->t = JT_OBJ;
+		v->obj = NULL;
+		v->obj_len = 0;
+		return v;
+	}
+	while (1) {
+		jskip_ws(t);
+		char *key = jparse_string(t);
+		if (!key)
+			return NULL;
+		jskip_ws(t);
+		if (jget(t) != ':')
+			return NULL;
+		jskip_ws(t);
+		JVal *val = jparse_value(t);
+		if (!val)
+			return NULL;
+		if (flen == fcap) {
+			fcap = fcap ? fcap * 2 : 4;
+			fields = realloc(fields, fcap * sizeof(JField));
+		}
+		fields[flen].key = key;
+		fields[flen].val = val;
+		++flen;
+		jskip_ws(t);
+		int c = jget(t);
+		if (c == '}')
+			break;
+		if (c != ',')
+			return NULL;
+	}
+	JVal *v = jmalloc(sizeof(*v));
+	v->t = JT_OBJ;
+	v->obj = fields;
+	v->obj_len = flen;
+	return v;
+}
+
+static JVal *jparse_bool(JTok *t)
+{
+	if (t->i + 4 <= t->n && strncmp(t->s + t->i, "true", 4) == 0) {
+		t->i += 4;
+		JVal *v = jmalloc(sizeof(*v));
+		v->t = JT_BOOL;
+		v->boolean = 1;
+		return v;
+	}
+	if (t->i + 5 <= t->n && strncmp(t->s + t->i, "false", 5) == 0) {
+		t->i += 5;
+		JVal *v = jmalloc(sizeof(*v));
+		v->t = JT_BOOL;
+		v->boolean = 0;
+		return v;
+	}
+	return NULL;
+}
+
+static JVal *jparse_null(JTok *t)
+{
+	if (t->i + 4 <= t->n && strncmp(t->s + t->i, "null", 4) == 0) {
+		t->i += 4;
+		JVal *v = jmalloc(sizeof(*v));
+		v->t = JT_NULL;
+		return v;
+	}
+	return NULL;
+}
+
+static JVal *jparse_number(JTok *t)
+{
+	size_t start = t->i;
+	int c = jpeek(t);
+	if (c == '-' || c == '+')
+		jget(t);
+	while (isdigit(jpeek(t)))
+		jget(t);
+	if (jpeek(t) == '.') {
+		jget(t);
+		while (isdigit(jpeek(t)))
+			jget(t);
+	}
+	if (t->i == start)
+		return NULL;
+	char buf[64];
+	size_t len = t->i - start;
+	if (len >= sizeof(buf))
+		len = sizeof(buf) - 1;
+	memcpy(buf, t->s + start, len);
+	buf[len] = '\0';
+	JVal *v = jmalloc(sizeof(*v));
+	v->t = JT_NUM;
+	v->num = strtod(buf, NULL);
+	return v;
+}
+
+static JVal *jparse_value(JTok *t)
+{
+	jskip_ws(t);
+	int c = jpeek(t);
+	if (c == '{')
+		return jparse_object(t);
+	if (c == '"') {
+		JVal *v = jmalloc(sizeof(*v));
+		v->t = JT_STR;
+		v->str = jparse_string(t);
+		return v;
+	}
+	JVal *b = jparse_bool(t);
+	if (b)
+		return b;
+	JVal *n = jparse_null(t);
+	if (n)
+		return n;
+	return jparse_number(t);
+}
+
+static JVal *jparse(const char *s, size_t len)
+{
+	JTok t = { .s = s, .i = 0, .n = len };
+	JVal *v = jparse_value(&t);
+	if (!v)
+		return NULL;
+	jskip_ws(&t);
+	if (t.i != t.n) {
+		jfree(v);
+		return NULL;
+	}
+	return v;
+}
+
+static const JVal *jobj_get(const JVal *o, const char *key)
+{
+	if (!o || o->t != JT_OBJ)
+		return NULL;
+	for (size_t i = 0; i < o->obj_len; ++i) {
+		if (strcmp(o->obj[i].key, key) == 0)
+			return o->obj[i].val;
+	}
+	return NULL;
+}
+
+static const char *jval_str(const JVal *v)
+{
+	return (v && v->t == JT_STR) ? v->str : NULL;
+}
+
+static long jval_long(const JVal *v, long def)
+{
+	return (v && v->t == JT_NUM) ? (long)v->num : def;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Base64 helper                                                              */
+/* -------------------------------------------------------------------------- */
+
+static const char b64_table[] =
+	"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+static char *base64_encode(const uint8_t *in, size_t len)
+{
+	size_t out_len = 4 * ((len + 2) / 3);
+	char *out = malloc(out_len + 1);
+	if (!out)
+		return NULL;
+	size_t i = 0, j = 0;
+	while (i < len) {
+		uint32_t octet_a = i < len ? in[i++] : 0;
+		uint32_t octet_b = i < len ? in[i++] : 0;
+		uint32_t octet_c = i < len ? in[i++] : 0;
+		uint32_t triple = (octet_a << 16) | (octet_b << 8) | octet_c;
+		out[j++] = b64_table[(triple >> 18) & 0x3F];
+		out[j++] = b64_table[(triple >> 12) & 0x3F];
+		out[j++] = (i - 1 > len) ? '=' : b64_table[(triple >> 6) & 0x3F];
+		out[j++] = (i > len) ? '=' : b64_table[triple & 0x3F];
+		if (i - 1 > len)
+			out[j - 2] = '=';
+		if (i > len)
+			out[j - 1] = '=';
+	}
+	out[j] = '\0';
+	return out;
+}
+
+static int base64_decode(const char *in, uint8_t **out, size_t *out_len)
+{
+	size_t len = strlen(in);
+	if (len % 4 != 0)
+		return -1;
+	size_t olen = len / 4 * 3;
+	if (len >= 4 && in[len - 1] == '=')
+		--olen;
+	if (len >= 4 && in[len - 2] == '=')
+		--olen;
+	uint8_t *buf = malloc(olen);
+	if (!buf)
+		return -1;
+	int T[256];
+	memset(T, -1, sizeof(T));
+	for (int i = 0; i < 64; ++i)
+		T[(int)b64_table[i]] = i;
+	T['='] = 0;
+	size_t j = 0;
+	for (size_t i = 0; i < len; i += 4) {
+		int a = T[(int)in[i]];
+		int b = T[(int)in[i + 1]];
+		int c = T[(int)in[i + 2]];
+		int d = T[(int)in[i + 3]];
+		if (a < 0 || b < 0 || c < 0 || d < 0) {
+			free(buf);
+			return -1;
+		}
+		buf[j++] = (uint8_t)((a << 2) | (b >> 4));
+		if (in[i + 2] != '=')
+			buf[j++] = (uint8_t)((b << 4) | (c >> 2));
+		if (in[i + 3] != '=')
+			buf[j++] = (uint8_t)((c << 6) | d);
+	}
+	*out = buf;
+	if (out_len)
+		*out_len = j;
+	return 0;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Generic network helpers                                                    */
+/* -------------------------------------------------------------------------- */
+
+static int guard_dial(const char *host, const char *port)
+{
+	struct addrinfo hints = {
+		.ai_socktype = SOCK_STREAM,
+	};
+	struct addrinfo *res = NULL;
+	int rc = getaddrinfo(host, port, &hints, &res);
+	if (rc != 0) {
+		hifs_err("guard dial: getaddrinfo failed: %s", gai_strerror(rc));
+		return -1;
+	}
+	int fd = -1;
+	for (struct addrinfo *rp = res; rp; rp = rp->ai_next) {
+		fd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+		if (fd < 0)
+			continue;
+		int one = 1;
+		setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
+		if (connect(fd, rp->ai_addr, rp->ai_addrlen) == 0)
+			break;
+		close(fd);
+		fd = -1;
+	}
+	freeaddrinfo(res);
+	if (fd < 0)
+		hifs_err("guard dial: unable to connect to %s:%s", host, port);
+	return fd;
+}
+
+static int send_all(int fd, const void *buf, size_t len)
+{
+	const uint8_t *p = buf;
+	size_t sent = 0;
+	while (sent < len) {
+		ssize_t n = send(fd, p + sent, len - sent, 0);
+		if (n < 0) {
+			if (errno == EINTR)
+				continue;
+			return -1;
+		}
+		if (n == 0)
+			return -1;
+		sent += (size_t)n;
+	}
+	return 0;
+}
+
+static int recv_all(int fd, void *buf, size_t len)
+{
+	uint8_t *p = buf;
+	size_t recvd = 0;
+	while (recvd < len) {
+		ssize_t n = recv(fd, p + recvd, len - recvd, 0);
+		if (n < 0) {
+			if (errno == EINTR)
+				continue;
+			return -1;
+		}
+		if (n == 0)
+			return -1;
+		recvd += (size_t)n;
+	}
+	return 0;
+}
+
+static bool guard_send_frame(int fd, const char *json, size_t len)
+{
+	uint32_t be_len = htonl((uint32_t)len);
+	if (send_all(fd, &be_len, sizeof(be_len)) != 0)
+		return false;
+	return send_all(fd, json, len) == 0;
+}
+
+static bool guard_recv_frame(int fd, char **json_out, size_t *len_out)
+{
+	uint32_t be_len = 0;
+	if (recv_all(fd, &be_len, sizeof(be_len)) != 0)
+		return false;
+	uint32_t len = ntohl(be_len);
+	if (len == 0 || len > (32U * 1024U * 1024U)) {
+		hifs_err("guard recv: invalid frame size %u", len);
+		return false;
+	}
+	char *buf = malloc(len + 1);
+	if (!buf)
+		return false;
+	if (recv_all(fd, buf, len) != 0) {
+		free(buf);
+		return false;
+	}
+	buf[len] = '\0';
+	*json_out = buf;
+	if (len_out)
+		*len_out = len;
+	return true;
+}
+
+static bool guard_ensure_connected(void)
+{
+	if (g_guard.fd >= 0)
+		return true;
+	const char *host = HIFS_GUARD_HOST;
+	const char *port = HIFS_GUARD_PORT_STR;
+	int fd = guard_dial(host, port);
+	if (fd < 0)
+		return false;
+	g_guard.fd = fd;
+	return true;
+}
+
+static void guard_disconnect(void)
+{
+	if (g_guard.fd >= 0) {
+		close(g_guard.fd);
+		g_guard.fd = -1;
+	}
+	free(g_guard.rx_buf);
+	g_guard.rx_buf = NULL;
+	g_guard.rx_cap = 0;
+	g_guard.session_id = 0;
+	sqldb.sql_init = false;
+}
+
+/* -------------------------------------------------------------------------- */
+/* JSON builder for outgoing requests                                         */
+/* -------------------------------------------------------------------------- */
+
+struct json_builder {
+	char *buf;
+	size_t len;
+	size_t cap;
+};
+
+static void jb_init(struct json_builder *b)
+{
+	b->cap = 256;
+	b->len = 0;
+	b->buf = malloc(b->cap);
+	if (!b->buf) {
+		perror("malloc");
+		exit(EXIT_FAILURE);
+	}
+	b->buf[0] = '\0';
+}
+
+static bool jb_reserve(struct json_builder *b, size_t need)
+{
+	if (b->len + need + 1 <= b->cap)
+		return true;
+	size_t new_cap = b->cap;
+	while (b->len + need + 1 > new_cap)
+		new_cap *= 2;
+	char *tmp = realloc(b->buf, new_cap);
+	if (!tmp)
+		return false;
+	b->buf = tmp;
+	b->cap = new_cap;
+	return true;
+}
+
+static bool jb_append(struct json_builder *b, const char *fmt, ...)
+{
+	va_list ap;
+	while (1) {
+		va_start(ap, fmt);
+		int n = vsnprintf(b->buf + b->len, b->cap - b->len, fmt, ap);
+		va_end(ap);
+		if (n < 0)
+			return false;
+		if ((size_t)n < b->cap - b->len) {
+			b->len += (size_t)n;
+			return true;
+		}
+		if (!jb_reserve(b, (size_t)n + 1))
+			return false;
+	}
+}
+
+static char *jb_finish(struct json_builder *b)
+{
+	char *out = b->buf;
+	b->buf = NULL;
+	b->len = b->cap = 0;
+	return out;
+}
+
+static void jb_destroy(struct json_builder *b)
+{
+	free(b->buf);
+	b->buf = NULL;
+	b->len = b->cap = 0;
+}
+
+static char *json_escape(const char *in)
+{
+	if (!in)
+		return jstrdup("");
+	size_t extra = 0;
+	for (const unsigned char *p = (const unsigned char *)in; *p; ++p) {
+		if (*p == '"' || *p == '\\')
+			++extra;
+		else if (*p == '\n' || *p == '\r' || *p == '\t')
+			++extra;
+	}
+	size_t len = strlen(in);
+	char *out = malloc(len + extra + 1);
+	if (!out)
+		return NULL;
+	size_t j = 0;
+	for (const unsigned char *p = (const unsigned char *)in; *p; ++p) {
+		switch (*p) {
+		case '"': out[j++]='\\'; out[j++]='"'; break;
+		case '\\': out[j++]='\\'; out[j++]='\\'; break;
+		case '\n': out[j++]='\\'; out[j++]='n'; break;
+		case '\t': out[j++]='\\'; out[j++]='t'; break;
+		case '\r': out[j++]='\\'; out[j++]='r'; break;
+		default: out[j++]=(char)*p; break;
+		}
+	}
+	out[j] = '\0';
+	return out;
+}
+
+enum guard_field_type {
+	GF_STR,
+	GF_U64,
+	GF_I64,
+	GF_BOOL,
+};
+
+struct guard_field {
+	const char *key;
+	enum guard_field_type type;
+	union {
+		const char *str;
+		uint64_t u64;
+		int64_t i64;
+		bool boolean;
+	} v;
+};
+
+#define GUARD_FIELD_STR(k, s)  { .key = (k), .type = GF_STR,  .v.str = (s) }
+#define GUARD_FIELD_U64(k, u)  { .key = (k), .type = GF_U64,  .v.u64 = (u) }
+#define GUARD_FIELD_I64(k, i)  { .key = (k), .type = GF_I64,  .v.i64 = (i) }
+#define GUARD_FIELD_BOOL(k, b) { .key = (k), .type = GF_BOOL, .v.boolean = (b) }
+
+static char *guard_build_request(const char *type,
+				 const struct guard_field *fields, size_t field_count,
+				 const void *payload, size_t payload_len)
+{
+	struct json_builder jb;
+	jb_init(&jb);
+	if (!jb_append(&jb, "{\"type\":\"%s\"", type))
+		goto fail;
+	for (size_t i = 0; i < field_count; ++i) {
+		const struct guard_field *f = &fields[i];
+		switch (f->type) {
+		case GF_STR: {
+			char *esc = json_escape(f->v.str ? f->v.str : "");
+			if (!esc)
+				goto fail;
+			bool ok = jb_append(&jb, ",\"%s\":\"%s\"", f->key, esc);
+			free(esc);
+			if (!ok)
+				goto fail;
+			break;
+		}
+		case GF_U64:
+			if (!jb_append(&jb, ",\"%s\":%llu",
+				       f->key,
+				       (unsigned long long)f->v.u64))
+				goto fail;
+			break;
+		case GF_I64:
+			if (!jb_append(&jb, ",\"%s\":%lld",
+				       f->key,
+				       (long long)f->v.i64))
+				goto fail;
+			break;
+		case GF_BOOL:
+			if (!jb_append(&jb, ",\"%s\":%s",
+				       f->key,
+				       f->v.boolean ? "true" : "false"))
+				goto fail;
+			break;
+		}
+	}
+	if (payload && payload_len) {
+		char *b64 = base64_encode(payload, payload_len);
+		if (!b64)
+			goto fail;
+		bool ok = jb_append(&jb, ",\"payload_b64\":\"%s\"", b64);
+		free(b64);
+		if (!ok)
+			goto fail;
+	}
+	if (!jb_append(&jb, "}"))
+		goto fail;
+	return jb_finish(&jb);
+fail:
+	jb_destroy(&jb);
+	return NULL;
+}
+
+/* -------------------------------------------------------------------------- */
+/* RPC plumbing                                                                */
+/* -------------------------------------------------------------------------- */
+
+struct guard_response {
+	char *raw;
+	size_t raw_len;
+	JVal *root;
+};
+
+static void guard_response_destroy(struct guard_response *resp)
+{
+	if (!resp)
+		return;
+	jfree(resp->root);
+	free(resp->raw);
+	memset(resp, 0, sizeof(*resp));
+}
+
+static bool guard_rpc(const char *type,
+		      const struct guard_field *fields, size_t field_count,
+		      const void *payload, size_t payload_len,
+		      struct guard_response *resp)
+{
+	if (!guard_ensure_connected())
+		return false;
+
+	char *json = guard_build_request(type, fields, field_count,
+					 payload, payload_len);
+	if (!json)
+		return false;
+
+	size_t json_len = strlen(json);
+	bool ok = guard_send_frame(g_guard.fd, json, json_len);
+	free(json);
+	if (!ok) {
+		guard_disconnect();
+		return false;
+	}
+
+	char *reply = NULL;
+	size_t reply_len = 0;
+	if (!guard_recv_frame(g_guard.fd, &reply, &reply_len)) {
+		free(reply);
+		guard_disconnect();
+		return false;
+	}
+
+	JVal *root = jparse(reply, reply_len);
+	if (!root) {
+		hifs_err("guard rpc: failed to parse reply: %s", reply);
+		free(reply);
+		return false;
+	}
+
+	resp->raw = reply;
+	resp->raw_len = reply_len;
+	resp->root = root;
+	return true;
+}
+
+static bool guard_response_ok(const struct guard_response *resp)
+{
+	const JVal *ok = jobj_get(resp->root, "ok");
+	if (ok && ok->t == JT_BOOL)
+		return ok->boolean != 0;
+	const JVal *type = jobj_get(resp->root, "type");
+	if (type && type->t == JT_STR && strcmp(type->str, "error") == 0)
+		return false;
+	return true;
+}
+
+static void guard_log_error(const struct guard_response *resp,
+			    const char *context)
+{
+	const char *code = jval_str(jobj_get(resp->root, "code"));
+	const char *msg = jval_str(jobj_get(resp->root, "message"));
+	if (code || msg)
+		hifs_err("guard %s failed: %s (%s)",
+			 context,
+			 msg ? msg : "unknown error",
+			 code ? code : "no-code");
+	else
+		hifs_err("guard %s failed: malformed error response", context);
+}
+
+static bool guard_expect_ok(struct guard_response *resp,
+			    const char *context)
+{
+	if (guard_response_ok(resp))
+		return true;
+	guard_log_error(resp, context);
+	return false;
+}
+
+static bool guard_copy_payload_exact(struct guard_response *resp,
+				     void *out, size_t out_len)
+{
+	const char *b64 = jval_str(jobj_get(resp->root, "payload_b64"));
+	if (!b64) {
+		hifs_err("guard response missing payload");
+		return false;
+	}
+	uint8_t *blob = NULL;
+	size_t blob_len = 0;
+	if (base64_decode(b64, &blob, &blob_len) != 0) {
+		hifs_err("guard payload base64 decode failed");
+		return false;
+	}
+	if (blob_len != out_len) {
+		hifs_err("guard payload size mismatch (have %zu need %zu)",
+			 blob_len, out_len);
+		free(blob);
+		return false;
+	}
+	memcpy(out, blob, out_len);
+	free(blob);
+	return true;
+}
+
+static bool guard_take_payload(struct guard_response *resp,
+			       uint8_t **out_buf, size_t *out_len)
+{
+	const char *b64 = jval_str(jobj_get(resp->root, "payload_b64"));
+	if (!b64)
+		return false;
+	uint8_t *blob = NULL;
+	size_t blob_len = 0;
+	if (base64_decode(b64, &blob, &blob_len) != 0)
+		return false;
+	*out_buf = blob;
+	*out_len = blob_len;
+	return true;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Common local helpers (host info, hashing, etc.)                             */
+/* -------------------------------------------------------------------------- */
+
+static char *hifs_get_machine_id(void)
+{
+	static char id_buf[64];
+	FILE *fp = fopen("/etc/machine-id", "r");
+	if (fp) {
+		if (fgets(id_buf, sizeof(id_buf), fp)) {
+			id_buf[strcspn(id_buf, "\n")] = '\0';
+			fclose(fp);
+			if (id_buf[0] != '\0')
+				return id_buf;
+		}
+		fclose(fp);
+	}
+	if (gethostname(id_buf, sizeof(id_buf)) == 0)
+		return id_buf;
+	strcpy(id_buf, "unknown");
+	return id_buf;
+}
 
 static long hifs_get_host_id(void)
 {
@@ -22,629 +884,408 @@ static long hifs_get_host_id(void)
 	return id;
 }
 
-
-static char *hifs_get_machine_id(void)
+static void bytes_to_hex(const uint8_t *src, size_t len, char *dst)
 {
-	static char id_buf[64];
-	FILE *fp = fopen("/etc/machine-id", "r");
-	if (fp) {
-		if (fgets(id_buf, sizeof(id_buf), fp)) {
-			id_buf[strcspn(id_buf, "\n")] = '\0';
-			fclose(fp);
-			if (id_buf[0] != '\0')
-				return id_buf;
-		}
-		fclose(fp);
+	static const char hexdigits[] = "0123456789abcdef";
+	for (size_t i = 0; i < len; ++i) {
+		dst[i * 2] = hexdigits[(src[i] >> 4) & 0xF];
+		dst[i * 2 + 1] = hexdigits[src[i] & 0xF];
+	}
+	dst[len * 2] = '\0';
+}
+
+static void sha256_hex(const uint8_t *src, size_t len, char *dst)
+{
+	unsigned char digest[SHA256_DIGEST_LENGTH];
+	SHA256(src, len, digest);
+	bytes_to_hex(digest, SHA256_DIGEST_LENGTH, dst);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Guard RPC wrappers for common patterns                                     */
+/* -------------------------------------------------------------------------- */
+
+static bool guard_fetch_struct(const char *type,
+			       const struct guard_field *fields, size_t field_count,
+			       void *out, size_t out_len)
+{
+	struct guard_response resp = {0};
+	bool ok = guard_rpc(type, fields, field_count, NULL, 0, &resp) &&
+		  guard_expect_ok(&resp, type) &&
+		  guard_copy_payload_exact(&resp, out, out_len);
+	guard_response_destroy(&resp);
+	return ok;
+}
+
+static bool guard_store_struct(const char *type,
+			       const struct guard_field *fields, size_t field_count,
+			       const void *payload, size_t payload_len)
+{
+	struct guard_response resp = {0};
+	bool ok = guard_rpc(type, fields, field_count, payload, payload_len, &resp) &&
+		  guard_expect_ok(&resp, type);
+	guard_response_destroy(&resp);
+	return ok;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Public API implementations                                                 */
+/* -------------------------------------------------------------------------- */
+
+void init_hive_link(void)
+{
+	if (sqldb.sql_init)
+		return;
+
+	char *machine_id = hifs_get_machine_id();
+	long host_id = hifs_get_host_id();
+	char pid_buf[32];
+	snprintf(pid_buf, sizeof(pid_buf), "%ld", (long)getpid());
+
+	struct guard_field fields[] = {
+		GUARD_FIELD_STR("client_id", pid_buf),
+		GUARD_FIELD_STR("machine_id", machine_id),
+		GUARD_FIELD_I64("host_id", host_id),
+		GUARD_FIELD_U64("version", 1),
+	};
+
+	struct guard_response resp = {0};
+	if (!guard_rpc("hello", fields, ARRAY_SIZE(fields), NULL, 0, &resp)) {
+		hifs_err("guard hello failed");
+		return;
 	}
 
-	if (gethostname(id_buf, sizeof(id_buf)) == 0)
-		return id_buf;
+	if (!guard_expect_ok(&resp, "hello")) {
+		guard_response_destroy(&resp);
+		return;
+	}
 
-	strcpy(id_buf, "unknown");
-	return id_buf;
+	const char *session = jval_str(jobj_get(resp.root, "session_id"));
+	if (session)
+		g_guard.session_id = strtoull(session, NULL, 10);
+
+	sqldb.sql_init = true;
+	sqldb.host.serial = machine_id;
+	sqldb.host.host_id = host_id;
+	guard_response_destroy(&resp);
+
+	hifs_notice("hive_guard session established (session=%llu)",
+		    (unsigned long long)g_guard.session_id);
 }
 
-
-bool hifs_tcp_connect(void) {
-    if (g_guard_fd >= 0)
-        return true;
-    g_guard_fd = dial(HIFS_GUARD_HOST, HIFS_GUARD_PORT_STR);  // from env or config
-    return g_guard_fd >= 0;
-}
-
-
-void hifs_tcp_close(void) {
-    if (g_guard_fd >= 0) {
-        close(g_guard_fd);
-        g_guard_fd = -1;
-    }
-}
-
-
-static int recv_json(int fd, char *buf, size_t bufsize) {
-    ssize_t n = read_line(fd, buf, bufsize);
-    if (n < 0) return -1;
-    if (n > 0 && buf[n-1] == '\n') buf[n-1] = '\0';
-    return 0;
-}
-
-
-bool hifs_get_hive_host_sbs( char *host_uuid ) 
+void close_hive_link(void)
 {
-    if (!*host_uuid || *host_uuid == 0)
-        return false;
-    if (!hifs_tcp_connect())
-        return false;
+	if (!sqldb.sql_init) {
+		guard_disconnect();
+		return;
+	}
 
-    int fd = g_guard_fd;
-    if (send_jsonf(fd,
-        "{\"type\":\"get_host\","
-        "\"host_uuid\":%llu}",
-        
-        ((char)host_uuid,) != 0) {
-        hifs_tcp_close();
-        return false;
-    }
-
-    char reply[65536];
-    if (recv_json(fd, reply, sizeof(reply)) != 0) {
-        hifs_tcp_close();
-        return false;
-    }
+	struct guard_response resp = {0};
+	struct guard_field fields[] = {
+		GUARD_FIELD_U64("session_id", g_guard.session_id),
+	};
+	if (guard_rpc("goodbye", fields, ARRAY_SIZE(fields), NULL, 0, &resp))
+		guard_response_destroy(&resp);
+	guard_disconnect();
+	memset(&sqldb, 0, sizeof(sqldb));
 }
 
-
-bool hifs_get_hive_host_data(char *machine_id)
+int get_hive_vers(void)
 {
-
-
+	struct guard_response resp = {0};
+	if (!guard_rpc("db_status", NULL, 0, NULL, 0, &resp))
+		return 0;
+	if (!guard_expect_ok(&resp, "db_status")) {
+		guard_response_destroy(&resp);
+		return 0;
+	}
+	int ver = (int)jval_long(jobj_get(resp.root, "version"), 0);
+	guard_response_destroy(&resp);
+	return ver;
 }
 
-
-bool hifs_volume_super_get(uint64_t volume_id,)
+static bool guard_register_host(const char *machine_id,
+				const char *hostname,
+				const char *ip_address,
+				long host_id,
+				const struct utsname *uts)
 {
-
-
+	struct guard_field fields[] = {
+		GUARD_FIELD_STR("machine_id", machine_id),
+		GUARD_FIELD_STR("hostname", hostname),
+		GUARD_FIELD_STR("ip_address", ip_address),
+		GUARD_FIELD_I64("host_id", host_id),
+		GUARD_FIELD_STR("os_name", uts ? uts->sysname : "unknown"),
+		GUARD_FIELD_STR("os_version", uts ? uts->release : "unknown"),
+	};
+	struct guard_response resp = {0};
+	bool ok = guard_rpc("register_host", fields, ARRAY_SIZE(fields),
+			    NULL, 0, &resp) &&
+		  guard_expect_ok(&resp, "register_host");
+	guard_response_destroy(&resp);
+	return ok;
 }
-
 
 int register_hive_host(void)
 {
-	char sql_query[MAX_QUERY_SIZE];
-	char ip_address[64] = {0};
-	char *hive_mach_id = NULL;
-	long hive_host_id = 0;
-	struct hostent *host_entry;
-	struct in_addr addr;
-	struct utsname uts;
-
-	char name[100] = {0};
-	if (gethostname(name, sizeof(name)) != 0) {
-		hifs_err("gethostname failed: %s\n", strerror(errno));
+	char hostname[256] = {0};
+	if (gethostname(hostname, sizeof(hostname)) != 0) {
+		hifs_err("gethostname failed: %s", strerror(errno));
 		return 0;
 	}
-	hifs_debug("Host name is [%s]\n", name);
 
-	host_entry = gethostbyname(name);
+	struct hostent *host_entry = gethostbyname(hostname);
 	if (!host_entry) {
-		hifs_crit("gethostbyname failed: %s\n", hstrerror(h_errno));
+		hifs_err("gethostbyname failed: %s", hstrerror(h_errno));
 		return 0;
 	}
 
+	struct in_addr addr;
 	memcpy(&addr.s_addr, host_entry->h_addr_list[0], host_entry->h_length);
+	char ip_address[64];
 	snprintf(ip_address, sizeof(ip_address), "%s", inet_ntoa(addr));
-	hifs_debug("IP address is [%s]\n", ip_address);
 
+	struct utsname uts;
 	if (uname(&uts) != 0) {
-		hifs_err("uname failed: %s\n", strerror(errno));
+		hifs_err("uname failed: %s", strerror(errno));
 		return 0;
 	}
 
-	hive_mach_id = hifs_get_machine_id();
-	hive_host_id = hifs_get_host_id();
+	char *machine_id = hifs_get_machine_id();
+	long host_id = hifs_get_host_id();
 
-	hifs_info("Hive machine ID is [%s] and host ID is [%ld]\n", hive_mach_id, hive_host_id);
-
-	MYSQL_RES *res = hifs_get_hive_host_data(hive_mach_id);
-	if (!res) {
-		hifs_err("Failed to query hive host data\n");
+	if (!guard_register_host(machine_id, hostname, ip_address, host_id, &uts))
 		return 0;
-	}
 
-	MYSQL_ROW row;
-	unsigned int row_count = 0;
-	mysql_data_seek(res, 0);
-	while ((row = mysql_fetch_row(res)) != NULL) {
-		row_count++;
-		sqldb.host.serial = row[0];
-		sqldb.host.name = row[1];
-		sqldb.host.host_id = row[2] ? str_to_long(row[2]) : 0;
-		sqldb.host.os_name = row[3];
-		sqldb.host.os_version = row[4];
-		sqldb.host.create_time = row[5];
-
-		hifs_debug("serial: %s, name: %s, host_id: %ld, os: %s %s, created: %s",
-			   safe_str(sqldb.host.serial), safe_str(sqldb.host.name),
-			   sqldb.host.host_id,
-			   safe_str(sqldb.host.os_name),
-			   safe_str(sqldb.host.os_version),
-			   safe_str(sqldb.host.create_time));
-	}
-
-	if (row_count > 0)
-		return 1;
-
-	hifs_notice("This host does not exist in the hive. Filesystems cannot be mounted without a hive connection.");
-	hifs_notice("Would you like to add this host to the hive? [y/n]\n");
-
-	char response = 'n';
-	if (scanf(" %c", &response) != 1 || (response != 'y' && response != 'Y')) {
-		hifs_notice("Not registering host to Hive.");
-		return 0;
-	}
-
-	sqldb.host.serial = hive_mach_id;
-	sqldb.host.name = name;
-	sqldb.host.host_id = hive_host_id;
+	sqldb.host.serial = machine_id;
+	sqldb.host.name = hostname;
+	sqldb.host.host_id = host_id;
 	sqldb.host.os_name = uts.sysname;
 	sqldb.host.os_version = uts.release;
 	sqldb.host.create_time = NULL;
 
-	char *serial_q = hifs_get_quoted_value(hive_mach_id);
-	char *name_q = hifs_get_quoted_value(name);
-	char *os_name_q = hifs_get_quoted_value(uts.sysname);
-	char *os_version_q = hifs_get_quoted_value(uts.release);
-	if (!serial_q || !name_q || !os_name_q || !os_version_q) {
-		free(serial_q);
-		free(name_q);
-		free(os_name_q);
-		free(os_version_q);
-		hifs_err("Out of memory while preparing host registration query");
-		return 0;
-	}
-
-	snprintf(sql_query, sizeof(sql_query), SQL_HOST_UPSERT,
-		 safe_str(serial_q), safe_str(name_q), hive_host_id,
-		 safe_str(os_name_q), safe_str(os_version_q));
-
-	free(serial_q);
-	free(name_q);
-	free(os_name_q);
-	free(os_version_q);
-
-	hifs_notice("Registering host to Hive.");
-	if (!hifs_insert_sql(sql_query))
-		return 0;
-
-	hifs_info("Registered host to hive: name [%s] machine ID [%s] host ID [%ld] "
-		  "IP address [%s] OS [%s %s]",
-		  name, hive_mach_id, hive_host_id, ip_address,
-		  uts.sysname, uts.release);
+	hifs_info("Registered host %s (%s) with hive_guard", hostname, machine_id);
 	return 1;
 }
 
+int hifs_get_hive_host_sbs(void)
+{
+	struct guard_field fields[] = {
+		GUARD_FIELD_STR("machine_id", sqldb.host.serial ? sqldb.host.serial : hifs_get_machine_id()),
+	};
+	struct guard_response resp = {0};
+	if (!guard_rpc("host_super_list", fields, ARRAY_SIZE(fields), NULL, 0, &resp))
+		return 0;
+	if (!guard_expect_ok(&resp, "host_super_list")) {
+		guard_response_destroy(&resp);
+		return 0;
+	}
 
+	uint8_t *buf = NULL;
+	size_t len = 0;
+	if (!guard_take_payload(&resp, &buf, &len)) {
+		guard_response_destroy(&resp);
+		return 0;
+	}
+
+	size_t count = len / sizeof(struct superblock);
+	size_t copy = MIN(count, ARRAY_SIZE(sqldb.sb));
+	memcpy(sqldb.sb, buf, copy * sizeof(struct superblock));
+	sqldb.rows = (int)copy;
+	free(buf);
+	guard_response_destroy(&resp);
+	return sqldb.rows;
+}
 
 bool hifs_volume_super_get(uint64_t volume_id, struct hifs_volume_superblock *out)
 {
-
+	struct guard_field fields[] = {
+		GUARD_FIELD_U64("volume_id", volume_id),
+	};
+	return guard_fetch_struct("volume_super_get", fields, ARRAY_SIZE(fields),
+				  out, sizeof(*out));
 }
-
 
 bool hifs_volume_super_set(uint64_t volume_id, const struct hifs_volume_superblock *vsb)
 {
-
+	struct guard_field fields[] = {
+		GUARD_FIELD_U64("volume_id", volume_id),
+	};
+	return guard_store_struct("volume_super_set", fields, ARRAY_SIZE(fields),
+				  vsb, sizeof(*vsb));
 }
-
 
 bool hifs_root_dentry_load(uint64_t volume_id, struct hifs_volume_root_dentry *out)
 {
-
+	struct guard_field fields[] = {
+		GUARD_FIELD_U64("volume_id", volume_id),
+	};
+	return guard_fetch_struct("root_dentry_get", fields, ARRAY_SIZE(fields),
+				  out, sizeof(*out));
 }
 
-
-bool hifs_root_dentry_store(uint64_t volume_id, const struct hifs_volume_root_dentry *root)
+bool hifs_root_dentry_store(uint64_t volume_id,
+			    const struct hifs_volume_root_dentry *root)
 {
-
+	struct guard_field fields[] = {
+		GUARD_FIELD_U64("volume_id", volume_id),
+	};
+	return guard_store_struct("root_dentry_put", fields, ARRAY_SIZE(fields),
+				  root, sizeof(*root));
 }
-
 
 bool hifs_volume_dentry_load_by_inode(uint64_t volume_id, uint64_t inode,
-				 struct hifs_volume_dentry *out)
+				      struct hifs_volume_dentry *out)
 {
-
+	struct guard_field fields[] = {
+		GUARD_FIELD_U64("volume_id", volume_id),
+		GUARD_FIELD_U64("inode", inode),
+	};
+	return guard_fetch_struct("volume_dentry_get_inode",
+				  fields, ARRAY_SIZE(fields),
+				  out, sizeof(*out));
 }
-
 
 bool hifs_volume_dentry_load_by_name(uint64_t volume_id, uint64_t parent,
-				 const char *name_hex, uint32_t name_hex_len,
-				 struct hifs_volume_dentry *out)
+				     const char *name_hex, uint32_t name_hex_len,
+				     struct hifs_volume_dentry *out)
 {
-
+	(void)name_hex_len;
+	struct guard_field fields[] = {
+		GUARD_FIELD_U64("volume_id", volume_id),
+		GUARD_FIELD_U64("parent", parent),
+		GUARD_FIELD_STR("name_hex", name_hex),
+	};
+	return guard_fetch_struct("volume_dentry_get_name",
+				  fields, ARRAY_SIZE(fields),
+				  out, sizeof(*out));
 }
-
 
 bool hifs_volume_dentry_store(uint64_t volume_id,
-				 const struct hifs_volume_dentry *dent)
+			      const struct hifs_volume_dentry *dent)
 {
-
+	struct guard_field fields[] = {
+		GUARD_FIELD_U64("volume_id", volume_id),
+	};
+	return guard_store_struct("volume_dentry_put",
+				  fields, ARRAY_SIZE(fields),
+				  dent, sizeof(*dent));
 }
-
 
 bool hifs_volume_inode_load(uint64_t volume_id, uint64_t inode,
-				 struct hifs_inode_wire *out)
+			    struct hifs_inode_wire *out)
 {
-
+	struct guard_field fields[] = {
+		GUARD_FIELD_U64("volume_id", volume_id),
+		GUARD_FIELD_U64("inode", inode),
+	};
+	return guard_fetch_struct("volume_inode_get",
+				  fields, ARRAY_SIZE(fields),
+				  out, sizeof(*out));
 }
-
 
 bool hifs_volume_inode_store(uint64_t volume_id,
-			 const struct hifs_inode_wire *inode)
+			     const struct hifs_inode_wire *inode)
 {
-
+	struct guard_field fields[] = {
+		GUARD_FIELD_U64("volume_id", volume_id),
+	};
+	return guard_store_struct("volume_inode_put", fields, ARRAY_SIZE(fields),
+				  inode, sizeof(*inode));
 }
-
 
 bool hifs_volume_block_load(uint64_t volume_id, uint64_t block_no,
-                            uint8_t *buf, uint32_t *len)
+			    uint8_t *buf, uint32_t *len)
 {
-
+	if (!buf || !len)
+		return false;
+	struct guard_field fields[] = {
+		GUARD_FIELD_U64("volume_id", volume_id),
+		GUARD_FIELD_U64("block_no", block_no),
+	};
+	struct guard_response resp = {0};
+	if (!guard_rpc("volume_block_get", fields, ARRAY_SIZE(fields),
+		       NULL, 0, &resp))
+		return false;
+	if (!guard_expect_ok(&resp, "volume_block_get")) {
+		guard_response_destroy(&resp);
+		return false;
+	}
+	uint8_t *payload = NULL;
+	size_t payload_len = 0;
+	if (!guard_take_payload(&resp, &payload, &payload_len)) {
+		guard_response_destroy(&resp);
+		return false;
+	}
+	if (payload_len > *len) {
+		*len = (uint32_t)payload_len;
+		free(payload);
+		guard_response_destroy(&resp);
+		return false;
+	}
+	memcpy(buf, payload, payload_len);
+	*len = (uint32_t)payload_len;
+	free(payload);
+	guard_response_destroy(&resp);
+	return true;
 }
-
 
 bool hifs_volume_block_store(uint64_t volume_id, uint64_t block_no,
 			     const uint8_t *buf, uint32_t len)
 {
+	if (!buf || len == 0)
+		return false;
 
+	char hash_hex[SHA256_DIGEST_LENGTH * 2 + 1];
+	sha256_hex(buf, len, hash_hex);
+
+	struct guard_field fields[] = {
+		GUARD_FIELD_U64("volume_id", volume_id),
+		GUARD_FIELD_U64("block_no", block_no),
+		GUARD_FIELD_STR("hash", hash_hex),
+	};
+	return guard_store_struct("volume_block_put",
+				  fields, ARRAY_SIZE(fields),
+				  buf, len);
 }
-
 
 bool hifs_volume_block_recv(uint64_t volume_id, uint64_t block_no,
-                            uint8_t *buf, uint32_t *len)
+			    uint8_t *buf, uint32_t *len)
 {
-    if (!buf || !len || *len == 0)
-        return false;
-    if (!hifs_tcp_connect())
-        return false;
-
-    int fd = g_guard_fd;
-    if (send_jsonf(fd,
-        "{\"type\":\"load_block\","
-        "\"volume_id\":%llu,"
-        "\"block_no\":%llu}",
-        (unsigned long long)volume_id,
-        (unsigned long long)block_no) != 0) {
-        hifs_tcp_close();
-        return false;
-    }
-
-    char reply[65536];
-    if (recv_json(fd, reply, sizeof(reply)) != 0) {
-        hifs_tcp_close();
-        return false;
-    }
-
-    /* You will want to parse JSON: extract data_b64, decode → buf, set *len */
-    hifs_debug("load_block reply: %s", reply);
-    /* TODO: actually base64-decode into buf and set *len */
-
-    return true;
+	return hifs_volume_block_load(volume_id, block_no, buf, len);
 }
 
-
-bool hifs_volume_block_send(uint64_t volume_id, uint64_t block_no,
-                             const uint8_t *buf, uint32_t len)
+bool hifs_insert_data(const char *q_string)
 {
-    if (!buf || len == 0 || len > HIFS_DEFAULT_BLOCK_SIZE)
-        return false;
-    if (!hifs_tcp_connect())
-        return false;
-
-    /* 1) Compute SHA-256 hex as today */
-    char hash_hex[SHA256_DIGEST_LENGTH * 2 + 1];
-    sha256_hex(buf, len, hash_hex);
-
-    /* 2) Base64 encode the whole block */
-    size_t b64_len = 0;
-    char *b64 = base64_encode(buf, len, &b64_len);
-    if (!b64) {
-        hifs_warning("base64 encode OOM");
-        return false;
-    }
-
-    /* 3) Build and send JSON */
-    int fd = g_guard_fd;
-    if (send_jsonf(fd,
-        "{\"type\":\"store_block\","
-        "\"volume_id\":%llu,"
-        "\"block_no\":%llu,"
-        "\"hash_algo\":\"sha256\","
-        "\"hash_hex\":\"%s\","
-        "\"data_b64\":\"%s\"}",
-        (unsigned long long)volume_id,
-        (unsigned long long)block_no,
-        hash_hex,
-        b64) != 0) {
-        free(b64);
-        hifs_tcp_close();
-        return false;
-    }
-    free(b64);
-
-    /* 4) Receive reply */
-    char reply[65536];
-    if (recv_json(fd, reply, sizeof(reply)) != 0) {
-        hifs_tcp_close();
-        return false;
-    }
-
-    /* Optional: parse reply JSON to enforce success / dedupe flags */
-    hifs_debug("store_block reply: %s", reply);
-    return true;
+	(void)q_string;
+	hifs_warning("hifs_insert_data: legacy SQL path is no longer supported");
+	return false;
 }
 
-
-/* ------------------ tiny utils ------------------ */
-static uint64_t now_ms(void) {
-    struct timespec ts;
-    clock_gettime(CLOCK_REALTIME, &ts);
-    return (uint64_t)ts.tv_sec * 1000ULL + ts.tv_nsec / 1000000ULL;
+char *hifs_get_quoted_value(const char *in_str)
+{
+	return in_str ? strdup(in_str) : NULL;
 }
 
-/* Read a single \n-terminated line from fd into buf (size bytes). Returns length (>=0) or -1 on error/EOF. */
-static ssize_t read_line(int fd, char *buf, size_t size) {
-    size_t used = 0;
-    while (used + 1 < size) {
-        char c;
-        ssize_t n = recv(fd, &c, 1, 0);
-        if (n == 0) return -1;          /* EOF */
-        if (n < 0) {
-            if (errno == EINTR) continue;
-            if (errno == EAGAIN || errno == EWOULDBLOCK) continue;
-            return -1;
-        }
-        buf[used++] = c;
-        if (c == '\n') break;
-    }
-    buf[used] = '\0';
-    return (ssize_t)used;
+char *hifs_get_unquoted_value(const char *in_str)
+{
+	return in_str ? strdup(in_str) : NULL;
 }
 
-/* Base64 encoder (RFC 4648) */
-static char b64_table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-static char *base64_encode(const uint8_t *in, size_t len, size_t *out_len) {
-    size_t olen = 4 * ((len + 2) / 3);
-    char *out = (char *)malloc(olen + 1);
-    if (!out) return NULL;
-
-    size_t i = 0, j = 0;
-    while (i < len) {
-        uint32_t octet_a = i < len ? in[i++] : 0;
-        uint32_t octet_b = i < len ? in[i++] : 0;
-        uint32_t octet_c = i < len ? in[i++] : 0;
-        uint32_t triple = (octet_a << 16) | (octet_b << 8) | octet_c;
-
-        out[j++] = b64_table[(triple >> 18) & 0x3F];
-        out[j++] = b64_table[(triple >> 12) & 0x3F];
-        out[j++] = (i - 1 > len) ? '=' : b64_table[(triple >> 6) & 0x3F];
-        out[j++] = (i > len) ? '=' : b64_table[triple & 0x3F];
-
-        if (i - 1 > len) out[j - 2] = '=';
-        if (i > len) out[j - 1] = '=';
-    }
-    out[j] = '\0';
-    if (out_len) *out_len = j;
-    return out;
+void hifs_release_query(void)
+{
+	/* nothing to do in guard mode */
 }
 
-/* Read entire file into memory (malloc’d); returns 0 on success */
-static int slurp_file(const char *path, uint8_t **buf, size_t *len) {
-    *buf = NULL; *len = 0;
-    FILE *f = fopen(path, "rb");
-    if (!f) return -1;
-    if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return -1; }
-    long sz = ftell(f);
-    if (sz < 0) { fclose(f); return -1; }
-    if (fseek(f, 0, SEEK_SET) != 0) { fclose(f); return -1; }
-    uint8_t *mem = (uint8_t *)malloc((size_t)sz);
-    if (!mem) { fclose(f); return -1; }
-    if (sz > 0 && fread(mem, 1, (size_t)sz, f) != (size_t)sz) {
-        free(mem); fclose(f); return -1;
-    }
-    fclose(f);
-    *buf = mem;
-    *len = (size_t)sz;
-    return 0;
+MYSQL_RES *hifs_get_hive_host_data(char *machine_id)
+{
+	(void)machine_id;
+	return NULL;
 }
 
-/* ------------------ socket ------------------ */
-static int dial(const char *host, const char *port) {
-    struct addrinfo hints, *res = NULL, *rp = NULL;
-    memset(&hints, 0, sizeof(hints));
-    hints.ai_socktype = SOCK_STREAM;
-    hints.ai_family   = AF_UNSPEC;
-
-    int rc = getaddrinfo(host, port, &hints, &res);
-    if (rc != 0) {
-        fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rc));
-        return -1;
-    }
-    int fd = -1;
-    for (rp = res; rp; rp = rp->ai_next) {
-        fd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
-        if (fd < 0) continue;
-        int one = 1;
-        setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
-        if (connect(fd, rp->ai_addr, rp->ai_addrlen) == 0) break;
-        close(fd); fd = -1;
-    }
-    freeaddrinfo(res);
-    if (fd < 0) perror("connect");
-    return fd;
-}
-
-/* Send a full buffer (retry on partial) */
-static int send_all(int fd, const void *buf, size_t len) {
-    const uint8_t *p = (const uint8_t *)buf;
-    size_t sent = 0;
-    while (sent < len) {
-        ssize_t n = send(fd, p + sent, len - sent, 0);
-        if (n < 0) {
-            if (errno == EINTR) continue;
-            return -1;
-        }
-        sent += (size_t)n;
-    }
-    return 0;
-}
-
-/* Convenience: send a JSON line built with printf-style formatting */
-static int send_jsonf(int fd, const char *fmt, ...) {
-    char *line = NULL;
-    va_list ap;
-    va_start(ap, fmt);
-    int n = vasprintf(&line, fmt, ap);
-    va_end(ap);
-    if (n < 0 || !line) return -1;
-    int rc = 0;
-    rc = send_all(fd, line, (size_t)n);
-    if (rc == 0) rc = send_all(fd, "\n", 1);
-    free(line);
-    return rc;
-}
-
-
-/* ------------------ commands ------------------ */
-static int cmd_hello(int fd, const char *client_id, int version) {
-    if (send_jsonf(fd,
-        "{\"type\":\"hello\",\"client_id\":\"%s\",\"version\":%d}",
-        client_id, version) != 0)
-        return -1;
-    return recv_and_print(fd);
-}
-
-static int cmd_ping(int fd) {
-    uint64_t ts = now_ms();
-    if (send_jsonf(fd, "{\"type\":\"ping\",\"ts\":%llu}",
-        (unsigned long long)ts) != 0)
-        return -1;
-    return recv_and_print(fd);
-}
-
-static int cmd_db_status(int fd) {
-    if (send_jsonf(fd, "{\"type\":\"db_status\"}") != 0)
-        return -1;
-    return recv_and_print(fd);
-}
-
-/* hash_check: we no longer compute any hash. The argument is sent as-is. */
-static int cmd_hash_check(int fd, const char *hash_or_literal) {
-    const char *hash = hash_or_literal;
-    if (send_jsonf(fd, "{\"type\":\"hash_check\",\"hash\":\"%s\"}", hash) != 0)
-        return -1;
-    return recv_and_print(fd);
-}
-
-/* store: we no longer compute any hash. Caller must provide --hash. */
-static int cmd_store(int fd, const char *path,
-                     const char *obj_id, int seq,
-                     const char *txn_id, const char *hash) {
-    if (!hash) {
-        fprintf(stderr,
-          "Error: --hash is required for store (client no longer computes hashes).\n");
-        return -1;
-    }
-
-    uint8_t *raw = NULL;
-    size_t   rlen = 0;
-    if (slurp_file(path, &raw, &rlen) != 0) {
-        fprintf(stderr, "failed to read %s\n", path);
-        return -1;
-    }
-
-    size_t b64len = 0;
-    char *b64 = base64_encode(raw, rlen, &b64len);
-    free(raw);
-    if (!b64) {
-        fprintf(stderr, "base64 OOM\n");
-        return -1;
-    }
-
-    int rc = send_jsonf(fd,
-        "{\"type\":\"store\",\"hash\":\"%s\",\"data_b64\":\"%s\","
-        "\"obj_id\":\"%s\",\"seq\":%d,\"txn_id\":\"%s\"}",
-        hash, b64, obj_id, seq, txn_id);
-
-    free(b64);
-    if (rc != 0) return -1;
-    return recv_and_print(fd);
-}
-
-/* ------------------ CLI ------------------ */
-
-
-int parse_protocol( char *recieve ) {
-    const char *host = "127.0.0.1";
-    const char *port = "7777";
-
-
-    int fd = dial(host, port);
-    if (fd < 0) return 1;
-
-    int rc = 0;
-
-    if (strcmp(cmd, "hello") == 0) {
-        const char *client_id = "client-123";
-        int version = 1;
-        for (; i < argc; ++i) {
-            if (strcmp(argv[i], "--client-id") == 0 && i + 1 < argc) {
-                client_id = argv[++i];
-                continue;
-            }
-            if (strcmp(argv[i], "--version") == 0 && i + 1 < argc) {
-                version = atoi(argv[++i]);
-                continue;
-            }
-        }
-        rc = cmd_hello(fd, client_id, version);
-
-    } else if (strcmp(cmd, "ping") == 0) {
-        rc = cmd_ping(fd);
-
-    } else if (strcmp(cmd, "db_status") == 0) {
-        rc = cmd_db_status(fd);
-
-    } else if (strcmp(cmd, "hash_check") == 0) {
-        if (i >= argc) { usage(argv[0]); close(fd); return 2; }
-        rc = cmd_hash_check(fd, argv[i]);
-
-    } else if (strcmp(cmd, "store") == 0) {
-        if (i >= argc) { usage(argv[0]); close(fd); return 2; }
-        const char *path   = argv[i++];
-        const char *obj_id = "obj-1";
-        int         seq    = 0;
-        const char *txn_id = "txn-123";
-        const char *hash   = NULL;
-
-        while (i < argc) {
-            if (strcmp(argv[i], "--obj-id") == 0 && i + 1 < argc) {
-                obj_id = argv[++i];
-            } else if (strcmp(argv[i], "--seq") == 0 && i + 1 < argc) {
-                seq = atoi(argv[++i]);
-            } else if (strcmp(argv[i], "--txn-id") == 0 && i + 1 < argc) {
-                txn_id = argv[++i];
-            } else if (strcmp(argv[i], "--hash") == 0 && i + 1 < argc) {
-                hash = argv[++i];
-            }
-            ++i;
-        }
-        rc = cmd_store(fd, path, obj_id, seq, txn_id, hash);
-
-    } else {
-        usage(argv[0]);
-        rc = 2;
-    }
-
-    close(fd);
-    return (rc == 0) ? 0 : 1;
+int save_binary_data(char *data_block, char *hash)
+{
+	(void)data_block;
+	(void)hash;
+	return 0;
 }
