@@ -27,6 +27,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "../../hicomm/hi_command.h"
+
 #define DB_HOST     "127.0.0.1"
 #define DB_NAME     "hive_meta"
 #define DB_USER     "hiveadmin"
@@ -242,25 +244,6 @@ bool hifs_volume_block_store(uint64_t volume_id, uint64_t block_no,
 /* SQL Connect */
 
 
-struct superblock {
-	uint64_t volume_id;
-	uint32_t s_magic;
-	uint32_t s_blocksize;
-	uint32_t s_blocksize_bits;
-	uint64_t s_blocks_count;
-	uint64_t s_free_blocks;
-	uint64_t s_inodes_count;
-	uint64_t s_free_inodes;
-};
-
-struct machine {
-	char *serial;
-	char *name;
-	long host_id;
-	char *os_name;
-	char *os_version;
-	char *create_time;
-};
 struct SQLDB {
 	MYSQL *conn;
 	MYSQL_RES *last_query;

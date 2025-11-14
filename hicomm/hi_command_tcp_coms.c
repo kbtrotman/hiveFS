@@ -7,7 +7,7 @@
  */
 
 #include "hi_command.h"
-#include "sql/hi_command_sql.h"
+#include "guard_client_state.h"
 
 #include <arpa/inet.h>
 #include <ctype.h>
@@ -27,7 +27,7 @@
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #endif
 
-struct SQLDB sqldb; /* still referenced throughout the legacy code */
+struct guard_link_state g_guard_link;
 
 /* -------------------------------------------------------------------------- */
 /* Helper types                                                                */
@@ -525,7 +525,7 @@ static void guard_disconnect(void)
 	g_guard.rx_buf = NULL;
 	g_guard.rx_cap = 0;
 	g_guard.session_id = 0;
-	sqldb.sql_init = false;
+	g_guard_link.guard_ready = false;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -934,7 +934,7 @@ static bool guard_store_struct(const char *type,
 
 void init_hive_link(void)
 {
-	if (sqldb.sql_init)
+	if (g_guard_link.guard_ready)
 		return;
 
 	char *machine_id = hifs_get_machine_id();
@@ -964,9 +964,7 @@ void init_hive_link(void)
 	if (session)
 		g_guard.session_id = strtoull(session, NULL, 10);
 
-	sqldb.sql_init = true;
-	sqldb.host.serial = machine_id;
-	sqldb.host.host_id = host_id;
+
 	guard_response_destroy(&resp);
 
 	hifs_notice("hive_guard session established (session=%llu)",
@@ -975,7 +973,7 @@ void init_hive_link(void)
 
 void close_hive_link(void)
 {
-	if (!sqldb.sql_init) {
+	if (!g_guard_link.guard_ready) {
 		guard_disconnect();
 		return;
 	}
@@ -987,7 +985,7 @@ void close_hive_link(void)
 	if (guard_rpc("goodbye", fields, ARRAY_SIZE(fields), NULL, 0, &resp))
 		guard_response_destroy(&resp);
 	guard_disconnect();
-	memset(&sqldb, 0, sizeof(sqldb));
+	memset(&g_guard_link, 0, sizeof(g_guard_link));
 }
 
 int get_hive_vers(void)
@@ -1057,12 +1055,16 @@ int register_hive_host(void)
 	if (!guard_register_host(machine_id, hostname, ip_address, host_id, &uts))
 		return 0;
 
-	sqldb.host.serial = machine_id;
-	sqldb.host.name = hostname;
-	sqldb.host.host_id = host_id;
-	sqldb.host.os_name = uts.sysname;
-	sqldb.host.os_version = uts.release;
-	sqldb.host.create_time = NULL;
+	g_guard_link.host.serial = machine_id;
+	free(g_guard_link.host.name);
+	g_guard_link.host.name = strdup(hostname);
+	g_guard_link.host.host_id = host_id;
+	free(g_guard_link.host.os_name);
+	free(g_guard_link.host.os_version);
+	g_guard_link.host.os_name = strdup(uts.sysname);
+	g_guard_link.host.os_version = strdup(uts.release);
+	free(g_guard_link.host.create_time);
+	g_guard_link.host.create_time = NULL;
 
 	hifs_info("Registered host %s (%s) with hive_guard", hostname, machine_id);
 	return 1;
@@ -1071,7 +1073,7 @@ int register_hive_host(void)
 int hifs_get_hive_host_sbs(void)
 {
 	struct guard_field fields[] = {
-		GUARD_FIELD_STR("machine_id", sqldb.host.serial ? sqldb.host.serial : hifs_get_machine_id()),
+		GUARD_FIELD_STR("machine_id", g_guard_link.host.serial ? g_guard_link.host.serial : hifs_get_machine_id()),
 	};
 	struct guard_response resp = {0};
 	if (!guard_rpc("host_super_list", fields, ARRAY_SIZE(fields), NULL, 0, &resp))
@@ -1089,12 +1091,12 @@ int hifs_get_hive_host_sbs(void)
 	}
 
 	size_t count = len / sizeof(struct superblock);
-	size_t copy = MIN(count, ARRAY_SIZE(sqldb.sb));
-	memcpy(sqldb.sb, buf, copy * sizeof(struct superblock));
-	sqldb.rows = (int)copy;
+	size_t copy = MIN(count, ARRAY_SIZE(g_guard_link.sb));
+	memcpy(g_guard_link.sb, buf, copy * sizeof(struct superblock));
+	g_guard_link.rows = (int)copy;
 	free(buf);
 	guard_response_destroy(&resp);
-	return sqldb.rows;
+	return g_guard_link.rows;
 }
 
 bool hifs_volume_super_get(uint64_t volume_id, struct hifs_volume_superblock *out)
@@ -1275,12 +1277,6 @@ char *hifs_get_unquoted_value(const char *in_str)
 void hifs_release_query(void)
 {
 	/* nothing to do in guard mode */
-}
-
-MYSQL_RES *hifs_get_hive_host_data(char *machine_id)
-{
-	(void)machine_id;
-	return NULL;
 }
 
 int save_binary_data(char *data_block, char *hash)

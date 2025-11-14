@@ -9,35 +9,36 @@
 
 CC := gcc
 
-# ---- Sources ----      
-OBJS = $(SRCS:.c=.o)
-MAIN = hive_guard
+# ---- Sources ----
+SRCS := hive_guard.c hive_guard_tcp_coms.c hive_guard_sql.c hive_guard_erasure_coding.c
+OBJS := $(SRCS:.c=.o)
 
-# ---- Common flags ----
+MAIN := hive_guard
+
+# ---- Flags ----
 CSTD    = -std=gnu11
 WARN    = -Wall -Wextra
 DEBUG   = -g
+OPT     = -O2
 INCS    = -I../
 
-CFLAGS  = $(CSTD) $(WARN) $(DEBUG) $(INCS)
+CFLAGS  = $(CSTD) $(WARN) $(DEBUG) $(OPT) $(INCS)
 LDFLAGS =
 LDLIBS  =
-# Try to pick reasonable defaults; override by exporting LIBS in env if needed.
-LIBS := -lmariadb -lz -lbz2 -lsnappy -llz4 -lzstd -lm -lpthread -ldl
 
-# ---- MySQL ----
+# ---- MariaDB / MySQL flags ----
 MYSQL_CONFIG := $(shell command -v mysql_config 2>/dev/null)
 ifeq ($(MYSQL_CONFIG),)
-  $(error "mysql_config not found. Please install the MariaDB/MySQL development packages.")
+  $(error "mysql_config not found. Please install libmariadb-dev or libmysqlclient-dev.")
 else
   CFLAGS  += $(shell $(MYSQL_CONFIG) --cflags)
   LDLIBS  += $(shell $(MYSQL_CONFIG) --libs) -lcrypto
 endif
 
+# Additional libs (adjust if you add RocksDB/etc later)
+LIBS := -lm -lpthread -ldl -lerasurecode
 
-CFLAGS := -O2 -Wall -Wextra -std=gnu11
-
-# ---- Build rules ----
+# ---- Build ----
 all: $(MAIN)
 
 $(MAIN): $(OBJS)
@@ -47,6 +48,4 @@ $(MAIN): $(OBJS)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:
-	$(RM) $(OBJS) $(MAIN)
-
- 
+	rm -f $(OBJS) $(MAIN)

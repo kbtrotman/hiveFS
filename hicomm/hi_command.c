@@ -8,7 +8,6 @@
  */
 
 #include "hi_command.h"
-#include "sql/hi_command_sql.h"
 
 static int comm_fd = -1;
 

@@ -33,13 +33,15 @@
 
 #include "../hifs_shared_defs.h"
 
+
 #define HIFS_GUARD_HOST "127.0.0.1"
 #define HIFS_GUARD_PORT_STR "6060"
 
-#define HIFS_COMM_DEVICE_PATH "/dev/" HIFS_COMM_DEVICE_NAME
-
-void hicomm_log(int level, const char *fmt, ...);
-
+/* Erasure coding profile shared with hive_guard */
+#define HIFS_EC_K         6
+#define HIFS_EC_M         3
+#define HIFS_EC_W         8
+#define HIFS_EC_CHECKSUM  CHKSUM_CRC32
 
 typedef struct {
     int     desc;        /* liberasurecode instance handle */
@@ -47,6 +49,36 @@ typedef struct {
     int     checksum;    /* CHKSUM_* */
     int     initialized; /* 0/1 */
 } ec_ctx_t;
+
+#define HIFS_COMM_DEVICE_PATH "/dev/" HIFS_COMM_DEVICE_NAME
+
+struct superblock {
+	uint64_t volume_id;
+	uint32_t s_magic;
+	uint32_t s_blocksize;
+	uint32_t s_blocksize_bits;
+	uint64_t s_blocks_count;
+	uint64_t s_free_blocks;
+	uint64_t s_inodes_count;
+	uint64_t s_free_inodes;
+};
+
+struct machine {
+	char *serial;
+	char *name;
+	long host_id;
+	char *os_name;
+	char *os_version;
+	char *create_time;
+};
+
+void hicomm_log(int level, const char *fmt, ...);
+
+void init_hive_link(void);
+void close_hive_link(void);
+int register_hive_host(void);
+int hifs_get_hive_host_sbs(void);
+
 
 /* Convenience macros mirroring the kernel names */
 #define hifs_emerg(fmt, ...)   hicomm_log(LOG_EMERG,   "hivefs: " fmt, ##__VA_ARGS__)
@@ -74,18 +106,27 @@ void hicomm_safe_cleanup(void);
 int hicomm_handle_command(int fd, const struct hifs_cmds *cmd);
 void hicomm_print_inode(const struct hifs_inode *inode);
 
-/* hi_command_erasure_encoding.c */
-int hifs_ec_ensure_init(void);
-int hicomm_erasure_coding_init(void);
-int hicomm_erasure_coding_encode(const uint8_t *data, size_t data_len,
-                                 uint8_t **encoded_chunks, size_t *chunk_size,
-                                 size_t num_data_chunks, size_t num_parity_chunks);
-int hicomm_erasure_coding_decode(uint8_t **encoded_chunks, size_t chunk_size,
-                                 size_t num_data_chunks, size_t num_parity_chunks,
-                                 uint8_t *decoded_data, size_t *data_len);
-int hicomm_erasure_coding_rebuild_from_partial(uint8_t **encoded_chunks, size_t chunk_size,
-                                 size_t num_data_chunks, size_t num_parity_chunks,
-                                 uint8_t *decoded_data, size_t *data_len);
 
 /* Utility */
 const char *hifs_link_state_string(enum hifs_link_state state);
+
+/* Remote superblock helpers */
+bool hifs_volume_super_get(uint64_t volume_id, struct hifs_volume_superblock *out);
+bool hifs_volume_super_set(uint64_t volume_id, const struct hifs_volume_superblock *vsb);
+bool hifs_root_dentry_load(uint64_t volume_id, struct hifs_volume_root_dentry *out);
+bool hifs_root_dentry_store(uint64_t volume_id, const struct hifs_volume_root_dentry *root);
+bool hifs_volume_dentry_load_by_inode(uint64_t volume_id, uint64_t inode,
+                                      struct hifs_volume_dentry *out);
+bool hifs_volume_dentry_load_by_name(uint64_t volume_id, uint64_t parent,
+                                     const char *name_hex, uint32_t name_hex_len,
+                                     struct hifs_volume_dentry *out);
+bool hifs_volume_dentry_store(uint64_t volume_id,
+                              const struct hifs_volume_dentry *dent);
+bool hifs_volume_inode_load(uint64_t volume_id, uint64_t inode,
+                            struct hifs_inode_wire *out);
+bool hifs_volume_inode_store(uint64_t volume_id,
+                             const struct hifs_inode_wire *inode);
+bool hifs_volume_block_load(uint64_t volume_id, uint64_t block_no,
+                            uint8_t *buf, uint32_t *len);
+bool hifs_volume_block_store(uint64_t volume_id, uint64_t block_no,
+                             const uint8_t *buf, uint32_t len);
