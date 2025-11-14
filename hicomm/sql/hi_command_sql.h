@@ -218,49 +218,7 @@ bool hifs_insert_data(const char *q_string);
 int hifs_get_hive_host_sbs(void);
 int save_binary_data(char *data_block, char *hash);
 
-/* Remote superblock helpers */
-bool hifs_volume_super_get(uint64_t volume_id, struct hifs_volume_superblock *out);
-bool hifs_volume_super_set(uint64_t volume_id, const struct hifs_volume_superblock *vsb);
-bool hifs_root_dentry_load(uint64_t volume_id, struct hifs_volume_root_dentry *out);
-bool hifs_root_dentry_store(uint64_t volume_id, const struct hifs_volume_root_dentry *root);
-bool hifs_volume_dentry_load_by_inode(uint64_t volume_id, uint64_t inode,
-                                      struct hifs_volume_dentry *out);
-bool hifs_volume_dentry_load_by_name(uint64_t volume_id, uint64_t parent,
-                                     const char *name_hex, uint32_t name_hex_len,
-                                     struct hifs_volume_dentry *out);
-bool hifs_volume_dentry_store(uint64_t volume_id,
-                              const struct hifs_volume_dentry *dent);
-bool hifs_volume_inode_load(uint64_t volume_id, uint64_t inode,
-                            struct hifs_inode_wire *out);
-bool hifs_volume_inode_store(uint64_t volume_id,
-                             const struct hifs_inode_wire *inode);
-bool hifs_volume_block_load(uint64_t volume_id, uint64_t block_no,
-                            uint8_t *buf, uint32_t *len);
-bool hifs_volume_block_store(uint64_t volume_id, uint64_t block_no,
-                             const uint8_t *buf, uint32_t len);
 
-/* SQL Connect */
-
-
-struct superblock {
-	uint64_t volume_id;
-	uint32_t s_magic;
-	uint32_t s_blocksize;
-	uint32_t s_blocksize_bits;
-	uint64_t s_blocks_count;
-	uint64_t s_free_blocks;
-	uint64_t s_inodes_count;
-	uint64_t s_free_inodes;
-};
-
-struct machine {
-	char *serial;
-	char *name;
-	long host_id;
-	char *os_name;
-	char *os_version;
-	char *create_time;
-};
 struct SQLDB {
 	MYSQL *conn;
 	MYSQL_RES *last_query;

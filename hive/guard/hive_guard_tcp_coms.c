@@ -19,10 +19,8 @@
  */
 
 #include "hive_guard.h"
-#include "../hicomm/hi_command.h"
 #include "hive_guard_sql.h"
 
-#include <sys/uio.h>
 
 /* -------------------------------------------------------------------------- */
 /* Logging bridge for hi_command macros                                       */
@@ -325,11 +323,6 @@ static long jnum_i(const JVal *v, long def)
 	return (v && v->t == JT_NUM) ? (long)v->num : def;
 }
 
-static bool jbool(const JVal *v, bool def)
-{
-	return (v && v->t == JT_BOOL) ? (v->boolean != 0) : def;
-}
-
 /* -------------------------------------------------------------------------- */
 /* Base64 helpers                                                             */
 /* -------------------------------------------------------------------------- */
@@ -588,7 +581,6 @@ static bool handle_register_host(const JVal *root)
 {
 	const char *machine_id = jstr(jobj_get(root, "machine_id"));
 	const char *hostname = jstr(jobj_get(root, "hostname"));
-	const char *ip_address = jstr(jobj_get(root, "ip_address"));
 	long host_id = jnum_i(jobj_get(root, "host_id"), -1);
 	const char *os_name = jstr(jobj_get(root, "os_name"));
 	const char *os_version = jstr(jobj_get(root, "os_version"));
@@ -791,7 +783,7 @@ static bool handle_volume_block_put(Client *c, const JVal *root)
 }
 
 /* -------------------------------------------------------------------------- */
-/* Command dispatcher                                                          */
+/* Command dispatcher                                                         */
 /* -------------------------------------------------------------------------- */
 static bool dispatch_request(Client *c, ServerState *S, const JVal *root)
 {
@@ -935,7 +927,7 @@ static void on_signal(int s)
 /* -------------------------------------------------------------------------- */
 /* Server main loop                                                            */
 /* -------------------------------------------------------------------------- */
-int main(void)
+int hive_guard_server_main(void)
 {
 	signal(SIGINT, on_signal);
 	signal(SIGTERM, on_signal);
@@ -990,7 +982,7 @@ int main(void)
 	};
 	epoll_ctl(ep, EPOLL_CTL_ADD, sfd, &ev);
 
-#define MAXC 1024
+
 	Client *clients[MAXC] = {0};
 	ServerState S = {.idle_timeout_ms = idle_ms, .next_session = 0 };
 	void close_client(int idx)

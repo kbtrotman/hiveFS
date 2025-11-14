@@ -7,15 +7,15 @@
  *
  */
 
-#include "hi_command.h"
-#include "sql/hi_command_sql.h"
-
 #include <arpa/inet.h>
 #include <stdlib.h>
 #include <endian.h>
 #include <netdb.h>
 #include <sys/utsname.h>
 #include <openssl/sha.h>
+
+#include "hive_guard.h"
+#include "hive_guard_sql.h"
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 

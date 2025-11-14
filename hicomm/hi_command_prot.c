@@ -8,7 +8,7 @@
  */
 
 #include "hi_command.h"
-#include "sql/hi_command_sql.h"
+#include "guard_client_state.h"
 
 #include <inttypes.h>
 #include <endian.h>
@@ -120,7 +120,7 @@ int hicomm_handle_command(int fd, const struct hifs_cmds *cmd)
 
 	if (hifs_command_equals(cmd, HIFS_Q_PROTO_CMD_LINK_INIT)) {
 		init_hive_link();
-		if (sqldb.sql_init) {
+		if (g_guard_link.guard_ready) {
 			if (hicomm_send_cmd_str(fd, HIFS_Q_PROTO_CMD_LINK_READY) != 0)
 				hifs_err("Failed to notify kernel that link is ready");
 		} else {
