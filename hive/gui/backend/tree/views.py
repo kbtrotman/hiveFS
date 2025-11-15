@@ -1,10 +1,12 @@
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.viewsets import ReadOnlyModelViewSet
+from rest_framework.response import Response
+from rest_framework.viewsets import ReadOnlyModelViewSet, ViewSet
 
-from .models import UnifiedTree
-from .serializers import UnifiedTreeSerializer
-from .models import UiHostMap, UiVirtualNode
-from .serializers import UiHostMapSerializer, UiVirtualNodeSerializer
+from .models import UiHostMap, UiVirtualNode, UnifiedTree
+from .serializers import (
+    UiHostMapSerializer,
+    UiVirtualNodeSerializer,
+    UnifiedTreeSerializer,
+)
 
 
 class UiVirtualNodeViewSet(ReadOnlyModelViewSet):
@@ -22,21 +24,39 @@ class UiHostMapViewSet(ReadOnlyModelViewSet):
 
 
 
-class TreeNodeViewSet(viewsets.ViewSet):
+class TreeNodeViewSet(ViewSet):
     """
-    GET /api/v1/tree?parent=<id>
-    Returns array[{id, label, hasChildren}]
+    Gets the HiveFS Tree View by parent dir.
+    
+    Usage:
+    GET /api/v1/tree                        -> top-level nodes (where parent is NULL)
+    GET /api/v1/tree?parent=<node-id>       -> children for the node provided in <node-id>
+
+    The payload matches:
+    [{ "key": "<node_id>", "title": "<name>", "isLeaf": bool, "hasChildren": bool }]
     """
+
+    # permission_classes = [IsAuthenticated]
+
     def list(self, request):
-        parent = request.query_params.get("parent")
-        # Fetch your nodes from DB here (pseudo-code):
-        qs = TreeNode.objects.filter(parent__isnull=True) if not parent else TreeNode.objects.filter(parent_id=parent)
+        parent_key = request.query_params.get("parent")
+
+        if not parent_key or parent_key.lower() == "root":
+            qs = UnifiedTree.objects.filter(parent_node_id__isnull=True)
+        else:
+            qs = UnifiedTree.objects.filter(parent_node_id=parent_key)
+
+        qs = qs.order_by("name")
         payload = [
             {
-                "id": str(n.id),
-                "label": n.name,
-                "hasChildren": n.children.exists(),   # or bool(n.child_count)
+                "key": node.node_id,
+                "title": node.name,
+                "isLeaf": not node.has_children,
+                "hasChildren": bool(node.has_children),
+                "nodeKind": node.node_kind,
+                "inodeId": node.inode_id,
+                "dentryId": node.dentry_id,
             }
-            for n in qs.order_by("name")
+            for node in qs
         ]
         return Response(payload)

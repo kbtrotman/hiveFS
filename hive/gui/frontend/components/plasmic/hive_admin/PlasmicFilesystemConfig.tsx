@@ -64,9 +64,7 @@ import { usePlasmicDataSourceContext } from "@plasmicapp/data-sources-context";
 
 import TextField from "../../TextField"; // plasmic-import: OfVdG6fCBlg2/component
 import { AntdButton } from "@plasmicpkgs/antd5/skinny/registerButton";
-import { RichTable } from "@plasmicpkgs/plasmic-rich-components/skinny/rich-table";
-import { tableHelpers as RichTable_Helpers } from "@plasmicpkgs/plasmic-rich-components/skinny/rich-table";
-import TreeBrowser from '@/components/TreeBrowser'; // plasmic-import: lDT68TVAGwod/codeComponent
+import { TreeBrowser } from "@/components/TreeBrowser"; // plasmic-import: lDT68TVAGwod/codeComponent
 import { Fetcher } from "@plasmicapp/react-web/lib/data-sources";
 import { _useGlobalVariants } from "./plasmic"; // plasmic-import: c8gT28iq7v39gxBJ6CcbGP/projectModule
 import { _useStyleTokens } from "./PlasmicStyleTokensProvider"; // plasmic-import: c8gT28iq7v39gxBJ6CcbGP/styleTokensProvider
@@ -94,7 +92,6 @@ export type PlasmicFilesystemConfig__OverridesType = {
   dashboard?: Flex__<"div">;
   textField?: Flex__<typeof TextField>;
   svg?: Flex__<"svg">;
-  table?: Flex__<typeof RichTable>;
   treeBrowser?: Flex__<typeof TreeBrowser>;
 };
 
@@ -150,38 +147,6 @@ function PlasmicFilesystemConfig__RenderFunc(props: {
         type: "private",
         variableType: "text",
         initFunc: ({ $props, $state, $queries, $ctx }) => undefined
-      },
-      {
-        path: "table.selectedRowKey",
-        type: "private",
-        variableType: "text",
-        initFunc: ({ $props, $state, $queries, $ctx }) => undefined,
-
-        onMutate: generateOnMutateForSpec("selectedRowKey", RichTable_Helpers)
-      },
-      {
-        path: "table.selectedRow",
-        type: "private",
-        variableType: "object",
-        initFunc: ({ $props, $state, $queries, $ctx }) => undefined,
-
-        onMutate: generateOnMutateForSpec("selectedRow", RichTable_Helpers)
-      },
-      {
-        path: "table.selectedRows",
-        type: "private",
-        variableType: "array",
-        initFunc: ({ $props, $state, $queries, $ctx }) => undefined,
-
-        onMutate: generateOnMutateForSpec("selectedRows", RichTable_Helpers)
-      },
-      {
-        path: "table.selectedRowKeys",
-        type: "private",
-        variableType: "array",
-        initFunc: ({ $props, $state, $queries, $ctx }) => undefined,
-
-        onMutate: generateOnMutateForSpec("selectedRowKeys", RichTable_Helpers)
       }
     ],
     [$props, $ctx, $refs]
@@ -420,142 +385,62 @@ function PlasmicFilesystemConfig__RenderFunc(props: {
               </div>
             </AntdButton>
           </div>
-          <div className={classNames(projectcss.all, sty.freeBox__i3Qsa)}>
-            <PlasmicLink__
-              className={classNames(
-                projectcss.all,
-                projectcss.a,
-                projectcss.__wab_text,
-                sty.link__zSb2D
-              )}
-              component={Link}
-              href={"https://www.plasmic.app/"}
-              platform={"nextjs"}
-            >
-              {"Files"}
-            </PlasmicLink__>
-            <PlasmicLink__
-              className={classNames(
-                projectcss.all,
-                projectcss.a,
-                projectcss.__wab_text,
-                sty.link___8KqsW
-              )}
-              component={Link}
-              href={"https://www.plasmic.app/"}
-              platform={"nextjs"}
-            >
-              {"Hosts"}
-            </PlasmicLink__>
-            <PlasmicLink__
-              className={classNames(
-                projectcss.all,
-                projectcss.a,
-                projectcss.__wab_text,
-                sty.link__g4Kar
-              )}
-              component={Link}
-              href={"https://www.plasmic.app/"}
-              platform={"nextjs"}
-            >
-              {"Solitaries"}
-            </PlasmicLink__>
-            <PlasmicLink__
-              className={classNames(
-                projectcss.all,
-                projectcss.a,
-                projectcss.__wab_text,
-                sty.link__xLp8N
-              )}
-              component={Link}
-              href={"https://www.plasmic.app/"}
-              platform={"nextjs"}
-            >
-              {"Tennants"}
-            </PlasmicLink__>
-          </div>
           <div className={classNames(projectcss.all, sty.freeBox__oRyBh)}>
             <div className={classNames(projectcss.all, sty.freeBox__saB2Q)}>
-              {(() => {
-                const child$Props = {
-                  canSelectRows: "click",
-                  className: classNames("__wab_instance", sty.table),
-                  onRowSelectionChanged: async (...eventArgs: any) => {
-                    generateStateOnChangePropForCodeComponents(
-                      $state,
-                      "selectedRowKey",
-                      ["table", "selectedRowKey"],
-                      RichTable_Helpers
-                    ).apply(null, eventArgs);
-                    generateStateOnChangePropForCodeComponents(
-                      $state,
-                      "selectedRow",
-                      ["table", "selectedRow"],
-                      RichTable_Helpers
-                    ).apply(null, eventArgs);
-                    generateStateOnChangePropForCodeComponents(
-                      $state,
-                      "selectedRows",
-                      ["table", "selectedRows"],
-                      RichTable_Helpers
-                    ).apply(null, eventArgs);
-                    generateStateOnChangePropForCodeComponents(
-                      $state,
-                      "selectedRowKeys",
-                      ["table", "selectedRowKeys"],
-                      RichTable_Helpers
-                    ).apply(null, eventArgs);
-                  },
-                  scopeClassName: sty["table__instance"],
-                  selectedRowKey: generateStateValueProp($state, [
-                    "table",
-                    "selectedRowKey"
-                  ]),
-                  selectedRowKeys: generateStateValueProp($state, [
-                    "table",
-                    "selectedRowKeys"
-                  ]),
-                  themeResetClassName: classNames(
-                    projectcss.root_reset,
-                    projectcss.root_reset_tags,
-                    projectcss.plasmic_default_styles,
-                    projectcss.plasmic_mixins,
-                    styleTokensClassNames
-                  )
-                };
-                initializeCodeComponentStates(
-                  $state,
-                  [
-                    {
-                      name: "selectedRowKey",
-                      plasmicStateName: "table.selectedRowKey"
-                    },
-                    {
-                      name: "selectedRow",
-                      plasmicStateName: "table.selectedRow"
-                    },
-                    {
-                      name: "selectedRows",
-                      plasmicStateName: "table.selectedRows"
-                    },
-                    {
-                      name: "selectedRowKeys",
-                      plasmicStateName: "table.selectedRowKeys"
-                    }
-                  ],
-                  [],
-                  RichTable_Helpers ?? {},
-                  child$Props
-                );
-
-                return (
-                  <RichTable
-                    data-plasmic-name={"table"}
-                    data-plasmic-override={overrides.table}
-                    {...child$Props}
-                  />
-                );
-              })()}
+              <div className={classNames(projectcss.all, sty.freeBox__i3Qsa)}>
+                <PlasmicLink__
+                  className={classNames(
+                    projectcss.all,
+                    projectcss.a,
+                    projectcss.__wab_text,
+                    sty.link__zSb2D
+                  )}
+                  component={Link}
+                  href={"https://www.plasmic.app/"}
+                  platform={"nextjs"}
+                >
+                  {"Files"}
+                </PlasmicLink__>
+                <PlasmicLink__
+                  className={classNames(
+                    projectcss.all,
+                    projectcss.a,
+                    projectcss.__wab_text,
+                    sty.link___8KqsW
+                  )}
+                  component={Link}
+                  href={"https://www.plasmic.app/"}
+                  platform={"nextjs"}
+                >
+                  {"Hosts"}
+                </PlasmicLink__>
+                <PlasmicLink__
+                  className={classNames(
+                    projectcss.all,
+                    projectcss.a,
+                    projectcss.__wab_text,
+                    sty.link__g4Kar
+                  )}
+                  component={Link}
+                  href={"https://www.plasmic.app/"}
+                  platform={"nextjs"}
+                >
+                  {"Solitaries"}
+                </PlasmicLink__>
+                <PlasmicLink__
+                  className={classNames(
+                    projectcss.all,
+                    projectcss.a,
+                    projectcss.__wab_text,
+                    sty.link__xLp8N
+                  )}
+                  component={Link}
+                  href={"https://www.plasmic.app/"}
+                  platform={"nextjs"}
+                >
+                  {"Tennants"}
+                </PlasmicLink__>
+              </div>
             </div>
           </div>
           <div className={classNames(projectcss.all, sty.freeBox__apTkU)}>
@@ -577,7 +462,7 @@ function PlasmicFilesystemConfig__RenderFunc(props: {
             <TreeBrowser
               data-plasmic-name={"treeBrowser"}
               data-plasmic-override={overrides.treeBrowser}
-              baseUrl={"http://localhost:8000/api/v1/tree"}
+              baseUrl={"/api/v1/tree"}
               className={classNames("__wab_instance", sty.treeBrowser)}
               designTimeSample={true}
               height={"60vh"}
@@ -592,10 +477,9 @@ function PlasmicFilesystemConfig__RenderFunc(props: {
 }
 
 const PlasmicDescendants = {
-  dashboard: ["dashboard", "textField", "svg", "table", "treeBrowser"],
+  dashboard: ["dashboard", "textField", "svg", "treeBrowser"],
   textField: ["textField"],
   svg: ["svg"],
-  table: ["table"],
   treeBrowser: ["treeBrowser"]
 } as const;
 type NodeNameType = keyof typeof PlasmicDescendants;
@@ -605,7 +489,6 @@ type NodeDefaultElementType = {
   dashboard: "div";
   textField: typeof TextField;
   svg: "svg";
-  table: typeof RichTable;
   treeBrowser: typeof TreeBrowser;
 };
 
@@ -698,7 +581,6 @@ export const PlasmicFilesystemConfig = Object.assign(
     // Helper components rendering sub-elements
     textField: makeNodeComponent("textField"),
     svg: makeNodeComponent("svg"),
-    table: makeNodeComponent("table"),
     treeBrowser: makeNodeComponent("treeBrowser"),
 
     // Metadata about props expected for PlasmicFilesystemConfig

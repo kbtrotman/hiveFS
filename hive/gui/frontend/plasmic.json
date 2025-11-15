@@ -27487,6 +27487,12 @@
           "name": "TreeBrowser",
           "displayName": "TreeBrowser",
           "componentImportPath": "@/components/TreeBrowser"
+        },
+        {
+          "id": "jVQANZxExoPl",
+          "name": "TableBrowser",
+          "displayName": "TableBrowser",
+          "componentImportPath": "@/components/TableBrowser"
         }
       ],
       "customFunctions": []

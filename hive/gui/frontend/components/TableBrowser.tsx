@@ -47,9 +47,9 @@ function parseJson<T>(s?: string, fallback: T): T {
   }
 }
 
-export default function TableBrowser({
+export function TableBrowser({
   className,
-  baseUrl = 'http://localhost:8000/api/v1/filelist',
+  baseUrl = '/api/v1/filelist',
   authToken,
   extraHeadersJson,
   columnsJson,
