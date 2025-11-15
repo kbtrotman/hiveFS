@@ -24,7 +24,7 @@ from audit.views import AuditRootView
 from monitor.views import MonitorRootView
 from tenant.views import TenantRootView
 
-router = DefaultRouter()
+router = DefaultRouter(trailing_slash=False)
 router.register(r'accounts', AccountsRootView, basename='accounts')
 #router.register(r'groups', GroupViewSet, basename='group')
 router.register(r'tree', TreeNodeViewSet, basename='tree')

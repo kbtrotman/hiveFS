@@ -4,4 +4,5 @@ sqlparse==0.5.0
 tzdata==2025.1
 djangorestframework
 django-cors-headers
+django-extensions
 mysqlclient

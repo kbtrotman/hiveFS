@@ -79,5 +79,5 @@ class UnifiedTree(models.Model):
 
     class Meta:
         managed = False
-        db_table = 'hive_api.v_unified_tree'
+        db_table = 'v_unified_tree'
         

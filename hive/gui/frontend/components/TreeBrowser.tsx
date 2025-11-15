@@ -32,9 +32,9 @@ function applyFieldMap(n: any, f: FieldNames): ApiNode {
   };
 }
 
-export default function TreeBrowser({
+export function TreeBrowser({
   className,
-  baseUrl = 'http://localhost:8000/api/v1/tree',
+  baseUrl = '/api/v1/tree',
   parentParam = 'parent',
   rootParentValue = 'root',
   authToken,
