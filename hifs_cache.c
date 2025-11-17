@@ -1093,9 +1093,33 @@ void hifs_sort_most_recent_cache_used(struct super_block *sb)
 	hifs_cache_sort_fifo(&ctx->dirent_fifo);
 	spin_unlock_irqrestore(&ctx->dirent_lock, flags);
 
-	spin_lock_irqsave(&ctx->inode_lock, flags);
-	hifs_cache_sort_fifo(&ctx->inode_fifo);
-	spin_unlock_irqrestore(&ctx->inode_lock, flags);
+    spin_lock_irqsave(&ctx->inode_lock, flags);
+    hifs_cache_sort_fifo(&ctx->inode_fifo);
+    spin_unlock_irqrestore(&ctx->inode_lock, flags);
+}
+
+/*
+ * Clear the dirty bit for a block and ensure it remains present.
+ * Used during fence/repair workflows to mark previously dirty items clean.
+ */
+void hifs_cache_write_cleanflush(struct super_block *sb, uint64_t block)
+{
+    struct hifs_cache_ctx *ctx;
+    unsigned long flags;
+
+    if (!sb)
+        return;
+
+    ctx = sbinfo(sb) ? sbinfo(sb)->cache : NULL;
+    if (!ctx)
+        return;
+
+    spin_lock_irqsave(&ctx->dirty_lock, flags);
+    hifs_cache_clear_bit(ctx->dirty_bmp, block);
+    spin_unlock_irqrestore(&ctx->dirty_lock, flags);
+
+    /* Ensure the block stays marked present for reads */
+    hifs_cache_mark_present(sb, block);
 }
 
 int hifs_fetch_block(struct super_block *sb, uint64_t block)
