@@ -202,14 +202,26 @@ ssize_t hifs_write(struct kiocb *iocb, struct iov_iter *from)
 	return count;
 }
 
-int hifs_open_file(struct inode *inode, struct file *filp)
+int hifs_open_file(struct inode *inode, struct file *file)
 {
+	/* Basic sanity: ensure private data is present */
+	if (!inode || !inode->i_private)
+		return -EINVAL;
 
+	/* Hook for future cluster/lease logic */
+	{
+		int ret = hifs_cluster_on_open(inode, file);
+		if (ret)
+			return ret;
+	}
+
+	file->private_data = inode->i_private;
 	return 0;
 }
 
-int hifs_release_file(struct inode *inode, struct file *filp)
+int hifs_release_file(struct inode *inode, struct file *file)
 {
-
+	/* Placeholder: cluster/lease teardown when implemented */
+	hifs_cluster_on_close(inode, file);
 	return 0;
 }

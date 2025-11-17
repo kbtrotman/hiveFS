@@ -68,7 +68,7 @@ INSERT INTO hive_meta.inodes (
 ) ON DUPLICATE KEY UPDATE m_time = VALUES(m_time);
 
 -- ----- data: one example block -----
-INSERT INTO hive_data.blocks (
+INSERT INTO hive_data.ecblocks (
   hash_algo, block_hash, block_data, block_bck_hash
 ) VALUES (
   1,
@@ -106,3 +106,27 @@ INSERT INTO hive_api.ui_virtual_node
 VALUES (@v_root_id, 'Hosts', 'virtual', 'none', NULL, NULL, 1)
 ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id);
 SET @v_hosts_id := LAST_INSERT_ID();
+
+INSERT INTO hive_api.ui_virtual_node
+(parent_id, name, node_kind, target_type, target_host, target_dentry, sort_order)
+VALUES (@v_hosts_id, 'kuma', 'virtual', 'none', 'kuma', NULL, 1)
+ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id);
+SET @v_host1_id := LAST_INSERT_ID();
+
+INSERT INTO hive_api.ui_virtual_node
+(parent_id, name, node_kind, target_type, target_host, target_dentry, sort_order)
+VALUES (@v_shareables_id, 'Global_Filesystems', 'virtual', 'none', NULL, NULL, 1)
+ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id);
+SET @v_gfs_id := LAST_INSERT_ID();
+
+INSERT INTO hive_api.ui_virtual_node
+(parent_id, name, node_kind, target_type, target_host, target_dentry, sort_order)
+VALUES (@v_shareables_id, 'NFS_Shares', 'virtual', 'none', NULL, NULL, 1)
+ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id);
+SET @v_nfs_id := LAST_INSERT_ID();
+
+INSERT INTO hive_api.ui_virtual_node
+(parent_id, name, node_kind, target_type, target_host, target_dentry, sort_order)
+VALUES (@v_shareables_id, 'S3_shares', 'virtual', 'none', NULL, NULL, 1)
+ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id);
+SET @v_s3_id := LAST_INSERT_ID();

@@ -332,7 +332,22 @@
   max-width: 100%;
   object-fit: cover;
   position: absolute;
-  left: 17px;
-  top: 59px;
+  left: 13px;
+  top: 16px;
   width: 230px;
+  overflow: auto;
+  background: linear-gradient(0deg, #1f03c3 18%, #56b9ff 90%) 0% 0% / 100% 100%
+    repeat;
+  font-size: 10px;
+  text-align: left;
+  line-height: 15px;
+  min-height: 200px;
+  bottom: 394px;
+  display: block;
+  backdrop-filter: none;
+  filter: none;
+  transform: translate3d(0px, 0px, 0px);
+  -webkit-backdrop-filter: none;
+  border-radius: 60px;
+  border-width: 2px;
 }

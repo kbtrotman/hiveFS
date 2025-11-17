@@ -197,6 +197,10 @@ ssize_t hifs_read(struct kiocb *iocb, struct iov_iter *to);
 ssize_t hifs_write(struct kiocb *iocb, struct iov_iter *from);
 int hifs_open_file(struct inode *inode, struct file *filp);
 int hifs_release_file(struct inode *inode, struct file *filp);
+
+/* hifs_cluster.c (stubs for future fencing/lease logic) */
+int hifs_cluster_on_open(struct inode *inode, struct file *file);
+void hifs_cluster_on_close(struct inode *inode, struct file *file);
 //ssize_t hifs_alloc_if_necessary(struct hifs_volume_superblock *sb, struct hifs_inode *di, loff_t off, size_t cnt);
 
 /* hifs_cache (shared cache context) */

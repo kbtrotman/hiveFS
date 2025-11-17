@@ -64,7 +64,10 @@ CREATE TABLE IF NOT EXISTS host_auth (
   status ENUM('pending','approved','revoked') NOT NULL DEFAULT 'pending',
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   approved_at TIMESTAMP NULL,
-  approved_by VARCHAR(128) NULL
+  approved_by VARCHAR(128) NULL,
+  epoch            BIGINT NOT NULL,
+  fenced           BOOLEAN NOT NULL,
+  last_heartbeat   TIMESTAMP
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS host_tokens (
@@ -75,7 +78,7 @@ CREATE TABLE IF NOT EXISTS host_tokens (
   used_at DATETIME NULL,
   UNIQUE KEY u_machine_token (machine_uid, token),
   CONSTRAINT fk_token_machine FOREIGN KEY (machine_uid)
-    REFERENCES host_auth(machine_uid) ON DELETE CASCADE
+  REFERENCES host_auth(machine_uid) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS volume_superblocks (
@@ -266,6 +269,7 @@ USE hive_data;
 -- Stripe payloads (one row per fragment)
 CREATE TABLE IF NOT EXISTS ecblocks (
   estripe_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,  -- generate this id then push back in code
+  estripe_version BIGINT UNSIGNED NOT NULL,
   ec_block   BLOB NOT NULL,
   PRIMARY KEY (estripe_id)
 ) ENGINE=ROCKSDB

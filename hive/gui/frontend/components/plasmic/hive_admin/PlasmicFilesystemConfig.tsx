@@ -466,6 +466,43 @@ function PlasmicFilesystemConfig__RenderFunc(props: {
               className={classNames("__wab_instance", sty.treeBrowser)}
               designTimeSample={true}
               height={"60vh"}
+              onSelect={async node => {
+                const $steps = {};
+
+                $steps["updateTextFieldValue"] = true
+                  ? (() => {
+                      const actionArgs = {
+                        variable: {
+                          objRoot: $state,
+                          variablePath: ["textField", "value"]
+                        },
+                        operation: 0
+                      };
+                      return (({
+                        variable,
+                        value,
+                        startIndex,
+                        deleteCount
+                      }) => {
+                        if (!variable) {
+                          return;
+                        }
+                        const { objRoot, variablePath } = variable;
+
+                        $stateSet(objRoot, variablePath, value);
+                        return value;
+                      })?.apply(null, [actionArgs]);
+                    })()
+                  : undefined;
+                if (
+                  $steps["updateTextFieldValue"] != null &&
+                  typeof $steps["updateTextFieldValue"] === "object" &&
+                  typeof $steps["updateTextFieldValue"].then === "function"
+                ) {
+                  $steps["updateTextFieldValue"] =
+                    await $steps["updateTextFieldValue"];
+                }
+              }}
               parentParam={"parent"}
               rootParentValue={"root"}
             />
