@@ -214,6 +214,8 @@ void hifs_cache_detach(struct hifs_sb_info *info);
 void hifs_cache_sync_init(struct super_block *sb, struct hifs_sb_info *info);
 void hifs_cache_sync_shutdown(struct hifs_sb_info *info);
 void hifs_cache_request_flush(struct super_block *sb, bool immediate);
+void hifs_cache_write_cleanflush(struct super_block *sb, uint64_t block);
+
 /* Per-volume logical super helpers */
 int hifs_volume_load(struct super_block *sb, struct hifs_sb_info *info, bool create);
 int hifs_volume_save(struct super_block *sb, const struct hifs_sb_info *info);
@@ -274,6 +276,11 @@ int hifs_dedupe_init(struct hifs_sb_info *info);
 void hifs_dedupe_shutdown(struct hifs_sb_info *info);
 bool hifs_dedupe_should_push(struct super_block *sb, uint64_t block_no);
 void hifs_dedupe_mark_clean(struct super_block *sb, uint64_t block_no, bool success);
+
+/* hifs_cluster (protections for the filesystem's shared contexts) */
+int hifs_cluster_on_open(struct inode *inode, struct file *file);
+void hifs_cluster_on_close(struct inode *inode, struct file *file);
+
 
 // END: Prototypes Here:
 

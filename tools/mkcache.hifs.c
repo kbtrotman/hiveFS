@@ -1,4 +1,13 @@
 /**
+ * HiveFS
+ *
+ * Hive Mind Filesystem
+ * By K. B. Trotman
+ * License: GNU GPL as of 2023
+ *
+ */
+
+/**
  * HiveFS mkcache utility
  *
  * Creates a basic on-disk layout for HiveFS cached local FS and pairs with remote hive.

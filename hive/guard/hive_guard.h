@@ -45,7 +45,6 @@
 #define ENV_MDB_DB       "WRAP_MARIADB_DB"
 
 #define HIFS_GUARD_HOST "127.0.0.1"
-#define HIFS_GUARD_PORT_STR "6060"
 #define MAXC 1024
 
 // Prototypes

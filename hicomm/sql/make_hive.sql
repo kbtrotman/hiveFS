@@ -249,11 +249,8 @@ CREATE TABLE IF NOT EXISTS hash_to_estripes (
   estripe_2_id   BIGINT UNSIGNED NOT NULL,
   estripe_3_id   BIGINT UNSIGNED NOT NULL,
   estripe_4_id   BIGINT UNSIGNED NOT NULL,
-  estripe_5_id   BIGINT UNSIGNED NOT NULL,
-  estripe_6_id   BIGINT UNSIGNED NOT NULL,
   estripe_p1_id  BIGINT UNSIGNED NOT NULL,
   estripe_p2_id  BIGINT UNSIGNED NOT NULL,
-  estripe_p3_id  BIGINT UNSIGNED NOT NULL,
   block_bck_hash VARBINARY(32) NULL,          -- or VARBINARY(32) if SHA-256
   PRIMARY KEY (hash_algo, block_hash),
   KEY idx_hash (hash_algo, block_hash)

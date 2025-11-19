@@ -1098,6 +1098,12 @@ void hifs_sort_most_recent_cache_used(struct super_block *sb)
     spin_unlock_irqrestore(&ctx->inode_lock, flags);
 }
 
+static inline void hifs_cache_clear_bit(struct hifs_cache_bitmap *bmp, u64 idx)
+{
+    if (bmp && idx < bmp->cache_block_count)
+        __bitmap_set_byte(bmp->bitmap, idx, false);
+}
+
 /*
  * Clear the dirty bit for a block and ensure it remains present.
  * Used during fence/repair workflows to mark previously dirty items clean.
