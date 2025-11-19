@@ -67,22 +67,45 @@ INSERT INTO hive_meta.inodes (
   '/', 'd', 0, 0
 ) ON DUPLICATE KEY UPDATE m_time = VALUES(m_time);
 
--- ----- data: one example block -----
-INSERT INTO hive_data.ecblocks (
-  hash_algo, block_hash, block_data, block_bck_hash
-) VALUES (
-  1,
-  UNHEX('ad7facb2586fc6e966c004d7d1d16b024f5805ff7cb47c7a85dabd8b48892ca7'),
-  UNHEX(REPEAT('00', 4096)),
-  NULL
-) ON DUPLICATE KEY UPDATE block_data = VALUES(block_data);
+-- ----- data: one example block encoded as 4+2 EC stripes -----
+-- For testing, we seed six zeroed stripes (k=4, m=2). Parity of all-zero data is also zero,
+-- which keeps the fragments trivially decodable.
+SET @hash_hex := 'ad7facb2586fc6e966c004d7d1d16b024f5805ff7cb47c7a85dabd8b48892ca7';
+SET @stripe1 := NULL; SET @stripe2 := NULL; SET @stripe3 := NULL; SET @stripe4 := NULL;
+SET @stripeP1 := NULL; SET @stripeP2 := NULL;
 
--- ----- meta: map block 0 to the hash -----
+INSERT INTO hive_data.ecblocks (ec_block, estripe_version) VALUES (UNHEX(REPEAT('00', 1024)), '1');
+SET @stripe1 := LAST_INSERT_ID();
+INSERT INTO hive_data.ecblocks (ec_block, estripe_version) VALUES (UNHEX(REPEAT('00', 1024)), '1');
+SET @stripe2 := LAST_INSERT_ID();
+INSERT INTO hive_data.ecblocks (ec_block, estripe_version) VALUES (UNHEX(REPEAT('00', 1024)), '1');
+SET @stripe3 := LAST_INSERT_ID();
+INSERT INTO hive_data.ecblocks (ec_block, estripe_version) VALUES (UNHEX(REPEAT('00', 1024)), '1');
+SET @stripe4 := LAST_INSERT_ID();
+INSERT INTO hive_data.ecblocks (ec_block, estripe_version) VALUES (UNHEX(REPEAT('00', 1024)), '1');
+SET @stripeP1 := LAST_INSERT_ID();
+INSERT INTO hive_data.ecblocks (ec_block, estripe_version) VALUES (UNHEX(REPEAT('00', 1024)), '1');
+SET @stripeP2 := LAST_INSERT_ID();
+
+-- Map hash → stripe ids
+INSERT INTO hive_meta.hash_to_estripes (
+  hash_algo, block_hash,
+  estripe_1_id, estripe_2_id, estripe_3_id, estripe_4_id,
+  estripe_p1_id, estripe_p2_id, block_bck_hash
+) VALUES (
+  1, UNHEX(@hash_hex),
+  @stripe1, @stripe2, @stripe3, @stripe4,
+  @stripeP1, @stripeP2, NULL
+) ON DUPLICATE KEY UPDATE
+  estripe_1_id=VALUES(estripe_1_id), estripe_2_id=VALUES(estripe_2_id),
+  estripe_3_id=VALUES(estripe_3_id), estripe_4_id=VALUES(estripe_4_id),
+  estripe_p1_id=VALUES(estripe_p1_id), estripe_p2_id=VALUES(estripe_p2_id);
+
+-- Map logical block → hash
 INSERT INTO hive_meta.volume_block_mappings (
   volume_id, block_no, hash_algo, block_hash
 ) VALUES (
-  @volume_id, 0, 1,
-  UNHEX('ad7facb2586fc6e966c004d7d1d16b024f5805ff7cb47c7a85dabd8b48892ca7')
+  @volume_id, 0, 1, UNHEX(@hash_hex)
 ) ON DUPLICATE KEY UPDATE
   hash_algo = VALUES(hash_algo),
   block_hash = VALUES(block_hash);

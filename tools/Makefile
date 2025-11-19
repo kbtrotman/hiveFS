@@ -1,8 +1,8 @@
 CC      := gcc
 CFLAGS  := -std=gnu11 -Wall -Wextra -g
-LDFLAGS :=
+LDFLAGS := -lcrypto
 
-TOOLS := mkcache.hifs get-size lscache
+TOOLS := mkcache.hifs get-size lscache host_register
 
 .PHONY: all clean mkfs getsize
 
@@ -11,6 +11,10 @@ all: $(TOOLS)
 mkcache: mkcache.hifs
 
 getsize: get-size
+
+lsc: lscache
+
+host_register: register
 
 mkcache.hifs: mkcache.hifs.o
 	$(CC) $(LDFLAGS) $^ -o $@
@@ -28,6 +32,12 @@ lscache: lscache.o
 	$(CC) $(LDFLAGS) $^ -o $@
 
 lscache.o: lscache.c tools.h
+	$(CC) $(CFLAGS) -c $< -o $@
+
+register: host_register.o
+	$(CC) $(LDFLAGS) $^ -o $@
+
+register.o: host_register.c tools.h
 	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:

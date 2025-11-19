@@ -933,7 +933,7 @@ int hive_guard_server_main(void)
 	signal(SIGTERM, on_signal);
 
 	const char *listen_addr = get_env(ENV_LISTEN_ADDR, "0.0.0.0");
-	int listen_port = get_env_int(ENV_LISTEN_PORT, 7400);
+	int listen_port = get_env_int(ENV_LISTEN_PORT, 7070);
 	int idle_ms = get_env_int(ENV_IDLE_MS, 30000);
 
 	openlog("hive_guard", LOG_PID | LOG_NDELAY, LOG_USER);
