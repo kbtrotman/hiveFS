@@ -8,7 +8,6 @@
  */
 #pragma once
 
-#define _GNU_SOURCE
 #include <errno.h>
 #include <fcntl.h>
 #include <stdbool.h>
@@ -35,7 +34,7 @@
 
 
 #define HIFS_GUARD_HOST "127.0.0.1"
-#define HIFS_GUARD_PORT_STR "6060"
+#define HIFS_GUARD_PORT_STR "7070"
 
 /* Erasure coding profile shared with hive_guard */
 #define HIFS_EC_K         6

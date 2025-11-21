@@ -1,112 +1,65 @@
-/* hive_guard_raft.h */
-#pragma once
+/**
+ * HiveFS
+ *
+ * Hive Mind Filesystem
+ * By K. B. Trotman
+ * License: GNU GPL as of 2023
+ *
+ */
 
-#include <stdint.h>
+#include <assert.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <stdbool.h>
+#include <stdint.h>
+#include <sys/epoll.h>
+#include <sys/time.h>
+#include <sys/types.h>
+#include <time.h>
+#include <unistd.h>
+#include <ctype.h>
+#include <sys/uio.h>
+#include <sys/stat.h>
+ 
+#include <mysql.h>   // libmariadbclient or libmysqlclient
 
-#ifdef __cplusplus
-#include <string>
-#endif
+#include <raft.h>      // core algorithm state
+#include <raft/uv.h>   // libuv-based I/O driver
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+#include "../../hicomm/hi_command.h"
 
-/* Single config used by both the Raft core and the RPC service. */
-struct hg_guard_config {
-    const char *node_id;      /* e.g. "node-1" or hostname */
-    const char *raft_group;   /* e.g. "hive_guard" */
-    const char *raft_peers;   /* comma-separated peer list "node-1:8100,node-2:8100,..." */
-    const char *raft_data_dir;
-    int         listen_port;  /* brpc/braft service port */
+
+
+/* Node identity & cluster config */
+#define HIFS_GUARD_HOST "127.0.0.1"
+#define N_SERVERS 3    /* Number of servers in the example cluster */
+#define APPLY_RATE 125 /* Apply a new entry every 125 milliseconds */
+
+#define Log(SERVER_ID, FORMAT) printf("%d: " FORMAT "\n", SERVER_ID)
+#define Logf(SERVER_ID, FORMAT, ...) \
+    printf("%d: " FORMAT "\n", SERVER_ID, __VA_ARGS__)
+
+struct hg_raft_peer {
+    uint64_t id;
+    const char *address;  /* "ip:port" */
 };
 
-/* Keep the legacy names around for now so existing callers still compile. */
-typedef struct hg_guard_config hg_raft_config;
-typedef struct hg_guard_config hg_rpc_server_config;
-
-/* Basic node status as seen locally */
-struct hg_guard_status {
-    uint64_t cluster_epoch;     /* monotonically increasing cluster generation */
-    uint64_t node_epoch;        /* this node's own generation */
-    bool     is_leader;         /* true if this node is currently the leader */
-    bool     fenced;            /* if true: this node must NOT serve writes */
+struct hg_raft_config {
+    uint64_t        self_id;
+    const char     *self_address; /* "ip:port" string */
+    const char     *data_dir;     /* directory for Raft log, e.g. /var/lib/hive_guard/raft */
+    struct hg_raft_peer *peers;
+    unsigned        num_peers;
 };
 
-enum GuardOpType : uint8_t {
-    GUARD_OP_FENCE_NODE = 1,
-    GUARD_OP_BUMP_CLUSTER_EPOCH = 2,
-    GUARD_OP_BUMP_NODE_EPOCH = 3,
-};
+// Prototypes
 
-/* Initialize Raft + brpc and join/start the hive_guard group */
-int hg_raft_init(const struct hg_guard_config *cfg);
+/* Initialize the Raft node and start its event loop in the background. */
+int  hg_raft_init(const struct hg_raft_config *cfg);
 
-/* Periodic tick (if you want, or you can rely on braft internal timers) */
-void hg_raft_poll(void);
+/* Clean shutdown (if/when you add it). */
+void hg_raft_shutdown(void);
 
-/* Query local view of cluster/guard status */
-void hg_guard_get_status(struct hg_guard_status *out_status);
-
-/* Propose operations (must be sent to leader only; helper wraps redirect) */
-int hg_guard_propose_fence_node(const char *target_node_id, bool fenced);
-int hg_guard_propose_bump_cluster_epoch(void);
-int hg_guard_propose_bump_node_epoch(const char *target_node_id);
-
-/* Convenience: check if THIS node is currently allowed to serve writes */
+/* Local decision helper: is this node currently the Raft leader? */
 bool hg_guard_local_can_write(void);
-
-
-/* Start the combined Raft + brpc server on this node.
- * Returns 0 on success, <0 on failure.
- */
-int hg_rpc_server_start(const struct hg_guard_config *cfg);
-
-/* Stop server (optional; you can also just exit process). */
-void hg_rpc_server_stop(void);
-
-/* Client configuration for talking to a HiveGuard leader (or any node) */
-struct hg_rpc_client_config {
-    const char *target_addr;   /* "ip:port" of a HiveGuardService */
-    int         timeout_ms;    /* RPC timeout */
-};
-
-/* Initialize a client handle. Returns opaque pointer, or NULL on error. */
-typedef void* hg_rpc_client_t;
-
-hg_rpc_client_t hg_rpc_client_create(const struct hg_rpc_client_config *cfg);
-void            hg_rpc_client_destroy(hg_rpc_client_t client);
-
-/* Get status from a remote node. Returns 0 on success. */
-int hg_rpc_client_get_status(hg_rpc_client_t client,
-                             struct hg_guard_status *out_status);
-
-/* Ask the cluster (via the contacted node) to fence/unfence a node.
- * Returns 0 on success.
- */
-int hg_rpc_client_fence_node(hg_rpc_client_t client,
-                             const char *target_node_id,
-                             bool fenced);
-
-/* Bump cluster epoch (leader decides exact value). */
-int hg_rpc_client_bump_cluster_epoch(hg_rpc_client_t client);
-
-/* Bump a node's epoch (leader decides exact value). */
-int hg_rpc_client_bump_node_epoch(hg_rpc_client_t client,
-                                  const char *target_node_id);
-
-                                  
-#ifdef __cplusplus
-} /* extern "C" */
-
-/* C++-only helpers/types live outside the extern "C" block */
-struct GuardOp {
-    GuardOpType type;
-    std::string node_id;    // empty for cluster-wide ops
-    uint64_t    new_epoch;  // optional; 0 = "auto"
-};
-
-// Very simple binary encoding/decoding (replace with protobuf if you want)
-bool encode_guard_op(const GuardOp &op, std::string *out);
-bool decode_guard_op(const std::string &buf, GuardOp *out);
-#endif

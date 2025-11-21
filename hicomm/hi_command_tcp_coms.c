@@ -506,8 +506,12 @@ static bool guard_ensure_connected(void)
 {
 	if (g_guard.fd >= 0)
 		return true;
-	const char *host = HIFS_GUARD_HOST;
-	const char *port = HIFS_GUARD_PORT_STR;
+	const char *host = getenv("HIFS_GUARD_HOST");
+	const char *port = getenv("HIFS_GUARD_PORT");
+	if (!host || !*host)
+		host = HIFS_GUARD_HOST;
+	if (!port || !*port)
+		port = HIFS_GUARD_PORT_STR;
 	int fd = guard_dial(host, port);
 	if (fd < 0)
 		return false;

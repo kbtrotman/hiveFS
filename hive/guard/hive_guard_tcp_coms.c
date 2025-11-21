@@ -929,11 +929,12 @@ static void on_signal(int s)
 /* -------------------------------------------------------------------------- */
 int hive_guard_server_main(void)
 {
+	printf("here!\n");
 	signal(SIGINT, on_signal);
 	signal(SIGTERM, on_signal);
 
 	const char *listen_addr = get_env(ENV_LISTEN_ADDR, "0.0.0.0");
-	int listen_port = get_env_int(ENV_LISTEN_PORT, 7070);
+	int listen_port = get_env_int(ENV_LISTEN_PORT, atoi(HIFS_GUARD_PORT_STR));
 	int idle_ms = get_env_int(ENV_IDLE_MS, 30000);
 
 	openlog("hive_guard", LOG_PID | LOG_NDELAY, LOG_USER);
@@ -944,11 +945,14 @@ int hive_guard_server_main(void)
 		return EXIT_FAILURE;
 	}
 
+	hifs_notice("Preparing hive_guard TCP listener on %s:%d", listen_addr, listen_port);
+
 	int sfd = socket(AF_INET, SOCK_STREAM, 0);
 	if (sfd < 0) {
 		perror("socket");
 		return EXIT_FAILURE;
 	}
+
 	int one = 1;
 	setsockopt(sfd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
 	struct sockaddr_in addr = {
