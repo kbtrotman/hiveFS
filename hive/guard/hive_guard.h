@@ -7,9 +7,7 @@
  *
  */
 
-#ifndef _GNU_SOURCE
-#define _GNU_SOURCE
-#endif
+
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -29,6 +27,7 @@
 #include <unistd.h>
 #include <ctype.h>
 #include <sys/uio.h>
+#include <sys/stat.h>
  
 #include <mysql.h>   // libmariadbclient or libmysqlclient
 
@@ -44,7 +43,6 @@
 #define ENV_MDB_PASS     "WRAP_MARIADB_PASS"
 #define ENV_MDB_DB       "WRAP_MARIADB_DB"
 
-#define HIFS_GUARD_HOST "127.0.0.1"
 #define MAXC 1024
 
 // Prototypes
