@@ -37,10 +37,10 @@ int main(void)
         .num_peers    = sizeof(peers)/sizeof(peers[0]),
     };
 
-    if (start_raft_server() != 0) {
-        fprintf(stderr, "Failed to initialize Raft; starting in degraded mode\n");
-        /* exit or run read-only here */
-    }
+ //   if (start_raft_server() != 0) {
+ //       fprintf(stderr, "Failed to initialize Raft; starting in degraded mode\n");
+ //       /* exit or run read-only here */
+ //   }
 
     /* Now run client TCP server loop */	
 	return hive_guard_server_main();

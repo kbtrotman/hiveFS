@@ -56,10 +56,21 @@ struct hg_raft_config {
 // Prototypes
 
 /* Initialize the Raft node and start its event loop in the background. */
-int  hg_raft_init(const struct hg_raft_config *cfg);
+int start_raft_server(void);
+static int ServerInit(struct Server *s,
+                      struct uv_loop_s *loop,
+                      const char *dir,
+                      unsigned id)
+static int ServerStart(struct Server *s);
 
 /* Clean shutdown (if/when you add it). */
-void hg_raft_shutdown(void);
+static void ServerClose(struct Server *s, ServerCloseCb cb);
+static void mainServerCloseCb(struct Server *server);
+static void serverTimerCloseCb(struct uv_handle_s *handle);
 
-/* Local decision helper: is this node currently the Raft leader? */
-bool hg_guard_local_can_write(void);
+/* Not to be called directly except by raft algorythm protocol */
+static void serverTimerCb(uv_timer_t *timer);
+static void mainSigintCb(struct uv_signal_s *handle, int signum);
+static void serverApplyCb(struct raft_apply *req, int status, void *result);
+static void serverTransferCb(struct raft_transfer *req);
+static void serverRaftCloseCb(struct raft *raft);
