@@ -8,16 +8,20 @@
 
 #include "hi_command.h"
 #include "guard_client_state.h"
+#include "hi_command_tcp.h"
 
 #include <arpa/inet.h>
 #include <ctype.h>
+#include <fcntl.h>
 #include <netdb.h>
 #include <netinet/tcp.h>
 #include <openssl/sha.h>
 #include <stdarg.h>
+#include <poll.h>
 #include <sys/socket.h>
 #include <sys/uio.h>
 #include <sys/utsname.h>
+#include <unistd.h>
 
 #ifndef ARRAY_SIZE
 #define ARRAY_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
@@ -46,6 +50,192 @@ static struct guard_client g_guard = {
 	.rx_buf = NULL,
 	.rx_cap = 0,
 };
+
+struct tcp_client {
+	int fd;
+};
+
+static int tcp_listen_fd = -1;
+static struct tcp_client tcp_clients[HICMD_MAX_TCP_CLIENTS];
+static size_t tcp_client_count = 0;
+static int tcp_kernel_fd = -1;
+
+static int tcp_set_nonblock(int fd)
+{
+	int flags = fcntl(fd, F_GETFL, 0);
+	if (flags < 0)
+		return -errno;
+	if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0)
+		return -errno;
+	return 0;
+}
+
+static int tcp_bind_and_listen(const char *host, const char *port)
+{
+	struct addrinfo hints = {
+		.ai_family   = AF_UNSPEC,
+		.ai_socktype = SOCK_STREAM,
+		.ai_flags    = AI_PASSIVE,
+	};
+	struct addrinfo *res = NULL, *rp = NULL;
+	int rc = getaddrinfo(host, port, &hints, &res);
+	if (rc != 0) {
+		hifs_err("getaddrinfo(%s:%s) failed: %s", host, port, gai_strerror(rc));
+		return -1;
+	}
+
+	int fd = -1;
+	for (rp = res; rp; rp = rp->ai_next) {
+		fd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+		if (fd < 0)
+			continue;
+		int one = 1;
+		setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+		if (bind(fd, rp->ai_addr, rp->ai_addrlen) == 0 && listen(fd, 16) == 0) {
+			break;
+		}
+		close(fd);
+		fd = -1;
+	}
+	freeaddrinfo(res);
+
+	if (fd >= 0)
+		(void)tcp_set_nonblock(fd);
+	return fd;
+}
+
+static void tcp_remove_client(size_t idx)
+{
+	if (idx >= tcp_client_count)
+		return;
+	close(tcp_clients[idx].fd);
+	if (idx != tcp_client_count - 1)
+		tcp_clients[idx] = tcp_clients[tcp_client_count - 1];
+	tcp_client_count--;
+}
+
+static void tcp_accept_new(void)
+{
+	if (tcp_listen_fd < 0 || tcp_client_count >= HICMD_MAX_TCP_CLIENTS)
+		return;
+
+	struct sockaddr_storage ss;
+	socklen_t slen = sizeof(ss);
+	int fd = accept(tcp_listen_fd, (struct sockaddr *)&ss, &slen);
+	if (fd < 0)
+		return;
+	if (tcp_set_nonblock(fd) != 0) {
+		close(fd);
+		return;
+	}
+	tcp_clients[tcp_client_count++].fd = fd;
+}
+
+static void tcp_drain_client(size_t idx)
+{
+	char buf[HIFS_MAX_CMD_SIZE];
+	ssize_t n = recv(tcp_clients[idx].fd, buf, sizeof(buf) - 1, 0);
+	if (n <= 0) {
+		tcp_remove_client(idx);
+		return;
+	}
+
+	struct hifs_cmds cmd;
+	memset(&cmd, 0, sizeof(cmd));
+	if (n > HIFS_MAX_CMD_SIZE - 1)
+		n = HIFS_MAX_CMD_SIZE - 1;
+	cmd.count = (int)n;
+	memcpy(cmd.cmd, buf, (size_t)n);
+
+	if (tcp_kernel_fd >= 0 && hicomm_comm_send_cmd(tcp_kernel_fd, &cmd) != 0)
+		hifs_warning("failed to enqueue TCP command to kernel");
+}
+
+int hicmd_tcp_init(const char *host, const char *port, int comm_fd)
+{
+	const char *bind_host = (host && *host) ? host : HICMD_DEFAULT_BIND_HOST;
+	const char *bind_port = (port && *port) ? port : HICMD_DEFAULT_BIND_PORT;
+
+	tcp_kernel_fd = comm_fd;
+	tcp_listen_fd = tcp_bind_and_listen(bind_host, bind_port);
+	if (tcp_listen_fd >= 0) {
+		hifs_notice("TCP control listening on %s:%s", bind_host, bind_port);
+		return 0;
+	}
+	return -1;
+}
+
+void hicmd_tcp_broadcast_cmd(const struct hifs_cmds *cmd)
+{
+	if (!cmd || cmd->count <= 0)
+		return;
+
+	for (size_t i = 0; i < tcp_client_count; ) {
+		ssize_t n = send(tcp_clients[i].fd, cmd->cmd, cmd->count, MSG_NOSIGNAL);
+		if (n < 0 && (errno == EPIPE || errno == ECONNRESET)) {
+			tcp_remove_client(i);
+			continue;
+		}
+		++i;
+	}
+}
+
+void hicmd_tcp_poll(int timeout_ms)
+{
+	struct pollfd pfds[1 + HICMD_MAX_TCP_CLIENTS];
+	nfds_t nfds = 0;
+
+	if (tcp_listen_fd >= 0) {
+		pfds[nfds].fd = tcp_listen_fd;
+		pfds[nfds].events = POLLIN;
+		++nfds;
+	}
+
+	for (size_t i = 0; i < tcp_client_count; ++i) {
+		pfds[nfds].fd = tcp_clients[i].fd;
+		pfds[nfds].events = POLLIN;
+		++nfds;
+	}
+
+	if (nfds == 0) {
+		if (timeout_ms > 0)
+			usleep(timeout_ms * 1000);
+		return;
+	}
+
+	int rc = poll(pfds, nfds, timeout_ms);
+	if (rc <= 0) {
+		if (rc < 0 && errno != EINTR)
+			hifs_warning("tcp poll failed: %s", strerror(errno));
+		return;
+	}
+
+	nfds_t idx = 0;
+	if (tcp_listen_fd >= 0) {
+		if (pfds[idx].revents & POLLIN)
+			tcp_accept_new();
+		idx++;
+	}
+
+	for (size_t c = 0; c < tcp_client_count && idx < nfds; ++c, ++idx) {
+		if (pfds[idx].revents & POLLIN) {
+			tcp_drain_client(c);
+			break;
+		}
+	}
+}
+
+void hicmd_tcp_shutdown(void)
+{
+	for (size_t i = 0; i < tcp_client_count; ++i)
+		close(tcp_clients[i].fd);
+	tcp_client_count = 0;
+	if (tcp_listen_fd >= 0) {
+		close(tcp_listen_fd);
+		tcp_listen_fd = -1;
+	}
+	tcp_kernel_fd = -1;
+}
 
 /* -------------------------------------------------------------------------- */
 /* Minimal JSON helper (borrowed from hive_guard server implementation)       */
@@ -439,7 +629,7 @@ static int send_all(int fd, const void *buf, size_t len)
 	const uint8_t *p = buf;
 	size_t sent = 0;
 	while (sent < len) {
-		ssize_t n = send(fd, p + sent, len - sent, 0);
+		ssize_t n = send(fd, p + sent, len - sent, MSG_NOSIGNAL);
 		if (n < 0) {
 			if (errno == EINTR)
 				continue;
@@ -737,8 +927,10 @@ static bool guard_rpc(const char *type,
 		      const void *payload, size_t payload_len,
 		      struct guard_response *resp)
 {
-	if (!guard_ensure_connected())
+	if (!guard_ensure_connected()) {
+		hifs_warning("guard rpc %s: unable to connect", type);
 		return false;
+	}
 
 	char *json = guard_build_request(type, fields, field_count,
 					 payload, payload_len);
@@ -749,6 +941,7 @@ static bool guard_rpc(const char *type,
 	bool ok = guard_send_frame(g_guard.fd, json, json_len);
 	free(json);
 	if (!ok) {
+		hifs_warning("guard rpc %s: send failed, reconnecting", type);
 		guard_disconnect();
 		return false;
 	}
@@ -756,6 +949,7 @@ static bool guard_rpc(const char *type,
 	char *reply = NULL;
 	size_t reply_len = 0;
 	if (!guard_recv_frame(g_guard.fd, &reply, &reply_len)) {
+		hifs_warning("guard rpc %s: recv failed, reconnecting", type);
 		free(reply);
 		guard_disconnect();
 		return false;
@@ -971,6 +1165,7 @@ void init_hive_link(void)
 
 	guard_response_destroy(&resp);
 
+	g_guard_link.guard_ready = true;
 	hifs_notice("hive_guard session established (session=%llu)",
 		    (unsigned long long)g_guard.session_id);
 }
@@ -1080,8 +1275,16 @@ int hifs_get_hive_host_sbs(void)
 		GUARD_FIELD_STR("machine_id", g_guard_link.host.serial ? g_guard_link.host.serial : hifs_get_machine_id()),
 	};
 	struct guard_response resp = {0};
-	if (!guard_rpc("host_super_list", fields, ARRAY_SIZE(fields), NULL, 0, &resp))
-		return 0;
+	const char *machine_id = fields[0].v.str;
+
+	hifs_info("Requesting host superblock list for %s", machine_id);
+	if (!guard_rpc("host_super_list", fields, ARRAY_SIZE(fields), NULL, 0, &resp)) {
+		hifs_warning("host_super_list RPC failed (will retry once)");
+		if (!guard_rpc("host_super_list", fields, ARRAY_SIZE(fields), NULL, 0, &resp)) {
+			hifs_err("host_super_list RPC failed after retry");
+			return 0;
+		}
+	}
 	if (!guard_expect_ok(&resp, "host_super_list")) {
 		guard_response_destroy(&resp);
 		return 0;
@@ -1090,6 +1293,7 @@ int hifs_get_hive_host_sbs(void)
 	uint8_t *buf = NULL;
 	size_t len = 0;
 	if (!guard_take_payload(&resp, &buf, &len)) {
+		hifs_warning("host_super_list response missing payload");
 		guard_response_destroy(&resp);
 		return 0;
 	}
@@ -1098,6 +1302,7 @@ int hifs_get_hive_host_sbs(void)
 	size_t copy = MIN(count, ARRAY_SIZE(g_guard_link.sb));
 	memcpy(g_guard_link.sb, buf, copy * sizeof(struct superblock));
 	g_guard_link.rows = (int)copy;
+	hifs_info("Retrieved %zu superblock entries for %s", copy, machine_id);
 	free(buf);
 	guard_response_destroy(&resp);
 	return g_guard_link.rows;

@@ -83,17 +83,16 @@ LIBS :=  -lleveldb    # adjust to what brpc/braft were built with and other addi
 all: $(MAIN)
 
 $(MAIN): $(OBJS)
-# Use C++ linker so libstdc++ gets pulled in
-#	$(CXX) -o $@ $(OBJS) $(LDFLAGS) $(LDLIBS) $(LIBS)
+	$(CXX) -o $@ $(OBJS) $(LDFLAGS) $(LDLIBS) $(LIBS)
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
 %.o: %.cc
-#	$(CXX) $(CXXFLAGS) -c $< -o $@
+	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 %.pb.cc %.pb.h: %.proto
-#	protoc --cpp_out=. $<
+	protoc --cpp_out=. $<
 
 clean:
 	rm -f $(OBJS) $(MAIN)

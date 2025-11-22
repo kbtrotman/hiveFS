@@ -487,22 +487,36 @@ static void hifs_cache_sync_workfn(struct work_struct *work)
                                              cache_sync_work);
     struct super_block *sb = READ_ONCE(info->sb);
     int dirty;
+    int ret;
 
     if (!sb)
         return;
 
+    WRITE_ONCE(info->cache_sync_active, true);
     dirty = atomic_xchg(&info->cache_dirty, 0);
     if (!dirty)
-        return;
+        goto out;
 
-    if (hifs_cache_save_ctx(sb))
+    hifs_debug("cache sync start: interval %lu jiffies, dirty=%d",
+               info->cache_flush_interval, dirty);
+
+    ret = hifs_cache_save_ctx(sb);
+    if (ret) {
+        hifs_warning("cache sync: bitmap flush failed rc=%d, will retry", ret);
         atomic_set(&info->cache_dirty, 1);
+    }
 
-    hifs_flush_dirty_cache_items();
+    ret = hifs_flush_dirty_cache_items();
+    if (ret)
+        hifs_warning("cache sync: flush_dirty_cache_items rc=%d", ret);
 
     if (atomic_read(&info->cache_dirty))
         queue_delayed_work(system_long_wq, &info->cache_sync_work,
                            info->cache_flush_interval);
+    else
+        hifs_debug("cache sync complete");
+out:
+    WRITE_ONCE(info->cache_sync_active, false);
 }
 
 void hifs_cache_sync_init(struct super_block *sb, struct hifs_sb_info *info)
@@ -512,6 +526,7 @@ void hifs_cache_sync_init(struct super_block *sb, struct hifs_sb_info *info)
 
     info->sb = sb;
     atomic_set(&info->cache_dirty, 0);
+    info->cache_sync_active = false;
     info->cache_flush_interval = msecs_to_jiffies(hifs_get_cache_flush_interval_ms());
     INIT_DELAYED_WORK(&info->cache_sync_work, hifs_cache_sync_workfn);
 }

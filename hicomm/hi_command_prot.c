@@ -406,16 +406,23 @@ int hicomm_handle_command(int fd, const struct hifs_cmds *cmd)
 			return -EINVAL;
 		}
 
-		memcpy(&msg_local, frame.data, sizeof(msg_local));
-		msg_reply = msg_local;
-		volume_id = le64toh(msg_local.volume_id);
-		inode_no = le64toh(msg_local.inode.i_ino);
-		request_only = (le32toh(msg_local.inode.i_msg_flags) & HIFS_INODE_MSGF_REQUEST) != 0;
+	memcpy(&msg_local, frame.data, sizeof(msg_local));
+	msg_reply = msg_local;
+	volume_id = le64toh(msg_local.volume_id);
+	inode_no = le64toh(msg_local.inode.i_ino);
+	request_only = (le32toh(msg_local.inode.i_msg_flags) & HIFS_INODE_MSGF_REQUEST) != 0;
 
-		have_db = hifs_volume_inode_load(volume_id, inode_no, &db_wire);
-		if (have_db) {
-			int cmp = hifs_compare_inode_newer(&db_wire, &msg_local.inode);
-			if (cmp > 0) {
+	if (le32toh(msg_local.inode.i_mode) == 0) {
+		msg_local.inode.i_mode = htole32(S_IFREG | 0644);
+		msg_reply.inode.i_mode = msg_local.inode.i_mode;
+		hifs_warning("rx inode %llu missing mode; defaulting to regular 0644",
+			     (unsigned long long)inode_no);
+	}
+
+	have_db = hifs_volume_inode_load(volume_id, inode_no, &db_wire);
+	if (have_db) {
+		int cmp = hifs_compare_inode_newer(&db_wire, &msg_local.inode);
+		if (cmp > 0) {
 				msg_reply.inode = db_wire;
 			} else if (cmp < 0) {
 				save_local = true;

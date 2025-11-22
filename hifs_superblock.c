@@ -228,6 +228,16 @@ static void hifs_parse_mount_options(void *data, struct hifs_mount_options *opts
 				opts->volume_id = parsed;
 				opts->volume_specified = true;
 			}
+			continue;
+		}
+
+		{
+			unsigned long long parsed;
+			if (!kstrtoull(token, 0, &parsed)) {
+				opts->volume_id = parsed;
+				opts->volume_specified = true;
+				continue;
+			}
 		}
 	}
 

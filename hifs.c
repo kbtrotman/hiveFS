@@ -117,6 +117,11 @@ static int hifs_sync_fs(struct super_block *sb, int wait)
     if (!info)
         return 0;
 
+    if (READ_ONCE(info->cache_sync_active)) {
+        hifs_debug("sync_fs: skipping cancel_delayed_work_sync (cache_sync_active)");
+        return 0;
+    }
+
     cancel_delayed_work_sync(&info->cache_sync_work);
 
     ret = hifs_cache_save_ctx(sb);
