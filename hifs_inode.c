@@ -11,6 +11,7 @@
 #include "hifs.h"
 #include <linux/dirent.h>
 #include <linux/byteorder/generic.h>
+#include <linux/uidgid.h>
 u32 _ix = 0, b = 0, e = 0;
 
 #define FOREAChi_BLK_IN_EXT(dmi, blk)	\
@@ -18,6 +19,25 @@ for (_ix = 0, b = dmi->i_addrb[0], e = dmi->i_addre[0], blk = b-1;	\
 _ix < HIFS_INODE_TSIZE;							\
 ++_ix, b = dmi->i_addrb[_ix], e = dmi->i_addre[_ix], blk = b-1)		\
 	while (++blk < e)
+
+static u32 hifs_timespec_to_disk(const struct timespec64 *ts)
+{
+	time64_t sec = ts->tv_sec;
+
+	if (sec < 0)
+		return 0;
+	if (sec > U32_MAX)
+		return U32_MAX;
+	return (u32)sec;
+}
+
+static struct timespec64 hifs_disk_to_timespec(u32 seconds)
+{
+	return (struct timespec64){
+		.tv_sec = (time64_t)seconds,
+		.tv_nsec = 0,
+	};
+}
 
 
 void dump_hifsinode(struct hifs_inode *dmi)
@@ -260,38 +280,65 @@ struct hifs_sb_info *hisb;
 
 struct inode *hifs_new_inode(struct inode *dir, struct dentry *dentry, umode_t mode)
 {
-	struct super_block *sb;
-struct hifs_sb_info *hisb;
+	struct super_block *sb = dir->i_sb;
+	struct hifs_sb_info *hisb = sb ? sb->s_fs_info : NULL;
 	struct hifs_inode *hii;
 	struct inode *inode;
 	int ret;
 
-	sb = dir->i_sb;
-	hisb = sb->s_fs_info;
+	if (!hisb)
+		return NULL;
 
 	hii = cache_get_inode();
+	if (!hii)
+		return NULL;
 
-	/* allocate space:
- 	 * sb has last block on it just use it
- 	 */
 	ret = alloc_inode(sb, hii);
-
 	if (ret) {
 		cache_put_inode(&hii);
-		printk(KERN_ERR "Unable to allocate disk space for inode");
+		hifs_err("Unable to allocate disk space for inode\n");
 		return NULL;
 	}
+
 	hii->i_mode = mode;
+	hii->i_uid = from_kuid(&init_user_ns, current_fsuid());
+	hii->i_gid = from_kgid(&init_user_ns, current_fsgid());
+	hii->i_hrd_lnk = 1;
 
-	BUG_ON(!S_ISREG(mode) && !S_ISDIR(mode));
+	if (!S_ISREG(mode) && !S_ISDIR(mode)) {
+		cache_put_inode(&hii);
+		return NULL;
+	}
 
-	/* Create VFS inode */
-	//inode = new_inode(sb);
+	inode = new_inode(sb);
+	if (!inode) {
+		cache_put_inode(&hii);
+		return NULL;
+	}
+
+	inode_init_owner(&nop_mnt_idmap, inode, dir, mode);
+	inode->i_ino = hii->i_ino;
+	{
+		struct timespec64 now = current_time(inode);
+		u32 disk_now = hifs_timespec_to_disk(&now);
+
+		inode_set_atime_to_ts(inode, now);
+		inode_set_mtime_to_ts(inode, now);
+		inode_set_ctime_to_ts(inode, now);
+
+		hii->i_atime = disk_now;
+		hii->i_mtime = disk_now;
+		hii->i_ctime = disk_now;
+	}
+	set_nlink(inode, 1);
 
 	hifs_fill_inode(sb, inode, hii);
 
-	/* Add new inode to parent dir */
 	ret = hifs_add_dir_record(sb, dir, dentry, inode);
+	if (ret) {
+		iput(inode);
+		return NULL;
+	}
 
 	return inode;
 }
@@ -436,16 +483,22 @@ struct hifs_inode *hifs_iget(struct super_block *sb, ino_t ino)
 
 void hifs_fill_inode(struct super_block *sb, struct inode *des, struct hifs_inode *src)
 {
-	struct timespec64 ts;
-	ktime_get_real_ts64(&ts);
-
 	des->i_mode = src->i_mode;
 	des->i_flags = src->i_flags;
 	des->i_sb = sb;
-//	des->i_atime = des->i_ctime = des->i_mtime = ts;
 	des->i_ino = src->i_ino;
 	des->i_private = src;
 	des->i_op = &hifs_inode_operations;
+
+	/* Some remote entries may arrive without a type; default to regular file. */
+	if (!S_ISDIR(src->i_mode) && !S_ISREG(src->i_mode) && !S_ISLNK(src->i_mode)) {
+		hifs_warning("inode %llu missing type (mode %#o); defaulting to regular file",
+			     (unsigned long long)src->i_ino, src->i_mode);
+		src->i_mode = S_IFREG | 0644;
+	}
+	inode_set_atime_to_ts(des, hifs_disk_to_timespec(src->i_atime));
+	inode_set_mtime_to_ts(des, hifs_disk_to_timespec(src->i_mtime));
+	inode_set_ctime_to_ts(des, hifs_disk_to_timespec(src->i_ctime));
 
 	if (S_ISDIR(des->i_mode))
 		des->i_fop = &hifs_dir_operations;

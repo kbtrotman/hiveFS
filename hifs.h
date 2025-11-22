@@ -338,6 +338,7 @@ struct hifs_sb_info
     struct delayed_work cache_sync_work;
     unsigned long cache_flush_interval;
     atomic_t cache_dirty;
+    bool cache_sync_active;
     unsigned int io_wait_ms;
     bool io_wait_mount_override;
 };

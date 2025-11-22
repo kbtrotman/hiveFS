@@ -553,6 +553,23 @@ static bool decode_payload(const JVal *root, uint8_t **buf, size_t *len)
 	return base64_decode(b64, buf, len) == 0;
 }
 
+/* Accept slightly over-sized payloads that only add trailing NUL padding. */
+static bool trim_optional_padding(uint8_t *blob, size_t *len, size_t want)
+{
+	if (!blob || !len)
+		return false;
+	if (*len == want)
+		return true;
+	if (*len < want)
+		return false;
+	for (size_t i = want; i < *len; ++i) {
+		if (blob[i] != 0)
+			return false;
+	}
+	*len = want;
+	return true;
+}
+
 static bool get_u64(const JVal *root, const char *key, uint64_t *out)
 {
 	const JVal *v = jobj_get(root, key);
@@ -624,6 +641,7 @@ static bool handle_host_super_list(Client *c, const JVal *root)
 		return send_error_json(c->fd, "not_found", "no superblocks");
 
 	size_t count = (size_t)sqldb.rows;
+	hifs_notice("host_super_list request from %s -> %zu records", machine_id, count);
 	size_t payload_len = count * sizeof(struct superblock);
 	return send_payload_ok(c->fd, "host_super_list", sqldb.sb, payload_len);
 }
@@ -650,7 +668,7 @@ static bool handle_struct_set(Client *c, uint64_t volume_id,
 	size_t blob_len = 0;
 	if (!decode_payload(root, &blob, &blob_len))
 		return send_error_json(c->fd, "bad_request", "missing payload");
-	if (blob_len != struct_size) {
+	if (!trim_optional_padding(blob, &blob_len, struct_size)) {
 		free(blob);
 		return send_error_json(c->fd, "bad_request", "payload size mismatch");
 	}
@@ -700,7 +718,7 @@ static bool handle_volume_dentry_store(Client *c, const JVal *root)
 	size_t blob_len = 0;
 	if (!decode_payload(root, &blob, &blob_len))
 		return send_error_json(c->fd, "bad_request", "missing payload");
-	if (blob_len != sizeof(struct hifs_volume_dentry)) {
+	if (!trim_optional_padding(blob, &blob_len, sizeof(struct hifs_volume_dentry))) {
 		free(blob);
 		return send_error_json(c->fd, "bad_request", "payload size mismatch");
 	}
@@ -733,7 +751,7 @@ static bool handle_volume_inode_store(Client *c, const JVal *root)
 	size_t blob_len = 0;
 	if (!decode_payload(root, &blob, &blob_len))
 		return send_error_json(c->fd, "bad_request", "missing payload");
-	if (blob_len != sizeof(struct hifs_inode_wire)) {
+	if (!trim_optional_padding(blob, &blob_len, sizeof(struct hifs_inode_wire))) {
 		free(blob);
 		return send_error_json(c->fd, "bad_request", "payload size mismatch");
 	}

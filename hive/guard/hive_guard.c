@@ -10,38 +10,39 @@
 
 /**
  * Thin wrapper so the build keeps the historical entry point while the
- * implementation lives in hive_guard_tcp_coms.c.
+ * implementation lives in hive_guard_raft.c & hive_guard_tcp_coms.c, two
+ * independantly started threads.
  */
 
-#include "hive_guard.h"
 #include "hive_guard_raft.h"
-
+#include "hive_guard.h"
 
 int main(void)
 {
-
-	fprintf(stdout, "main: starting\n");
-
-    /* Hard-code or read from config/env for now */
+    /* TODO: read these from config or env */
     struct hg_raft_peer peers[] = {
-       // { .id = 1, .address = "127.0.0.1:7000" },
-       // { .id = 2, .address = "10.0.0.2:7000" },
-       // { .id = 3, .address = "10.0.0.3:7000" },
+        { .id = 1, .address = "127.0.0.1:7000" },
+        /* Add other nodes here when you run a real cluster */
     };
 
     struct hg_raft_config rcfg = {
-        .self_id      = 1,                       /* this node */
+        .self_id      = 1,
         .self_address = "127.0.0.1:7000",
-        .data_dir     = "/var/lib/hive_guard/raft",
+        .data_dir     = "/tmp/hive_guard_raft",
         .peers        = peers,
-        .num_peers    = sizeof(peers)/sizeof(peers[0]),
+        .num_peers    = sizeof(peers) / sizeof(peers[0]),
     };
 
- //   if (start_raft_server() != 0) {
- //       fprintf(stderr, "Failed to initialize Raft; starting in degraded mode\n");
- //       /* exit or run read-only here */
- //   }
+    fprintf(stderr, "main: starting\n");
+    fflush(stderr);
 
-    /* Now run client TCP server loop */	
-	return hive_guard_server_main();
+    if (hg_raft_init(&rcfg) != 0) {
+        fprintf(stderr, "main: hg_raft_init failed, running without Raft\n");
+        /* You can choose to exit here instead: return 1; */
+    }
+
+    /* Now start the existing epoll-based TCP server.
+     * Raft is running in its own thread; both will make progress.
+     */
+    return hive_guard_server_main();
 }

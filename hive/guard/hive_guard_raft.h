@@ -30,47 +30,34 @@
 #include "../../hicomm/hi_command.h"
 
 
+/* hive_guard_raft.h */
 
-/* Node identity & cluster config */
-#define HIFS_GUARD_HOST "127.0.0.1"
-#define N_SERVERS 3    /* Number of servers in the example cluster */
-#define APPLY_RATE 125 /* Apply a new entry every 125 milliseconds */
+#ifndef HIVE_GUARD_RAFT_H
+#define HIVE_GUARD_RAFT_H
 
-#define Log(SERVER_ID, FORMAT) printf("%d: " FORMAT "\n", SERVER_ID)
-#define Logf(SERVER_ID, FORMAT, ...) \
-    printf("%d: " FORMAT "\n", SERVER_ID, __VA_ARGS__)
+#include <stdint.h>
+#include <stdbool.h>
 
 struct hg_raft_peer {
-    uint64_t id;
-    const char *address;  /* "ip:port" */
+    uint64_t    id;
+    const char *address;   /* "ip:port" */
 };
 
 struct hg_raft_config {
-    uint64_t        self_id;
-    const char     *self_address; /* "ip:port" string */
-    const char     *data_dir;     /* directory for Raft log, e.g. /var/lib/hive_guard/raft */
-    struct hg_raft_peer *peers;
-    unsigned        num_peers;
+    uint64_t                self_id;
+    const char             *self_address;  /* "ip:port" */
+    const char             *data_dir;      /* e.g. "/var/lib/hive_guard/raft" */
+    const struct hg_raft_peer *peers;
+    unsigned                num_peers;
 };
 
-// Prototypes
+/* Start Raft in a background thread. Returns 0 on success. */
+int  hg_raft_init(const struct hg_raft_config *cfg);
 
-/* Initialize the Raft node and start its event loop in the background. */
-int start_raft_server(void);
-static int ServerInit(struct Server *s,
-                      struct uv_loop_s *loop,
-                      const char *dir,
-                      unsigned id)
-static int ServerStart(struct Server *s);
+/* Optional: clean shutdown (can be TODO for now). */
+void hg_raft_shutdown(void);
 
-/* Clean shutdown (if/when you add it). */
-static void ServerClose(struct Server *s, ServerCloseCb cb);
-static void mainServerCloseCb(struct Server *server);
-static void serverTimerCloseCb(struct uv_handle_s *handle);
+/* Helper: is this node currently the Raft leader? */
+bool hg_guard_local_can_write(void);
 
-/* Not to be called directly except by raft algorythm protocol */
-static void serverTimerCb(uv_timer_t *timer);
-static void mainSigintCb(struct uv_signal_s *handle, int signum);
-static void serverApplyCb(struct raft_apply *req, int status, void *result);
-static void serverTransferCb(struct raft_transfer *req);
-static void serverRaftCloseCb(struct raft *raft);
+#endif /* HIVE_GUARD_RAFT_H */

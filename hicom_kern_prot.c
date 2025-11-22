@@ -688,12 +688,16 @@ int hifs_publish_inode(struct super_block *sb, const struct hifs_inode *hii,
     struct hifs_data_frame *frame = NULL;
     int ret = 0;
 
-    if (!sb || !hii)
+    if (!sb || !hii) {
+        hifs_err("publish inode: invalid args sb=%p hii=%p", sb, hii);
         return -EINVAL;
+    }
 
     info = (struct hifs_sb_info *)sb->s_fs_info;
-    if (!info)
+    if (!info) {
+        hifs_err("publish inode %llu: missing sb info", hii->i_ino);
         return -EINVAL;
+    }
 
     wire_local = kzalloc(sizeof(*wire_local), GFP_KERNEL);
     if (!wire_local)
@@ -706,8 +710,10 @@ int hifs_publish_inode(struct super_block *sb, const struct hifs_inode *hii,
     strscpy(cmd.cmd, HIFS_Q_PROTO_CMD_INODE_SEND, sizeof(cmd.cmd));
     cmd.count = strlen(cmd.cmd);
     ret = hifs_cmd_fifo_out_push(&cmd);
-    if (ret)
+    if (ret) {
+        hifs_err("publish inode %llu: cmd enqueue failed rc=%d", hii->i_ino, ret);
         goto out;
+    }
 
     msg_local = kzalloc(sizeof(*msg_local), GFP_KERNEL);
     if (!msg_local) {
@@ -732,8 +738,10 @@ int hifs_publish_inode(struct super_block *sb, const struct hifs_inode *hii,
                request_only ? HIFS_INODE_MSGF_REQUEST : 0);
 
     ret = hifs_data_fifo_out_push_buf(msg_local, sizeof(*msg_local));
-    if (ret)
+    if (ret) {
+        hifs_err("publish inode %llu: data enqueue failed rc=%d", hii->i_ino, ret);
         goto out;
+    }
 
     {
         int tries;
@@ -751,10 +759,15 @@ int hifs_publish_inode(struct super_block *sb, const struct hifs_inode *hii,
 
             if (cmd_equals(&cmd, HIFS_Q_PROTO_CMD_INODE_RECV)) {
                 ret = hifs_data_fifo_in_pop(frame, false);
-                if (ret)
+                if (ret) {
+                    hifs_err("publish inode %llu: recv frame failed rc=%d",
+                             hii->i_ino, ret);
                     goto out;
+                }
                 if (frame->len != sizeof(*msg_remote)) {
                     ret = -EINVAL;
+                    hifs_err("publish inode %llu: recv frame len %u expected %zu",
+                             hii->i_ino, frame->len, sizeof(*msg_remote));
                     goto out;
                 }
                 memcpy(msg_remote, frame->data, sizeof(*msg_remote));
@@ -762,17 +775,23 @@ int hifs_publish_inode(struct super_block *sb, const struct hifs_inode *hii,
             }
         }
         if (tries == 20) {
+            hifs_warning("publish inode %llu: no response after %d attempts (flags %#x)",
+                         hii->i_ino, tries,
+                         request_only ? HIFS_INODE_MSGF_REQUEST : 0);
             ret = 0;
             goto out;
         }
     }
 
     if (hifs_compare_inode_newer(&msg_local->inode, &msg_remote->inode) > 0) {
+        hifs_debug("publish inode %llu: remote newer, applying", hii->i_ino);
         hifs_apply_remote_inode(sb, &msg_remote->inode);
         ret = 1;
         goto out;
     }
 
+    hifs_debug("publish inode %llu: local accepted (flags %#x)",
+               hii->i_ino, request_only ? HIFS_INODE_MSGF_REQUEST : 0);
     ret = 0;
 
 out:
@@ -938,6 +957,11 @@ int hifs_flush_dirty_cache_items(void)
 {
 	struct hifs_flush_ctx ctx = { .rc = 0 };
 
+	hifs_debug("flush dirty cache items: begin");
 	iterate_supers_type(&hifs_type, hifs_flush_sync_super, &ctx);
+	if (ctx.rc)
+		hifs_warning("flush dirty cache items: sync_filesystem rc=%d", ctx.rc);
+	else
+		hifs_debug("flush dirty cache items: complete");
 	return ctx.rc;
 }

@@ -50,6 +50,9 @@ typedef struct {
 } ec_ctx_t;
 
 #define HIFS_COMM_DEVICE_PATH "/dev/" HIFS_COMM_DEVICE_NAME
+#define HICMD_MAX_TCP_CLIENTS 16
+#define HICMD_DEFAULT_BIND_HOST "0.0.0.0"
+#define HICMD_DEFAULT_BIND_PORT "7070"
 
 struct superblock {
 	uint64_t volume_id;
@@ -129,3 +132,9 @@ bool hifs_volume_block_load(uint64_t volume_id, uint64_t block_no,
                             uint8_t *buf, uint32_t *len);
 bool hifs_volume_block_store(uint64_t volume_id, uint64_t block_no,
                              const uint8_t *buf, uint32_t len);
+
+/* hi_command_tcp.c (control-plane TCP relay) */
+int hicmd_tcp_init(const char *host, const char *port, int comm_fd);
+void hicmd_tcp_poll(int timeout_ms);
+void hicmd_tcp_broadcast_cmd(const struct hifs_cmds *cmd);
+void hicmd_tcp_shutdown(void);
