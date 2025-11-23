@@ -51,6 +51,20 @@ struct hg_raft_config {
     unsigned                num_peers;
 };
 
+struct hg_raft_block {
+    uint8_t  op_type;          // e.g. 1 = PUT_BLOCK
+    uint8_t  hash_algo;        // 1 = SHA-256
+    uint8_t  hash[32];         // SHA-256 of the 4K block
+    uint64_t estripe_id[6];    // 4 data + 2 parity stripe IDs
+    uint64_t version;          // optional, if you want
+    struct StripeId {
+        uint32_t node_id;
+        uint64_t local_estripe_id;
+        uint64_t raft_estripe_id;
+    } ec_stripes[6];
+};
+
+
 /* Start Raft in a background thread. Returns 0 on success. */
 int  hg_raft_init(const struct hg_raft_config *cfg);
 

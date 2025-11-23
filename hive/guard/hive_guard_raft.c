@@ -1,5 +1,14 @@
 /**
- * Minimal pthread-based wrapper that starts the Raft stack in the background.
+ * HiveFS
+ *
+ * Hive Mind Filesystem
+ * By K. B. Trotman
+ * License: GNU GPL as of 2023
+ *
+ */
+
+/**
+ * Minimal pthread-based wrapper that starts the Raft protocol in a second thread.
  */
 
 #include "hive_guard_raft.h"
@@ -120,3 +129,33 @@ bool hg_guard_local_can_write(void)
     pthread_mutex_unlock(&g_state_mu);
     return leader;
 }
+
+static int commitCb(struct uv_raft *raft,
+                    int type,
+                    const uv_buf_t *buf)
+{
+    (void)raft;
+
+    if (type != RAFT_COMMAND || buf == NULL || buf->len < sizeof(struct RaftPutBlock)) {
+        return 0;
+    }
+
+    const struct RaftPutBlock *cmd = (const struct RaftPutBlock *)buf->base;
+    if (cmd->op_type != OP_PUT_BLOCK) {
+        return 0;
+    }
+
+    // Pseudo-code: insert into hash_to_estripes
+    hifs_meta_insert_hash_to_estripes(
+        cmd->hash_algo,
+        cmd->hash,
+        cmd->estripe_id[0],
+        cmd->estripe_id[1],
+        cmd->estripe_id[2],
+        cmd->estripe_id[3],
+        cmd->estripe_id[4],
+        cmd->estripe_id[5]);
+
+    return 0;
+}
+
