@@ -13,7 +13,7 @@ reality, it is actually managing any number of remotely managed filesystems, all
 This is somewhat of a bold statemnt, but it comes from what HiveFS truly is. Clustered filesystems
 use raft consensus to write data and control locking. In the engineering world, Software Defined
 storage is a superset of clustered filesystems which enables some vitualized components. This is what
-HiveFS is, but in addition, it is slightly more unusualy than traditional SDS in that it actually 
+HiveFS is, but in addition, it is slightly more unusual than traditional SDS in that it actually 
 tricks the O/S kernel into thinking it's only one local disk, when it's actually many remote 
 network-base filesystems in the same style as traditional SDS. On the backend, all data is stored 
 in one global virtual de-dupe pool. In addition, SDS usually is a signle tree design shared between 
