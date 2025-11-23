@@ -42,13 +42,17 @@ There are 3 required and one optional companents to the "Hive" in general:
    initial ISO install and configuration. Adding nodes adds both the ability to attach more storage 
    via PCI slots/internal bays and distribution of incoming reads/writes for more bandwidth. The 
    hive runs a software called Hive_Guard which provides a whole host of functions, from securing
-   incoming trqansmissions, to load balancing erasure coding stripes across the nodes, re-balancing
-   when nodes are added/deleted, and managing Posix locks and notifications. This load balances all
+   incoming transmissions, balancing erasure code stripes across the nodes, re-balancing EC when 
+   nodes are added/deleted, raft clustering algorythm, replicated write logs, and managing Posix 
+   locks, leases, and notifications. Hive guard acts as a query distribution and load balances all
    load across every node equally. And by using erasure coding, it not only provides redundancy but
    also breaks up each block into chunks written across the nodes for very efficient write speeds.
-   Backend storage can be anything that appears locally attached but the hive is tuned specifically 
-   for SSD (especially NVME). HSD is not recommended. It uses a key/value store for de-dupe and those
-   are extramely fast when tuned well and backed by SSD.
+   Each written block is distributed across six nodes, which significantly increases speed. (However,
+   two of those stripes are parity, meaning with 6 nodes or more, the system can loose at least two 
+   nodes and operate degradaded, but still retain viability.) Backend storage can be anything that 
+   appears locally attached but the hive is tuned specifically for SSD (especially NVME). HSD is not 
+   recommended. It uses a high-speed key/value store for de-dupe that is extremely fast as configured
+   and backed by SSD.
 
 2. HiveFS is a kernel module that takes a small local disk and builds a superblock on it and cache.
    The superblock allows the FS to load and then points it to the central hive for inode data. A small 
@@ -60,15 +64,19 @@ There are 3 required and one optional companents to the "Hive" in general:
    it will not show up as a filesystem, and if you attempt to list the directory, you'll be told
    that function isn't supported. See, the cache is just a collection of most-often used directories,
    inodes, and blocks. It has no tree structure or ability to be read locally. This makes high-speed
-   reads very fast.
+   reads very fast. Unlike traditional clusters and most SDS platforms, HiveFS is not architected so
+   that storage nodes are also the only end clients. In fact, storage nodes in the hive are not
+   designed to be clients at all. Instead, end clients participate in fast reads/writes due to their
+   not having any storage based in the shared filesystem. They only have local cache tuned for fast
+   reads. Writes are done over network topology to the hive storage nodes.
 
 3. Hi_Command is a user-space program that runs on the same linux client as HiveFS. Hi_Command sets 
    up FIFO queues with the kernel module and accepts data from the kernel to be sent over ethernet to 
    the central hive. In other words, its a user space program that implements the protocol necessary 
    to communicate. Using insecure network comms from the linux kernel isn't a good idea. By moving this
-   to user space, it can use TLS encryption and higher-level token authentication,  to pair with 
+   to user space, it can use TLS encryption and higher-level token authentication, to pair with 
    Hive_Guard on the remote hive. Which node it attaches to doesn't matter, because Hive_guard will
-   direct all traffic and provide the data in the lowest latency method it can.
+   direct traffic and provide the data in the lowest latency method it can.
 
 4. HoneyComb is an optional node server install ISO that can be added which has the hive software to
    access the datastore, the hiveFS kernel module, and hi_command installed. It also has Hive_guard 
@@ -80,7 +88,6 @@ There are 3 required and one optional companents to the "Hive" in general:
    of the hive and accept client communication to store or read data. However, if file and object 
    traffic is heavy, it will hand off communication from hive clients as load gets higher and 
    prioritize its own function first.
-
 
 
 Like any virtualization, HiveFS is designed by architecture to easily expand across a hybrid cloud or 
