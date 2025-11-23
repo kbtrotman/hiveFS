@@ -20,11 +20,20 @@
 
 #include "hive_guard.h"
 #include "hive_guard_sql.h"
+#include "../../hifs_shared_defs.h"
 
 
 /* -------------------------------------------------------------------------- */
 /* Logging bridge for hi_command macros                                       */
 /* -------------------------------------------------------------------------- */
+
+/* Sanity: ensure protocol structs match the shared definitions we send/recv. */
+/* This ensures the hifs_shared_defs.h file is the only defs used for all stages. */
+_Static_assert(sizeof(struct hifs_sb_msg) == sizeof(struct hifs_sb_msg), "hifs_sb_msg size mismatch");
+_Static_assert(sizeof(struct hifs_root_msg) == sizeof(struct hifs_root_msg), "hifs_root_msg size mismatch");
+_Static_assert(sizeof(struct hifs_dentry_msg) == sizeof(struct hifs_dentry_msg), "hifs_dentry_msg size mismatch");
+_Static_assert(sizeof(struct hifs_inode_msg) == sizeof(struct hifs_inode_msg), "hifs_inode_msg size mismatch");
+
 void hicomm_log(int level, const char *fmt, ...)
 {
 	va_list ap;
