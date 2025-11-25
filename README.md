@@ -7,33 +7,34 @@ HiveFS is hive mind filesystem for physical Linux, (Windows?) and VMWare/Nutanix
 
 What is a hive mind filesystem? There is no better or more descriptive way to describe HiveFS than
 in saying it is a full hypervisor that lives in the O/S layer for backend storage. Everything is
-virtualized now. Why not the filesystem itself? HiveFS is a truely virtual global filesystem.
-Virtual in the sense that the local kernel believes it is mounting physical storage, while in
-reality, it is actually managing any number of remotely managed filesystems, all completely virtual.
-This is somewhat of a bold statemnt, but it comes from what HiveFS truly is. Clustered filesystems
+virtualized now. Why not the filesystem too? HiveFS is virtual in the sense that the local kernel 
+believes it is mounting physical storage, while in reality, it is actually managing any number of 
+remotely managed filesystems, all completely virtual. But we're getting ahead of ourselves. See,
+this is somewhat of a bold statemnt, but it comes from what HiveFS actually is. Clustered filesystems
 use raft consensus to write data and control locking. In the engineering world, Software Defined
-storage is a superset of clustered filesystems which enables some vitualized components. This is what
-HiveFS is, software defined storage, but in addition, it is slightly more unusual than traditional 
-SDS in that its main virtualization component is a kernel driver that tricks the O/S kernel into 
-thinking it's only one local disk, when it's actually many remote network-based filesystems in the 
-same style as traditional SDS. On the backend, all data is stored in one global virtual de-dupe pool. 
-In addition, SDS usually is a single tree design shared between many servers. HiveFS has a global 
-tree with branches that represent shared filesystems, hosts, and other virtual entities. Under hosts, 
-a filesystem may be dedicated to that host, shared between many hosts, or junctioned partially from 
-one host to another. No data has to be stored on local disk or SAN mounted. Although, it's 
-recommended to have a small local cache on SSD disk just to make sure remote speed is no slower than 
-local speed. Traditional SDS has a single global cache, while HiveFS's local client cache acts as 
-NVRAM, ensuring write fidelity in power outages, so there is a reliability component when choosing 
-not to use cache. These unique traits don't mean that HiveFS is not software defined storage, but
-rather, they simply mean its a different architecture of software defined storage than other, more
-traditional models. The closest other comparisons would be primarily object style clustered 
-filesystems. Once storage is attached to the backend nodes, whether local commodity or SAN-attached 
-arrays, all management is done through one interface. In fact, the point of HiveFS's design is 
-simple ease of management for storage architects. HiveFS is both clustered and SDS storage like many 
-virtualization models coming out currently, but unlike many virtual systems, it treats the storage 
-as block-only by the internal protocol, like any local filesystem, but with an additional node or 
-nodes, it can also provide file and object stores (see below). It was not originally designed to 
-do everything internally, however. It focuses on doing one thing well, block storage over network.
+storage is a superset of clustered filesystems which enables some vitualized components. This is 
+what HiveFS is, software defined storage, but in addition, it is slightly more unusual than 
+traditional SDS in that its main virtualization component is a kernel driver that tricks the O/S 
+kernel into thinking it's only one local disk, when it's actually many remote network-based 
+filesystems in the same style as traditional SDS. On the backend, all data is stored in one global 
+virtual de-dupe pool. In addition, SDS usually is a single tree design shared between many servers. 
+HiveFS has a global tree with branches that represent shared filesystems, hosts, and other virtual 
+entities. (This layer doesn't actually exist anywhere except conceptually.) Under hosts, a 
+filesystem may be dedicated to that host, shared between many hosts, or junctioned partially from 
+one host to another. No data has to be SAN mounted. It's recommended to have a small local cache on 
+SSD disk to make sure remote speed is no slower than local speed. Traditional SDS has a single global 
+cache, while HiveFS's local client cache makes a large percentage of reads extremely fast. This pairs
+well with SSD, which is tuned for high-speed writes to make a well-rounded performance profile. These 
+unique traits don't mean that HiveFS is not software defined storage, but rather, they simply mean 
+its a different architecture of software defined storage than other, more object-based models. (The 
+closest other comparisons would be primarily object style clustered filesystems.) Once storage is 
+attached to the backend nodes, whether local commodity or SAN-attached arrays, all management is 
+done through one interface. In fact, the point of HiveFS's design is simple ease of management for 
+storage architects. HiveFS is both clustered and SDS storage like many virtualization models coming 
+out currently, but unlike many virtual systems, it treats the storage as block-only by the internal 
+protocol, like any local filesystem, but with an additional node or nodes, it can also provide file 
+and object stores (see below). It was not originally designed to do everything internally, however. 
+It focuses on doing one thing well, block storage over network.
 
 There are 3 required and one optional companents to the "Hive" in general:
 1. The central "Hive" is one or more server(s), storage appliances, installed via ISO image. 
