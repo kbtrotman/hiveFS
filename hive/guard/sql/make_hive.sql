@@ -38,7 +38,7 @@ CREATE TABLE IF NOT EXISTS storage_nodes (
 
 CREATE TABLE IF NOT EXISTS shard_map (
   shard_id INT PRIMARY KEY,
-  node_id INT PRIMARY KEY,
+  node_id INT NOT NULL,
   shard_name VARCHAR(100) NOT NULL,
   storage_node_id INT NOT NULL,
   date_added TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -48,7 +48,7 @@ CREATE TABLE IF NOT EXISTS shard_map (
   stripe_id_high BIGINT UNSIGNED NOT NULL,
   UNIQUE KEY u_shard_name (shard_name),
   CONSTRAINT fk_shard_node FOREIGN KEY (storage_node_id)
-    REFERENCES storage_nodes(id) ON DELETE CASCADE
+    REFERENCES storage_nodes(node_id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS host (
@@ -295,7 +295,7 @@ CREATE TABLE estripe_locations (
   storage_node_id INT UNSIGNED NOT NULL,
   block_offset    BIGINT UNSIGNED NOT NULL,
   PRIMARY KEY (estripe_id),
-  FOREIGN KEY (e_shard_id) REFERENCES shard_map(shard_id)
+  FOREIGN KEY (shard_id) REFERENCES shard_map(shard_id),
   FOREIGN KEY (storage_node_id) REFERENCES storage_nodes(node_id)
 );
 
