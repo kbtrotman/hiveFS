@@ -35,8 +35,7 @@
 #ifndef HIVE_GUARD_RAFT_H
 #define HIVE_GUARD_RAFT_H
 
-#include <stdint.h>
-#include <stdbool.h>
+#define OP_PUT_BLOCK  1
 
 struct hg_raft_peer {
     uint64_t    id;
@@ -51,17 +50,26 @@ struct hg_raft_config {
     unsigned                num_peers;
 };
 
-struct hg_raft_block {
-    uint8_t  op_type;          // e.g. 1 = PUT_BLOCK
-    uint8_t  hash_algo;        // 1 = SHA-256
-    uint8_t  hash[32];         // SHA-256 of the 4K block
-    uint64_t estripe_id[6];    // 4 data + 2 parity stripe IDs
-    uint64_t version;          // optional, if you want
-    struct StripeId {
-        uint32_t node_id;
-        uint64_t local_estripe_id;
-        uint64_t raft_estripe_id;
-    } ec_stripes[6];
+/* One stripe ID: which node, which local stripe row */
+struct StripeId {
+    uint32_t node_id;          /* storage node id */
+    uint64_t local_estripe_id; /* estripe_id in that node's hive_data.ecblocks */
+};
+
+/* Raft metadata command for a deduped/EC block */
+struct RaftPutBlock {
+    uint8_t   op_type;     /* OP_PUT_BLOCK */
+    uint8_t   hash_algo;   /* 1 = SHA-256 */
+    uint16_t  reserved16;  /* padding / future flags */
+    uint32_t  reserved32;  /* padding / future use */
+
+    uint64_t  volume_id;   /* which volume this block belongs to */
+    uint64_t  block_no;    /* logical block number within the volume */
+    uint64_t  version;     /* optional version of this mapping */
+
+    uint8_t   hash[32];    /* SHA-256 of 4K block */
+
+    struct StripeId ec_stripes[6];  /* 4 data + 2 parity stripes */
 };
 
 

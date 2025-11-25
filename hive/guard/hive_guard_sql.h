@@ -52,7 +52,7 @@
 
 #define SQL_HOST_UPSERT \
 	"INSERT INTO host (serial, name, host_id, os_name, os_version, create_time) " \
-	"VALUES ('%s', '%s', %ld, '%s', '%s', NOW()) " \
+	"VALUES ('%s', '%s', %s, '%s', '%s', NOW()) " \
 	"ON DUPLICATE KEY UPDATE name=VALUES(name), host_id=VALUES(host_id), " \
 	"os_name=VALUES(os_name), os_version=VALUES(os_version)"
 
@@ -171,38 +171,41 @@
   "SELECT hash_algo, HEX(block_hash) FROM volume_block_mappings " \
   "WHERE volume_id=%llu AND block_no=%llu"
 
-/* INSERT/UPSERT: volume → hash (expects hash_hex) */
+/* volume_id + block_no -> hash mapping */
 #define SQL_VOLUME_BLOCK_MAP_UPSERT \
   "INSERT INTO volume_block_mappings (volume_id, block_no, hash_algo, block_hash) " \
   "VALUES (%llu, %llu, %u, UNHEX('%s')) " \
   "ON DUPLICATE KEY UPDATE hash_algo=VALUES(hash_algo), block_hash=VALUES(block_hash)"
 
-/* SELECT: block_hash → 9 stripe ids (expects hash_hex) */
+/* block_hash -> 4 data + 2 parity stripe ids + ref_count (4+2 EC) */
 #define SQL_HASH_TO_ESTRIPES_SELECT \
-  "SELECT estripe_1_id, estripe_2_id, estripe_3_id, estripe_4_id, estripe_5_id, estripe_6_id, " \
-  "       estripe_p1_id, estripe_p2_id, estripe_p3_id " \
-  "FROM hive_data.hash_to_estripes " \
+  "SELECT estripe_1_id, estripe_2_id, estripe_3_id, estripe_4_id, " \
+  "       estripe_p1_id, estripe_p2_id, ref_count " \
+  "FROM hive_meta.hash_to_estripes " \
   "WHERE hash_algo=%u AND block_hash=UNHEX('%s')"
 
-/* Insert a single EC stripe payload as binary */
-#define SQL_ECBLOCKS_INSERT_HEX \
-  "INSERT INTO hive_data.ecblocks (ec_block) VALUES (UNHEX('%s'))"
-
-/* 9-way mapping, block_hash is VARBINARY(32) → 9 stripe ids (expects hash_hex) */
+/* UPSERT: block_hash -> 4 data + 2 parity stripe ids, bump ref_count */
 #define SQL_HASH_TO_ESTRIPES_UPSERT \
-  "INSERT INTO hive_data.hash_to_estripes (" \
-  " hash_algo, block_hash," \
-  " estripe_1_id, estripe_2_id, estripe_3_id, estripe_4_id, estripe_5_id, estripe_6_id," \
-  " estripe_p1_id, estripe_p2_id, estripe_p3_id, block_bck_hash) " \
-  "VALUES (%u, UNHEX('%s'), %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, NULL) " \
+  "INSERT INTO hive_meta.hash_to_estripes (" \
+  "  hash_algo, block_hash, ref_count, " \
+  "  estripe_1_id, estripe_2_id, estripe_3_id, estripe_4_id, " \
+  "  estripe_p1_id, estripe_p2_id, block_bck_hash) " \
+  "VALUES (%u, UNHEX('%s'), %llu, %llu, %llu, %llu, %llu, %llu, %llu, NULL) " \
   "ON DUPLICATE KEY UPDATE " \
-  " estripe_1_id=VALUES(estripe_1_id), estripe_2_id=VALUES(estripe_2_id)," \
-  " estripe_3_id=VALUES(estripe_3_id), estripe_4_id=VALUES(estripe_4_id)," \
-  " estripe_5_id=VALUES(estripe_5_id), estripe_6_id=VALUES(estripe_6_id)," \
-  " estripe_p1_id=VALUES(estripe_p1_id), estripe_p2_id=VALUES(estripe_p2_id)," \
-  " estripe_p3_id=VALUES(estripe_p3_id)"
+  "  ref_count = ref_count + VALUES(ref_count), " \
+  "  estripe_1_id = VALUES(estripe_1_id), " \
+  "  estripe_2_id = VALUES(estripe_2_id), " \
+  "  estripe_3_id = VALUES(estripe_3_id), " \
+  "  estripe_4_id = VALUES(estripe_4_id), " \
+  "  estripe_p1_id = VALUES(estripe_p1_id), " \
+  "  estripe_p2_id = VALUES(estripe_p2_id)"
+  
+/* Insert a single EC stripe payload as binary, with version */
+#define SQL_ECBLOCKS_INSERT_HEX \
+  "INSERT INTO hive_data.ecblocks (estripe_version, ec_block) " \
+  "VALUES (%llu, UNHEX('%s'))"
 
-/* Lookup the 9 stripe ids by binary block hash, SELECT the raw BLOB */
+/* Lookup the 6 stripe ids by binary block hash, SELECT the raw BLOB */
 #define SQL_ECBLOCK_SELECT \
   "SELECT ec_block FROM hive_data.ecblocks WHERE estripe_id=%llu"
 

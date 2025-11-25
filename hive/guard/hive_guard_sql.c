@@ -1261,6 +1261,7 @@ out:
 bool hifs_volume_block_store(uint64_t volume_id, uint64_t block_no,
 			     const uint8_t *buf, uint32_t len)
 {
+	uint32_t stripe_version = 1;
 	/* Basic guards */
 	if (!sqldb.sql_init || !sqldb.conn || !buf ||
 	    len > HIFS_DEFAULT_BLOCK_SIZE)
@@ -1300,7 +1301,7 @@ bool hifs_volume_block_store(uint64_t volume_id, uint64_t block_no,
 		bytes_to_hex(encoded_chunks[i], frag_size, stripe_hex);
 
 		size_t sql_len = (size_t)snprintf(NULL, 0,
-						  SQL_ECBLOCKS_INSERT_HEX,
+						  SQL_ECBLOCKS_INSERT_HEX, stripe_version,
 						  stripe_hex) + 1;
 		char *sql_data = (char *)malloc(sql_len);
 		if (!sql_data) {
@@ -1309,7 +1310,7 @@ bool hifs_volume_block_store(uint64_t volume_id, uint64_t block_no,
 		}
 
 		(void)snprintf(sql_data, sql_len,
-			       SQL_ECBLOCKS_INSERT_HEX, stripe_hex);
+			       SQL_ECBLOCKS_INSERT_HEX, stripe_version, stripe_hex);
 
 		if (!hifs_insert_sql(sql_data)) {
 			hifs_warning("Failed to insert ecblock");
