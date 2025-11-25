@@ -10,72 +10,100 @@ CREATE DATABASE IF NOT EXISTS hive_data;
 -- =========================
 USE hive_meta;
 
-CREATE TABLE IF NOT EXISTS inodes (
-  inode_id       BIGINT UNSIGNED NOT NULL PRIMARY KEY AUTO_INCREMENT,
-  iname          VARCHAR(255)    NOT NULL,
-  iuid           INT UNSIGNED,
-  igid           INT UNSIGNED,
-  imode          INT UNSIGNED,
-  c_time         TIMESTAMP NULL,
-  a_time         TIMESTAMP NULL,
-  m_time         TIMESTAMP NULL,
-  b_time         TIMESTAMP NULL,
-  filename       VARCHAR(255),
-  type           CHAR(1),
-  hash_count     SMALLINT UNSIGNED NOT NULL DEFAULT 0,
-  hash_reserved  SMALLINT UNSIGNED NOT NULL DEFAULT 0,
-  UNIQUE KEY u_iname (iname)
+CREATE TABLE IF NOT EXISTS storage_nodes (
+  node_id INT PRIMARY KEY,
+  node_name VARCHAR(100) NOT NULL,
+  node_address VARCHAR(255) NOT NULL,
+  node_uid VARCHAR(128) NOT NULL,
+  node_serial VARCHAR(100) NOT NULL,
+  node_guard_port INT NOT NULL,
+  node_data_port INT NOT NULL,
+  last_heartbeat TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  hive_version INT NOT NULL,
+  hive_patch_level INT NOT NULL,
+  ec_group INT NOT NULL,
+  fenced BOOLEAN NOT NULL DEFAULT 0,
+  last_maintenance TIMESTAMP NULL,
+  maintenance_reason VARCHAR(255) NULL,
+  maintenance_started_at TIMESTAMP NULL,
+  maintenance_ended_at TIMESTAMP NULL,
+  date_added_to_cluster TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  storage_capacity_bytes BIGINT UNSIGNED NOT NULL,
+  storage_used_bytes BIGINT UNSIGNED NOT NULL,
+  storage_reserved_bytes BIGINT UNSIGNED NOT NULL,
+  storage_overhead_bytes BIGINT UNSIGNED NOT NULL,
+  UNIQUE KEY u_node_name (node_name),
+  UNIQUE KEY u_node_address (node_address)
 ) ENGINE=InnoDB;
 
-CREATE TABLE IF NOT EXISTS inode_to_blocks (
-  inode_id       BIGINT UNSIGNED NOT NULL,
-  block_order    INT UNSIGNED    NOT NULL,
-  block_no       BIGINT UNSIGNED NOT NULL,
-  hash_algo      TINYINT UNSIGNED NOT NULL,
-  block_hash     VARBINARY(32)   NOT NULL,
-  block_bck_hash VARBINARY(16)   NULL,
-  PRIMARY KEY (inode_id, block_order),
-  KEY idx_block_hash (hash_algo, block_hash),
-  KEY idx_inode_blockno (inode_id, block_no),
-  CONSTRAINT fk_inode FOREIGN KEY (inode_id)
-    REFERENCES inodes(inode_id) ON DELETE CASCADE
+CREATE TABLE IF NOT EXISTS shard_map (
+  shard_id INT PRIMARY KEY,
+  node_id INT PRIMARY KEY,
+  shard_name VARCHAR(100) NOT NULL,
+  storage_node_id INT NOT NULL,
+  date_added TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  stripes BIGINT UNSIGNED NOT NULL,
+  ec_group INT NOT NULL,
+  stripe_id_low BIGINT UNSIGNED NOT NULL,
+  stripe_id_high BIGINT UNSIGNED NOT NULL,
+  UNIQUE KEY u_shard_name (shard_name),
+  CONSTRAINT fk_shard_node FOREIGN KEY (storage_node_id)
+    REFERENCES storage_nodes(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS host (
   serial               VARCHAR(100) NOT NULL PRIMARY KEY,
-  name                 VARCHAR(100),
   host_id              VARCHAR(50),
+  name                 VARCHAR(100),
+  host_address         VARCHAR(255) NOT NULL,
   os_name              VARCHAR(50),
   os_version           VARCHAR(50),
   create_time          DATETIME,
+  hicom_port     INT NOT NULL,
   security_level       INT,
   root_connect_as      INT,
   def_user_connect_as  INT,
+  quota_bytes        BIGINT UNSIGNED,
+  quota_files        BIGINT UNSIGNED,
+  epoch            BIGINT NOT NULL,
+  fenced           BOOLEAN NOT NULL,
+  last_heartbeat TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  date_added_to_cluster TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   ldap_member          BOOLEAN
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS host_auth (
   id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  serial VARCHAR(255),
   machine_uid VARCHAR(128) NOT NULL UNIQUE,
   name VARCHAR(255),
-  serial VARCHAR(255),
+  pub_key_pem TEXT,
+  issued_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  expires_at DATETIME NOT NULL,
+  revoked_at TIMESTAMP NULL,
+  revoked_by VARCHAR(128) NULL,
+  revocation_reason VARCHAR(255) NULL,
   intended_ip VARBINARY(16) NULL,
   claims JSON,
   status ENUM('pending','approved','revoked') NOT NULL DEFAULT 'pending',
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  approved_at TIMESTAMP NULL,
-  approved_by VARCHAR(128) NULL,
-  epoch            BIGINT NOT NULL,
-  fenced           BOOLEAN NOT NULL,
-  last_heartbeat   TIMESTAMP
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS host_tokens (
   token CHAR(64) PRIMARY KEY,
   machine_uid VARCHAR(128) NOT NULL,
+  issued_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   expires_at DATETIME NOT NULL,
   used BOOLEAN NOT NULL DEFAULT 0,
   used_at DATETIME NULL,
+  approved_at TIMESTAMP NULL,
+  approved_by VARCHAR(128) NULL,
+  expired BOOLEAN NOT NULL DEFAULT 0,
+  expired_at DATETIME NULL,
+  revoked BOOLEAN NOT NULL DEFAULT 0,
+  revoked_at DATETIME NULL,
+  revoked_by VARCHAR(128) NULL,
+  revocation_reason VARCHAR(255) NULL,
   UNIQUE KEY u_machine_token (machine_uid, token),
   CONSTRAINT fk_token_machine FOREIGN KEY (machine_uid)
   REFERENCES host_auth(machine_uid) ON DELETE CASCADE
@@ -147,7 +175,8 @@ CREATE TABLE IF NOT EXISTS volume_root_dentries (
 
 CREATE TABLE IF NOT EXISTS volume_inodes (
   volume_id     BIGINT UNSIGNED NOT NULL,
-  inode         BIGINT UNSIGNED NOT NULL,
+  inode         BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  type          CHAR(1),
   i_msg_flags   INT UNSIGNED NOT NULL,
   i_version     TINYINT UNSIGNED NOT NULL,
   i_flags       TINYINT UNSIGNED NOT NULL,
@@ -178,9 +207,43 @@ CREATE TABLE IF NOT EXISTS volume_inodes (
   updated_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
                 ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (volume_id, inode),
+  KEY u_iname (i_name),
   CONSTRAINT fk_volume_inode FOREIGN KEY (volume_id)
     REFERENCES volume_superblocks(volume_id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
+
+CREATE TABLE volume_xattrs (
+  volume_id   BIGINT UNSIGNED NOT NULL,
+  inode       BIGINT UNSIGNED NOT NULL,
+
+  -- Namespace for separation of "user.", "system.", "security.", "trusted."
+  -- You can either store the raw prefix (e.g. 'user') or an enum-ish SMALLINT.
+  ns          TINYINT UNSIGNED NOT NULL,  -- 0=user, 1=system, 2=security, 3=trusted, etc.
+
+  -- Attribute name WITHOUT the "<ns>." prefix, e.g. "comment" from "user.comment"
+  name        VARBINARY(255) NOT NULL,
+
+  -- The raw value; binary to support arbitrary payloads
+  value       BLOB NOT NULL,
+
+  -- For ordering / debugging / conflict resolution if needed
+  created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                      ON UPDATE CURRENT_TIMESTAMP,
+
+  -- One row per (volume, inode, ns, name)
+  PRIMARY KEY (volume_id, inode, ns, name),
+
+  -- Fast listing of all xattrs for an inode
+  KEY idx_xattr_inode (volume_id, inode),
+
+  CONSTRAINT fk_xattr_inode
+    FOREIGN KEY (volume_id, inode)
+    REFERENCES volume_inodes (volume_id, inode)
+    ON DELETE CASCADE
+) ENGINE=InnoDB
+  COMMENT='Extended attributes for inodes (POSIX-like xattrs)';
+
 
 CREATE TABLE IF NOT EXISTS volume_inode_fingerprints (
   volume_id    BIGINT UNSIGNED NOT NULL,
@@ -208,43 +271,11 @@ CREATE TABLE IF NOT EXISTS volume_block_mappings (
     REFERENCES volume_superblocks(volume_id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
-CREATE TABLE IF NOT EXISTS csr_queue (
-  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
-  machine_uid VARCHAR(128) NOT NULL,
-  token CHAR(64) NOT NULL,
-  csr_pem MEDIUMTEXT NOT NULL,
-  submitted_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  status ENUM('received','approved','rejected','issued') NOT NULL DEFAULT 'received',
-  status_msg VARCHAR(255) NULL,
-  cert_pem MEDIUMTEXT NULL,
-  ca_chain_pem MEDIUMTEXT NULL,
-  cert_serial VARCHAR(128) NULL,
-  not_before DATETIME NULL,
-  not_after DATETIME NULL,
-  UNIQUE KEY u_machine_open (machine_uid, status),
-  CONSTRAINT fk_csr_machine FOREIGN KEY (machine_uid)
-    REFERENCES host_auth(machine_uid) ON DELETE CASCADE
-) ENGINE=InnoDB;
-
-CREATE TABLE IF NOT EXISTS machine_identities (
-  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
-  machine_uid VARCHAR(128) NOT NULL,
-  cert_serial VARCHAR(128) NOT NULL,
-  subject_dn TEXT NOT NULL,
-  not_before DATETIME NOT NULL,
-  not_after DATETIME NOT NULL,
-  revoked BOOLEAN NOT NULL DEFAULT 0,
-  revoked_at DATETIME NULL,
-  UNIQUE KEY u_cert (cert_serial),
-  KEY k_machine (machine_uid),
-  CONSTRAINT fk_ident_machine FOREIGN KEY (machine_uid)
-    REFERENCES host_auth(machine_uid) ON DELETE CASCADE
-) ENGINE=InnoDB;
-
--- Mapping: content hash -> 6 data + 3 parity stripe IDs
+-- Mapping: content hash -> 4 data + 2 parity stripe IDs
 CREATE TABLE IF NOT EXISTS hash_to_estripes (
   hash_algo      TINYINT UNSIGNED NOT NULL,   -- e.g., 1 = SHA-256
   block_hash     VARBINARY(32) NOT NULL,      -- 32 bytes for SHA-256
+  ref_count      BIGINT UNSIGNED NOT NULL DEFAULT 1,
   estripe_1_id   BIGINT UNSIGNED NOT NULL,
   estripe_2_id   BIGINT UNSIGNED NOT NULL,
   estripe_3_id   BIGINT UNSIGNED NOT NULL,
@@ -254,8 +285,19 @@ CREATE TABLE IF NOT EXISTS hash_to_estripes (
   block_bck_hash VARBINARY(32) NULL,          -- or VARBINARY(32) if SHA-256
   PRIMARY KEY (hash_algo, block_hash),
   KEY idx_hash (hash_algo, block_hash)
-  -- (Optional) add individual indexes on estripe_*_id if you need reverse lookups
+  -- (Optional) I can add individual indexes on estripe_*_id if you need reverse lookups
 ) ENGINE=InnoDB;
+
+-- Mapping: stripe to its fragment locations (shard and node)
+CREATE TABLE estripe_locations (
+  estripe_id      BIGINT UNSIGNED NOT NULL,
+  shard_id        INT NOT NULL,
+  storage_node_id INT UNSIGNED NOT NULL,
+  block_offset    BIGINT UNSIGNED NOT NULL,
+  PRIMARY KEY (estripe_id),
+  FOREIGN KEY (e_shard_id) REFERENCES shard_map(shard_id)
+  FOREIGN KEY (storage_node_id) REFERENCES storage_nodes(node_id)
+);
 
 
 -- =========================
@@ -388,44 +430,6 @@ WHERE d.de_parent IS NOT NULL;
 -- =========================
 USE hive_meta;
 DELIMITER //
-
-CREATE PROCEDURE sp_bootstrap_begin(
-  IN p_machine_uid VARCHAR(128),
-  IN p_token CHAR(64),
-  IN p_csr_pem MEDIUMTEXT,
-  IN p_claims JSON
-)
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM hive_meta.host_tokens
-    WHERE token = p_token
-      AND machine_uid = p_machine_uid
-      AND used = 0
-      AND expires_at > NOW()
-  ) THEN
-    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='Invalid or expired token';
-  END IF;
-
-  INSERT INTO hive_meta.host_auth (machine_uid, status, claims)
-    VALUES (p_machine_uid, 'pending', p_claims)
-  ON DUPLICATE KEY UPDATE claims = COALESCE(p_claims, claims);
-
-  INSERT INTO hive_meta.csr_queue (machine_uid, token, csr_pem, status)
-    VALUES (p_machine_uid, p_token, p_csr_pem, 'received');
-
-  UPDATE hive_meta.host_tokens
-     SET used = 1, used_at = NOW()
-   WHERE token = p_token AND machine_uid = p_machine_uid;
-END//
-
-CREATE PROCEDURE sp_bootstrap_poll(IN p_machine_uid VARCHAR(128))
-BEGIN
-  SELECT id, status, status_msg, cert_pem, ca_chain_pem, cert_serial, not_before, not_after
-    FROM hive_meta.csr_queue
-   WHERE machine_uid = p_machine_uid
-   ORDER BY id DESC
-   LIMIT 1;
-END//
 
 CREATE PROCEDURE sp_bootstrap_finish(IN p_machine_uid VARCHAR(128))
 BEGIN
