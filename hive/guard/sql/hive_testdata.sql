@@ -56,17 +56,6 @@ INSERT INTO hive_meta.volume_inodes (
 DELETE FROM hive_meta.volume_inode_fingerprints
  WHERE volume_id = @volume_id AND inode = @root_inode;
 
--- ----- meta: convenience inodes row -----
-INSERT INTO hive_meta.inodes (
-  iname, iuid, igid, imode, c_time, a_time, m_time, b_time,
-  filename, type, hash_count, hash_reserved
-) VALUES (
-  CONCAT(@cache_device, ':root'),
-  0, 0, @root_mode,
-  FROM_UNIXTIME(@now), FROM_UNIXTIME(@now), FROM_UNIXTIME(@now), FROM_UNIXTIME(@now),
-  '/', 'd', 0, 0
-) ON DUPLICATE KEY UPDATE m_time = VALUES(m_time);
-
 -- ----- data: one example block encoded as 4+2 EC stripes -----
 -- For testing, we seed six zeroed stripes (k=4, m=2). Parity of all-zero data is also zero,
 -- which keeps the fragments trivially decodable.
