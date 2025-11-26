@@ -18,6 +18,7 @@
 
 #include "hive_guard.h"
 #include "hive_guard_sql.h"
+#include "hive_guard_raft.h"
 
 
 static ec_ctx_t g_ec = { .desc = -1, .initialized = 0 };
@@ -237,5 +238,22 @@ int hicomm_erasure_coding_rebuild_from_partial(uint8_t **encoded_chunks, size_t 
     *data_len = (size_t)decoded_len;
 
     liberasurecode_decode_cleanup(g_ec.desc, decoded);
+    return 0;
+}
+
+int hifs_put_block(uint64_t volume_id,
+                   uint64_t block_no,
+                   const void *data,
+                   size_t len,
+                   enum hifs_hash_algorithm algo)
+{
+    /* For now, guard writes pass through to the existing DB-backed store with
+     * leader gating. TODO: when Raft is fully wired, route through submit. */
+    if (!hg_guard_local_can_write())
+        return -EAGAIN;
+
+    if (!hifs_volume_block_store(volume_id, block_no, data, (uint32_t)len))
+        return -EIO;
+
     return 0;
 }
