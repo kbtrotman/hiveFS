@@ -21,6 +21,7 @@
 #include "hive_guard.h"
 #include "hive_guard_sql.h"
 #include "../../hifs_shared_defs.h"
+#include <errno.h>
 
 
 /* -------------------------------------------------------------------------- */
@@ -802,9 +803,11 @@ static bool handle_volume_block_put(Client *c, const JVal *root)
 		return send_error_json(c->fd, "bad_request", "block too large");
 	}
 
-	bool ok = hifs_volume_block_store(volume_id, block_no, blob, (uint32_t)blob_len);
+	int rc = hifs_put_block(volume_id, block_no, blob, blob_len, HIFS_HASH_ALGO_SHA256);
 	free(blob);
-	if (!ok)
+	if (rc == -EAGAIN)
+		return send_error_json(c->fd, "not_leader", "forward to leader");
+	if (rc != 0)
 		return send_error_json(c->fd, "db_error", "unable to store block");
 	return send_simple_ok(c->fd, "volume_block_put");
 }
