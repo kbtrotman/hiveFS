@@ -7,6 +7,8 @@
  *
  */
 
+#pragma once
+
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -60,3 +62,24 @@ int hicomm_erasure_coding_decode(uint8_t **encoded_chunks, size_t chunk_size,
 int hicomm_erasure_coding_rebuild_from_partial(uint8_t **encoded_chunks, size_t chunk_size,
                                  size_t num_data_chunks, size_t num_parity_chunks,
                                  uint8_t *decoded_data, size_t *data_len);
+
+struct hifs_ec_stripe_set {
+	size_t chunk_count;
+	size_t chunk_len;
+	uint8_t **chunks;
+	enum hifs_hash_algorithm hash_algo;
+	uint8_t hash[HIFS_BLOCK_HASH_SIZE];
+};
+
+bool hifs_volume_block_ec_encode(const uint8_t *buf, uint32_t len,
+				 enum hifs_hash_algorithm algo,
+				 struct hifs_ec_stripe_set *out);
+void hifs_volume_block_ec_free(struct hifs_ec_stripe_set *ec);
+bool hifs_volume_block_store_encoded(uint64_t volume_id, uint64_t block_no,
+				     const struct hifs_ec_stripe_set *ec);
+int hifs_put_block_stripes(uint64_t volume_id, uint64_t block_no,
+			   const struct hifs_ec_stripe_set *ec,
+			   enum hifs_hash_algorithm algo);
+int hifs_put_block(uint64_t volume_id, uint64_t block_no,
+		   const void *data, size_t len,
+		   enum hifs_hash_algorithm algo);

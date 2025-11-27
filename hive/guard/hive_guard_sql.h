@@ -8,6 +8,8 @@
  */
 #pragma once
 
+#include "hive_guard.h"
+
 /***********************
  * Database  Definitions
  ***********************/
@@ -52,7 +54,7 @@
 
 #define SQL_HOST_UPSERT \
 	"INSERT INTO host (serial, name, host_id, os_name, os_version, create_time) " \
-	"VALUES ('%s', '%s', %s, '%s', '%s', NOW()) " \
+	"VALUES ('%s', '%s', %ld, '%s', '%s', NOW()) " \
 	"ON DUPLICATE KEY UPDATE name=VALUES(name), host_id=VALUES(host_id), " \
 	"os_name=VALUES(os_name), os_version=VALUES(os_version)"
 
@@ -243,6 +245,12 @@ bool hifs_volume_block_load(uint64_t volume_id, uint64_t block_no,
                             uint8_t *buf, uint32_t *len);
 bool hifs_volume_block_store(uint64_t volume_id, uint64_t block_no,
                              const uint8_t *buf, uint32_t len);
+bool hifs_volume_block_store_encoded(uint64_t volume_id, uint64_t block_no,
+                                     const struct hifs_ec_stripe_set *ec);
+bool hifs_volume_block_ec_encode(const uint8_t *buf, uint32_t len,
+				 enum hifs_hash_algorithm algo,
+				 struct hifs_ec_stripe_set *out);
+void hifs_volume_block_ec_free(struct hifs_ec_stripe_set *ec);
 
 /* SQL Connect */
 

@@ -28,6 +28,7 @@
 #include <raft/uv.h>   // libuv-based I/O driver
 
 #include "../../hicomm/hi_command.h"
+#include "../../hifs_shared_defs.h"
 
 
 /* hive_guard_raft.h */
@@ -56,20 +57,49 @@ struct StripeId {
     uint64_t local_estripe_id; /* estripe_id in that node's hive_data.ecblocks */
 };
 
+enum hg_op_type {
+    HG_OP_PUT_BLOCK = 1,
+    HG_OP_PUT_INODE = 2,
+    HG_OP_PUT_DIRENT = 3,
+    /* later: other read/write routines, etc. */
+};
+
 /* Raft metadata command for a deduped/EC block */
 struct RaftPutBlock {
-    uint8_t   op_type;     /* OP_PUT_BLOCK */
-    uint8_t   hash_algo;   /* 1 = SHA-256 */
-    uint16_t  reserved16;  /* padding / future flags */
-    uint32_t  reserved32;  /* padding / future use */
+    uint8_t   hash_algo;   /* HIFS_HASH_ALGO_* */
+    uint8_t   reserved8[3];
+    uint64_t  volume_id;
+    uint64_t  block_no;
+    uint64_t  version;
+    uint8_t   hash[32];             /* SHA-256 of block */
+    struct StripeId ec_stripes[6];  /* 4 data + 2 parity or whatever profile */
+};
 
-    uint64_t  volume_id;   /* which volume this block belongs to */
-    uint64_t  block_no;    /* logical block number within the volume */
-    uint64_t  version;     /* optional version of this mapping */
+struct RaftPutInode {
+    uint64_t  volume_id;
+    uint64_t  inode_id;
+    uint64_t  version;
+    struct hifs_inode_wire inode;
+    uint16_t  fp_index;             /* which fingerprint slot */
+    uint16_t  reserved;
+};
 
-    uint8_t   hash[32];    /* SHA-256 of 4K block */
+struct RaftPutDirent {
+    uint64_t  volume_id;
+    uint64_t  dir_id;
+    uint64_t  version;
+    struct hifs_dir_entry dirent;
+    uint16_t  reserved;
+};
 
-    struct StripeId ec_stripes[6];  /* 4 data + 2 parity stripes */
+struct RaftCmd {
+    uint8_t op_type;
+    uint8_t reserved[3];
+    union {
+        struct RaftPutBlock block;   // current fields
+        struct RaftPutInode inode;   // e.g., hifs_inode_wire + fp_index info
+        struct RaftPutDirent dirent; // hifs_dir_entry
+    } u;
 };
 
 
