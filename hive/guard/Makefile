@@ -31,7 +31,7 @@ UV_LIB := /usr/lib
 #PROTO_HDRS := $(PROTO_SRCS:.proto=.pb.h)
 
 # ---- Sources ----
-SRCS_C  := hive_guard.c hive_guard_tcp_coms.c hive_guard_sql.c hive_guard_erasure_coding.c hive_guard_raft.c
+SRCS_C  := hive_guard.c hive_guard_tcp.c hive_guard_sql.c hive_guard_erasure_code.c hive_guard_raft.c
 #SRCS_CC := hive_guard_raft_rpc.cc \
 #           hive_guard_raft_statemachine.cc \
 #           hive_guard_raft.cc \

@@ -39,7 +39,7 @@ static int                  g_should_stop = 0;
 /* Convert binary to hex string; out must be at least 2*len + 1 bytes. */
 /* This helper function seems tyo be going everywhere since we sending */
 /* and recieving in a lot of places.  */
-static void bytes_to_hex(const uint8_t *in, size_t len, char *out)
+static void __attribute__((unused)) bytes_to_hex(const uint8_t *in, size_t len, char *out)
 {
     static const char hex_chars[] = "0123456789abcdef";
     for (size_t i = 0; i < len; ++i) {
@@ -146,9 +146,9 @@ bool hg_guard_local_can_write(void)
     return leader;
 }
 
-/* Serialize RaftPutBlock into a heap-allocated uv_buf_t.
- * Caller is responsible for free(buf->base) after submit/commit.
- */
+#if 0
+/* The serialization/commit helpers below are sketches for the future Raft
+ * integration. They are kept here for reference. */
 static int raft_put_block_serialize(const struct RaftPutBlock *cmd,
                                     uv_buf_t *out_buf)
 {
@@ -156,30 +156,51 @@ static int raft_put_block_serialize(const struct RaftPutBlock *cmd,
         return -1;
     }
 
-    out_buf->len = sizeof(struct RaftPutBlock);
+    struct RaftCmd rcmd = {0};
+    rcmd.op_type = HG_OP_PUT_BLOCK;
+    rcmd.u.block = *cmd;
+
+    out_buf->len = sizeof(struct RaftCmd);
     out_buf->base = (char *)malloc(out_buf->len);
     if (!out_buf->base) {
         return -1;
     }
 
-    memcpy(out_buf->base, cmd, out_buf->len);
+    memcpy(out_buf->base, &rcmd, out_buf->len);
     return 0;
 }
 
-/* Deserialize from uv_buf_t into a RaftPutBlock.
- * Returns 0 on success, -1 on size mismatch.
- */
-static int raft_put_block_deserialize(struct RaftPutBlock *cmd,
-                                      const uv_buf_t *buf)
+static int raft_put_inode_serialize(const struct RaftPutInode *cmd,
+                                    uv_buf_t *out_buf)
+{
+    if (!cmd || !out_buf) {
+        return -1;
+    }
+
+    struct RaftCmd rcmd = {0};
+    rcmd.op_type   = HG_OP_PUT_INODE;
+    rcmd.u.inode   = *cmd;
+
+    out_buf->len = sizeof(struct RaftCmd);
+    out_buf->base = (char *)malloc(out_buf->len);
+    if (!out_buf->base) {
+        return -1;
+    }
+
+    memcpy(out_buf->base, &rcmd, out_buf->len);
+    return 0;
+}
+
+static int raft_put_deserialize(struct RaftCmd *cmd,
+                                const uv_buf_t *buf)
 {
     if (!cmd || !buf) {
         return -1;
     }
-    if (buf->len != sizeof(struct RaftPutBlock)) {
-        /* Version mismatch / corrupted entry */
+    if (buf->len != sizeof(struct RaftCmd)) {
         return -1;
     }
-    memcpy(cmd, buf->base, sizeof(struct RaftPutBlock));
+    memcpy(cmd, buf->base, sizeof(struct RaftCmd));
     return 0;
 }
 
@@ -193,72 +214,95 @@ static int commitCb(struct uv_raft *raft,
         return 0;
     }
 
-    struct RaftPutBlock cmd;
-    if (raft_put_block_deserialize(&cmd, buf) != 0) {
-        /* Unknown or corrupt entry; ignore */
+    struct RaftCmd cmd;
+    if (raft_put_deserialize(&cmd, buf) != 0)
+        return 0;
+
+    switch (cmd.op_type) {
+#if 0
+    case HG_OP_PUT_BLOCK: {
+        const struct RaftPutBlock *b = &cmd.u.block;
+        struct hifs_ec_stripe_set ec = {
+            .chunk_count = HIFS_EC_K + HIFS_EC_M,
+            .chunk_len   = b->stripe_len,
+            .hash_algo   = b->hash_algo,
+        };
+
+        memcpy(ec.hash, b->hash, sizeof(ec.hash));
+        ec.chunks = calloc(ec.chunk_count, sizeof(uint8_t *));
+        if (!ec.chunks)
+            return -ENOMEM;
+        for (size_t i = 0; i < ec.chunk_count; ++i) {
+            ec.chunks[i] = malloc(ec.chunk_len);
+            if (!ec.chunks[i]) {
+                hifs_volume_block_ec_free(&ec);
+                return -ENOMEM;
+            }
+            memcpy(ec.chunks[i], b->stripes[i], ec.chunk_len);
+        }
+
+        int rc = hifs_put_block_stripes(b->volume_id, b->block_no, &ec, b->hash_algo);
+        hifs_volume_block_ec_free(&ec);
+        return rc;
+    }
+    case HG_OP_PUT_INODE: {
+        const struct RaftPutInode *pi = &cmd.u.inode;
+        if (!hifs_volume_inode_store(pi->volume_id, &pi->inode))
+            return -EIO;
+        if (!hifs_volume_inode_fp_replace(pi->volume_id,
+                                          pi->inode_id,
+                                          pi->fp_index,
+                                          pi->fp_block_no,
+                                          pi->fp_hash_algo,
+                                          pi->fp_hash_hex))
+            return -EIO;
         return 0;
     }
-
-    if (cmd.op_type != OP_PUT_BLOCK) {
-        return 0;  /* not our concern */
+#endif
+    case HG_OP_PUT_BLOCK: {
+        /* TODO: once WAL stripes are available, apply them here. */
+        (void)cmd;
+        return 0;
     }
-
-    /* ---- 1) Hex encode the hash ---- */
-    char hash_hex[65];  /* 32 bytes -> 64 hex chars + NUL */
-    bytes_to_hex(cmd.hash, 32, hash_hex);
-
-    /* ---- 2) Update hash_to_estripes (hash -> stripes, ref_count += 1) ---- */
-    /* We expect 6 stripes in cmd.ec_stripes[0..5]. */
-    char sql1[1024];
-
-    /* We pass ref_count=1 so UPSERT will do: ref_count = ref_count + 1. */
-    unsigned long long ref_increment = 1ULL;
-
-    snprintf(sql1, sizeof(sql1),
-             SQL_HASH_TO_ESTRIPES_UPSERT,
-             (unsigned)cmd.hash_algo,
-             hash_hex,
-             ref_increment,
-             (unsigned long long)cmd.ec_stripes[0].local_estripe_id,
-             (unsigned long long)cmd.ec_stripes[1].local_estripe_id,
-             (unsigned long long)cmd.ec_stripes[2].local_estripe_id,
-             (unsigned long long)cmd.ec_stripes[3].local_estripe_id,
-             (unsigned long long)cmd.ec_stripes[4].local_estripe_id,
-             (unsigned long long)cmd.ec_stripes[5].local_estripe_id,
-             (unsigned long long)0ULL  /* placeholder or spare stripe if you adapt schema */
-    );
-
-    if (hg_sql_exec(sql1) != 0) {
-        fprintf(stderr, "commitCb: SQL_HASH_TO_ESTRIPES_UPSERT failed: %s\n", sql1);
-        /* return error? Raft typically expects 0, but can log and keep going. */
+    case HG_OP_PUT_INODE: {
+        /* TODO: add inode + fingerprint payload handling */
+        return 0;
     }
-
-    /* ---- 3) Update volume_block_mappings (volume_id, block_no -> hash) here ---- */
-    char sql2[512];
-
-    snprintf(sql2, sizeof(sql2),
-             SQL_VOLUME_BLOCK_MAP_UPSERT,
-             (unsigned long long)cmd.volume_id,
-             (unsigned long long)cmd.block_no,
-             (unsigned)cmd.hash_algo,
-             hash_hex);
-
-    if (hg_sql_exec(sql2) != 0) {
-        fprintf(stderr, "commitCb: SQL_VOLUME_BLOCK_MAP_UPSERT failed: %s\n", sql2);
+    default:
+        break;
     }
-    /* ---- 3) Update volume_block_mappings (volume_id, block_no -> hash) here ---- */
-
-
-    /* ----- 4) Update volume_inode_fingerprints here. Raft would need to carry inode + fp_index / block_no ----- */
-    /* Need to add these to raft if we want to do this here.  Each RaftPutBlock should have
-       command that also carries inode + fp_index / block_no, e.g.:
-
-       hifs_meta_upsert_inode_fingerprint(cmd.volume_id, cmd.inode, cmd.fp_index,
-                                          cmd.block_no, cmd.hash_algo, cmd.hash);
-
-       using a SQL_VOLUME_INODE_FP_REPLACE macro.
-    */
-
     return 0;
 }
+#endif
 
+int hifs_put_block_stripes(uint64_t volume_id,
+			   uint64_t block_no,
+			   const struct hifs_ec_stripe_set *ec,
+			   enum hifs_hash_algorithm algo)
+{
+	(void)algo;
+	if (!hg_guard_local_can_write())
+		return -EAGAIN;
+
+	if (!hifs_volume_block_store_encoded(volume_id, block_no, ec))
+		return -EIO;
+
+	return 0;
+}
+
+int hifs_put_block(uint64_t volume_id,
+		   uint64_t block_no,
+		   const void *data,
+		   size_t len,
+		   enum hifs_hash_algorithm algo)
+{
+	struct hifs_ec_stripe_set ec = {0};
+	int rc;
+
+	if (!hifs_volume_block_ec_encode(data, (uint32_t)len, algo, &ec))
+		return -EIO;
+
+	rc = hifs_put_block_stripes(volume_id, block_no, &ec, algo);
+	hifs_volume_block_ec_free(&ec);
+	return rc;
+}
