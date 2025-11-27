@@ -131,48 +131,45 @@ CREATE TABLE IF NOT EXISTS volume_superblocks (
                          ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
 
--- NEW: dentry_id surrogate PK + uniqueness on (volume_id, de_parent, de_name)
+-- Directory entries per volume (logical namespace)
 CREATE TABLE IF NOT EXISTS volume_dentries (
-  dentry_id   BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  dentry_id   BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
   volume_id   BIGINT UNSIGNED NOT NULL,
-  de_parent   BIGINT UNSIGNED NOT NULL,  -- parent inode number
-  de_inode    BIGINT UNSIGNED NOT NULL,  -- this entry's inode number
-  de_epoch    INT UNSIGNED NOT NULL,
-  de_type     INT UNSIGNED NOT NULL,
-  de_name_len INT UNSIGNED NOT NULL,
-  de_name     VARBINARY(256) NOT NULL,
+  de_parent   BIGINT UNSIGNED NOT NULL,  -- parent inode (directory)
+  de_inode    BIGINT UNSIGNED NOT NULL,  -- target inode
+  de_name_len SMALLINT UNSIGNED NOT NULL,
+  de_name     VARBINARY(255) NOT NULL,
   updated_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-              ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (dentry_id),
-  UNIQUE KEY uk_vol_parent_name (volume_id, de_parent, de_name),
-  KEY idx_volume_inode (volume_id, de_inode),   -- reverse lookup by inode
-  -- idx_volume_parent is redundant with the unique key’s left prefix,
-  -- so we omit it to save space/write amplification.
+                         ON UPDATE CURRENT_TIMESTAMP,
+  KEY idx_volume_parent (volume_id, de_parent),
+  KEY idx_volume_inode  (volume_id, de_inode),
   CONSTRAINT fk_volume_dentry FOREIGN KEY (volume_id)
     REFERENCES volume_superblocks(volume_id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
+-- Root dentry per volume (mount point inside the volume)
 CREATE TABLE IF NOT EXISTS volume_root_dentries (
-  volume_id             BIGINT UNSIGNED NOT NULL PRIMARY KEY,
-  rd_inode              BIGINT UNSIGNED NOT NULL,
-  rd_mode               INT UNSIGNED NOT NULL,
-  rd_uid                INT UNSIGNED NOT NULL,
-  rd_gid                INT UNSIGNED NOT NULL,
-  rd_flags              INT UNSIGNED NOT NULL,
-  rd_size               BIGINT UNSIGNED NOT NULL,
-  rd_blocks             BIGINT UNSIGNED NOT NULL,
-  rd_atime              INT UNSIGNED NOT NULL,
-  rd_mtime              INT UNSIGNED NOT NULL,
-  rd_ctime              INT UNSIGNED NOT NULL,
-  rd_links              INT UNSIGNED NOT NULL,
-  rd_name_len           INT UNSIGNED NOT NULL,
-  rd_name               VARBINARY(256) NOT NULL,
-  updated_at            TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+  volume_id   BIGINT UNSIGNED NOT NULL,
+  rd_inode    BIGINT UNSIGNED NOT NULL,
+  rd_uid      INT UNSIGNED NOT NULL,
+  rd_gid      INT UNSIGNED NOT NULL,
+  rd_flags    INT UNSIGNED NOT NULL,
+  rd_size     BIGINT UNSIGNED NOT NULL,
+  rd_blocks   BIGINT UNSIGNED NOT NULL,
+  rd_atime    INT UNSIGNED NOT NULL,
+  rd_mtime    INT UNSIGNED NOT NULL,
+  rd_ctime    INT UNSIGNED NOT NULL,
+  rd_links    INT UNSIGNED NOT NULL,
+  rd_name_len INT UNSIGNED NOT NULL,
+  rd_name     VARBINARY(256) NOT NULL,
+  updated_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
                          ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (volume_id),
   CONSTRAINT fk_volume_root FOREIGN KEY (volume_id)
     REFERENCES volume_superblocks(volume_id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
+-- Inode metadata per volume (used for stats and attributes)
 CREATE TABLE IF NOT EXISTS volume_inodes (
   volume_id     BIGINT UNSIGNED NOT NULL,
   inode         BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -188,16 +185,7 @@ CREATE TABLE IF NOT EXISTS volume_inodes (
   i_atime       INT UNSIGNED NOT NULL,
   i_mtime       INT UNSIGNED NOT NULL,
   i_ctime       INT UNSIGNED NOT NULL,
-  i_size        INT UNSIGNED NOT NULL,
-  i_name        VARBINARY(256) NOT NULL,
-  i_addrb0      INT UNSIGNED NOT NULL,
-  i_addrb1      INT UNSIGNED NOT NULL,
-  i_addrb2      INT UNSIGNED NOT NULL,
-  i_addrb3      INT UNSIGNED NOT NULL,
-  i_addre0      INT UNSIGNED NOT NULL,
-  i_addre1      INT UNSIGNED NOT NULL,
-  i_addre2      INT UNSIGNED NOT NULL,
-  i_addre3      INT UNSIGNED NOT NULL,
+  i_size        BIGINT UNSIGNED NOT NULL,
   i_blocks      INT UNSIGNED NOT NULL,
   i_bytes       INT UNSIGNED NOT NULL,
   i_links       TINYINT UNSIGNED NOT NULL,
@@ -205,114 +193,38 @@ CREATE TABLE IF NOT EXISTS volume_inodes (
   i_hash_reserved SMALLINT UNSIGNED NOT NULL,
   epoch         BIGINT UNSIGNED NOT NULL,
   updated_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-                ON UPDATE CURRENT_TIMESTAMP,
+                         ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (volume_id, inode),
-  KEY u_iname (i_name),
+  KEY idx_name (i_ino),
   CONSTRAINT fk_volume_inode FOREIGN KEY (volume_id)
     REFERENCES volume_superblocks(volume_id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
-CREATE TABLE volume_xattrs (
+-- Extended attributes per inode (optional GUI exposure)
+CREATE TABLE IF NOT EXISTS volume_xattrs (
   volume_id   BIGINT UNSIGNED NOT NULL,
   inode       BIGINT UNSIGNED NOT NULL,
-
-  -- Namespace for separation of "user.", "system.", "security.", "trusted."
-  -- You can either store the raw prefix (e.g. 'user') or an enum-ish SMALLINT.
-  ns          TINYINT UNSIGNED NOT NULL,  -- 0=user, 1=system, 2=security, 3=trusted, etc.
-
-  -- Attribute name WITHOUT the "<ns>." prefix, e.g. "comment" from "user.comment"
+  ns          TINYINT UNSIGNED NOT NULL,  -- namespace (user/system/etc)
   name        VARBINARY(255) NOT NULL,
-
-  -- The raw value; binary to support arbitrary payloads
   value       BLOB NOT NULL,
-
-  -- For ordering / debugging / conflict resolution if needed
-  created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-                      ON UPDATE CURRENT_TIMESTAMP,
-
-  -- One row per (volume, inode, ns, name)
+                         ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (volume_id, inode, ns, name),
-
-  -- Fast listing of all xattrs for an inode
-  KEY idx_xattr_inode (volume_id, inode),
-
-  CONSTRAINT fk_xattr_inode
-    FOREIGN KEY (volume_id, inode)
-    REFERENCES volume_inodes (volume_id, inode)
-    ON DELETE CASCADE
-) ENGINE=InnoDB
-  COMMENT='Extended attributes for inodes (POSIX-like xattrs)';
-
-
-CREATE TABLE IF NOT EXISTS volume_inode_fingerprints (
-  volume_id    BIGINT UNSIGNED NOT NULL,
-  inode        BIGINT UNSIGNED NOT NULL,
-  fp_index     INT UNSIGNED NOT NULL,
-  block_no     INT UNSIGNED NOT NULL,
-  hash_algo    TINYINT UNSIGNED NOT NULL,
-  block_hash   VARBINARY(32) NOT NULL,
-  PRIMARY KEY (volume_id, inode, fp_index),
-  CONSTRAINT fk_volume_inode_fp FOREIGN KEY (volume_id, inode)
+  CONSTRAINT fk_xattr_inode FOREIGN KEY (volume_id, inode)
     REFERENCES volume_inodes(volume_id, inode) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
-CREATE TABLE IF NOT EXISTS volume_block_mappings (
-  volume_id    BIGINT UNSIGNED NOT NULL,
-  block_no     BIGINT UNSIGNED NOT NULL,
-  hash_algo    TINYINT UNSIGNED NOT NULL,
-  block_hash   VARBINARY(32) NOT NULL,
-  block_bck_hash VARBINARY(32) NULL,
+CREATE TABLE IF NOT EXISTS volume_stats (
+  volume_id    BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+  file_count   BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  dir_count    BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  total_bytes  BIGINT UNSIGNED NOT NULL DEFAULT 0,
   updated_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-               ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (volume_id, block_no),
-  KEY idx_block_hash (hash_algo, block_hash),
-  CONSTRAINT fk_volume_block FOREIGN KEY (volume_id)
+                         ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_volume_stats FOREIGN KEY (volume_id)
     REFERENCES volume_superblocks(volume_id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
--- Mapping: content hash -> 4 data + 2 parity stripe IDs
-CREATE TABLE IF NOT EXISTS hash_to_estripes (
-  hash_algo      TINYINT UNSIGNED NOT NULL,   -- e.g., 1 = SHA-256
-  block_hash     VARBINARY(32) NOT NULL,      -- 32 bytes for SHA-256
-  ref_count      BIGINT UNSIGNED NOT NULL DEFAULT 1,
-  estripe_1_id   BIGINT UNSIGNED NOT NULL,
-  estripe_2_id   BIGINT UNSIGNED NOT NULL,
-  estripe_3_id   BIGINT UNSIGNED NOT NULL,
-  estripe_4_id   BIGINT UNSIGNED NOT NULL,
-  estripe_p1_id  BIGINT UNSIGNED NOT NULL,
-  estripe_p2_id  BIGINT UNSIGNED NOT NULL,
-  block_bck_hash VARBINARY(32) NULL,          -- or VARBINARY(32) if SHA-256
-  PRIMARY KEY (hash_algo, block_hash),
-  KEY idx_hash (hash_algo, block_hash)
-  -- (Optional) I can add individual indexes on estripe_*_id if you need reverse lookups
-) ENGINE=InnoDB;
-
--- Mapping: stripe to its fragment locations (shard and node)
-CREATE TABLE estripe_locations (
-  estripe_id      BIGINT UNSIGNED NOT NULL,
-  shard_id        INT NOT NULL,
-  storage_node_id INT UNSIGNED NOT NULL,
-  block_offset    BIGINT UNSIGNED NOT NULL,
-  PRIMARY KEY (estripe_id),
-  FOREIGN KEY (shard_id) REFERENCES shard_map(shard_id),
-  FOREIGN KEY (storage_node_id) REFERENCES storage_nodes(node_id)
-);
-
-
--- =========================
--- DATA SCHEMA (hive_data)
--- =========================
-USE hive_data;
-
--- Stripe payloads (one row per fragment)
-CREATE TABLE IF NOT EXISTS ecblocks (
-  estripe_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,  -- generate this id then push back in code
-  estripe_version BIGINT UNSIGNED NOT NULL,
-  ec_block   BLOB NOT NULL,
-  PRIMARY KEY (estripe_id)
-) ENGINE=ROCKSDB
-  COMMENT='rocksdb_cf=block_data';
 
 -- =========================
 -- API SCHEMA (hive_api)

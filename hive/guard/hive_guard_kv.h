@@ -8,3 +8,66 @@
  */
 
  
+#ifndef HIVE_GUARD_KV_H
+#define HIVE_GUARD_KV_H
+
+#include <stdint.h>
+#include <stddef.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+
+
+/* structs, in C types (Rocks is inherantly C++, but has C interface.) */
+
+struct Estripes {
+    uint64_t stripe_id;
+    uint8_t storage_node_id;
+    uint64_t version_epoch;
+    uint64_t ec_stripe;
+};
+struct H2SEntry {
+    uint64_t ref_count;
+    uint64_t estripe_ids[6];
+    uint8_t  has_backup_hash;
+    uint8_t  reserved[7];
+    uint8_t  block_bck_hash[32];
+};
+
+struct VbEntry {
+    uint8_t  hash_algo;
+    uint8_t  reserved[7];
+    uint8_t  block_hash[32];
+    uint8_t  block_bck_hash[32];
+};
+
+struct VifEntry {
+    uint64_t block_no;
+};
+
+struct EstripeLoc {
+    uint32_t shard_id;
+    uint32_t storage_node_id;
+    uint64_t block_offset;
+};
+
+/*  operations  */
+
+int hg_kv_init(const char *path);
+void hg_kv_shutdown(void);
+
+int hg_kv_put_h2s(uint8_t hash_algo,
+                  const uint8_t hash[32],
+                  const struct H2SEntry *e);
+
+int hg_kv_get_h2s(uint8_t hash_algo,
+                  const uint8_t hash[32],
+                  struct H2SEntry *out);  /* returns 0 on success, <0 on error */
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* HIVE_GUARD_KV_H */
