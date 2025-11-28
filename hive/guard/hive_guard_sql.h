@@ -201,7 +201,7 @@
   "  estripe_4_id = VALUES(estripe_4_id), " \
   "  estripe_p1_id = VALUES(estripe_p1_id), " \
   "  estripe_p2_id = VALUES(estripe_p2_id)"
-  
+
 /* Insert a single EC stripe payload as binary, with version */
 #define SQL_ECBLOCKS_INSERT_HEX \
   "INSERT INTO hive_data.ecblocks (estripe_version, ec_block) " \
@@ -210,6 +210,12 @@
 /* Lookup the 6 stripe ids by binary block hash, SELECT the raw BLOB */
 #define SQL_ECBLOCK_SELECT \
   "SELECT ec_block FROM hive_data.ecblocks WHERE estripe_id=%llu"
+
+
+/* The great news here is we removed a LOT of slow SQL by moving Rocks to a C-Library form rather than
+ * controlled by MariaDB. And the cost was only a little bit of code in hive_guard_kv. (though knowing
+ * me it may bloat over time-I'm already wondering what other features I can add to the KV.) 
+ * */
 
 
 /* Prototypes */

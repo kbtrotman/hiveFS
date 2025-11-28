@@ -16,6 +16,8 @@
 
 #include "hive_guard_raft.h"
 #include "hive_guard.h"
+#include "hive_guard_sn_tcp.h"
+#include "hive_guard_erasure_code.h"
 
 int main(void)
 {
@@ -39,6 +41,9 @@ int main(void)
     if (hg_raft_init(&rcfg) != 0) {
         fprintf(stderr, "main: hg_raft_init failed, running without Raft\n");
         /* You can choose to exit here instead: return 1; */
+    }
+    if (hifs_sn_tcp_start(0, hifs_recv_stripe_from_node) != 0) {
+        fprintf(stderr, "main: failed to start stripe listener\n");
     }
 
     /* Now start the existing epoll-based TCP server.

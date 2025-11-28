@@ -134,3 +134,36 @@ int hg_kv_get_h2s(uint8_t hash_algo,
  * the bulk of the data, however, and will be very fast compared to the overhead of using SQL to 
  * talk to rocks.
  * */
+
+ long long get_next_auto_increment_id(rocksdb_t* db, rocksdb_readoptions_t* ropts, rocksdb_writeoptions_t* wopts) {
+    char* err = NULL;
+    size_t len;
+    char* counter_str = rocksdb_get(db, ropts, "next_id_counter", strlen("next_id_counter"), &len, &err);
+
+    long long current_id = 0;
+    if (err == NULL && counter_str != NULL) {
+        current_id = atoll(counter_str);
+        free(counter_str);
+    } else if (err != NULL) {
+        fprintf(stderr, "Error reading counter: %s\n", err);
+        rocksdb_free(err);
+        return -1; // Indicate error
+    }
+
+    long long next_id = current_id + 1;
+
+    // Convert next_id to string for storage
+    char next_id_buf[32];
+    sprintf(next_id_buf, "%lld", next_id);
+
+    // Atomically update the counter
+    err = NULL;
+    rocksdb_put(db, wopts, "next_id_counter", strlen("next_id_counter"), next_id_buf, strlen(next_id_buf), &err);
+    if (err != NULL) {
+        fprintf(stderr, "Error updating counter: %s\n", err);
+        rocksdb_free(err);
+        return -1; // Indicate error
+    }
+
+    return next_id;
+}

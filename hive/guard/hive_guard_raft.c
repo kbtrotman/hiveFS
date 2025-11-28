@@ -21,6 +21,8 @@
 #include <unistd.h>
 #include <uv.h>
 
+struct uv_raft;
+
 struct raft_thread_ctx {
     struct hg_raft_config cfg;
     struct hg_raft_peer  *peers_copy;
@@ -146,11 +148,12 @@ bool hg_guard_local_can_write(void)
     return leader;
 }
 
-#if 0
+
 /* The serialization/commit helpers below are sketches for the future Raft
  * integration. They are kept here for reference. */
-static int raft_put_block_serialize(const struct RaftPutBlock *cmd,
-                                    uv_buf_t *out_buf)
+static int __attribute__((unused))
+raft_put_block_serialize(const struct RaftPutBlock *cmd,
+                         uv_buf_t *out_buf)
 {
     if (!cmd || !out_buf) {
         return -1;
@@ -170,8 +173,9 @@ static int raft_put_block_serialize(const struct RaftPutBlock *cmd,
     return 0;
 }
 
-static int raft_put_inode_serialize(const struct RaftPutInode *cmd,
-                                    uv_buf_t *out_buf)
+static int __attribute__((unused))
+raft_put_inode_serialize(const struct RaftPutInode *cmd,
+                         uv_buf_t *out_buf)
 {
     if (!cmd || !out_buf) {
         return -1;
@@ -204,9 +208,10 @@ static int raft_put_deserialize(struct RaftCmd *cmd,
     return 0;
 }
 
-static int commitCb(struct uv_raft *raft,
-                    int type,
-                    const uv_buf_t *buf)
+static int __attribute__((unused))
+commitCb(struct uv_raft *raft,
+         int type,
+         const uv_buf_t *buf)
 {
     (void)raft;
 
@@ -219,32 +224,7 @@ static int commitCb(struct uv_raft *raft,
         return 0;
 
     switch (cmd.op_type) {
-#if 0
-    case HG_OP_PUT_BLOCK: {
-        const struct RaftPutBlock *b = &cmd.u.block;
-        struct hifs_ec_stripe_set ec = {
-            .chunk_count = HIFS_EC_K + HIFS_EC_M,
-            .chunk_len   = b->stripe_len,
-            .hash_algo   = b->hash_algo,
-        };
 
-        memcpy(ec.hash, b->hash, sizeof(ec.hash));
-        ec.chunks = calloc(ec.chunk_count, sizeof(uint8_t *));
-        if (!ec.chunks)
-            return -ENOMEM;
-        for (size_t i = 0; i < ec.chunk_count; ++i) {
-            ec.chunks[i] = malloc(ec.chunk_len);
-            if (!ec.chunks[i]) {
-                hifs_volume_block_ec_free(&ec);
-                return -ENOMEM;
-            }
-            memcpy(ec.chunks[i], b->stripes[i], ec.chunk_len);
-        }
-
-        int rc = hifs_put_block_stripes(b->volume_id, b->block_no, &ec, b->hash_algo);
-        hifs_volume_block_ec_free(&ec);
-        return rc;
-    }
     case HG_OP_PUT_INODE: {
         const struct RaftPutInode *pi = &cmd.u.inode;
         if (!hifs_volume_inode_store(pi->volume_id, &pi->inode))
@@ -258,14 +238,13 @@ static int commitCb(struct uv_raft *raft,
             return -EIO;
         return 0;
     }
-#endif
+
     case HG_OP_PUT_BLOCK: {
-        /* TODO: once WAL stripes are available, apply them here. */
-        (void)cmd;
-        return 0;
-    }
-    case HG_OP_PUT_INODE: {
-        /* TODO: add inode + fingerprint payload handling */
+        struct RaftPutBlock cmd;
+        if (raft_put_block_deserialize(&cmd, buf) != 0) {
+            return 0;
+        }
+        hg_kv_apply_put_block(&cmd);
         return 0;
     }
     default:
@@ -273,36 +252,4 @@ static int commitCb(struct uv_raft *raft,
     }
     return 0;
 }
-#endif
 
-int hifs_put_block_stripes(uint64_t volume_id,
-			   uint64_t block_no,
-			   const struct hifs_ec_stripe_set *ec,
-			   enum hifs_hash_algorithm algo)
-{
-	(void)algo;
-	if (!hg_guard_local_can_write())
-		return -EAGAIN;
-
-	if (!hifs_volume_block_store_encoded(volume_id, block_no, ec))
-		return -EIO;
-
-	return 0;
-}
-
-int hifs_put_block(uint64_t volume_id,
-		   uint64_t block_no,
-		   const void *data,
-		   size_t len,
-		   enum hifs_hash_algorithm algo)
-{
-	struct hifs_ec_stripe_set ec = {0};
-	int rc;
-
-	if (!hifs_volume_block_ec_encode(data, (uint32_t)len, algo, &ec))
-		return -EIO;
-
-	rc = hifs_put_block_stripes(volume_id, block_no, &ec, algo);
-	hifs_volume_block_ec_free(&ec);
-	return rc;
-}
