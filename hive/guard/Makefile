@@ -31,7 +31,7 @@ UV_LIB := /usr/lib
 #PROTO_HDRS := $(PROTO_SRCS:.proto=.pb.h)
 
 # ---- Sources ----
-SRCS_C  := hive_guard.c hive_guard_tcp.c hive_guard_sql.c hive_guard_erasure_code.c hive_guard_raft.c hive_guard_sn_tcp.c
+SRCS_C  := hive_guard.c hive_guard_tcp.c hive_guard_sql.c hive_guard_erasure_code.c hive_guard_raft.c hive_guard_sn_tcp.c hive_guard_kv.c
 #SRCS_CC := hive_guard_raft_rpc.cc \
 #           hive_guard_raft_statemachine.cc \
 #           hive_guard_raft.cc \
@@ -77,7 +77,7 @@ else
 endif
 
 # Additional libs
-LIBS :=  -lleveldb    # adjust to what brpc/braft were built with and other additionals
+LIBS :=  -lrocksdb -lleveldb    # adjust to what brpc/braft were built with and other additionals
 
 # ---- Build ----
 all: $(MAIN)

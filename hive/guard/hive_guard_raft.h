@@ -53,8 +53,10 @@ struct hg_raft_config {
 
 /* One stripe ID: which node, which local stripe row */
 struct StripeId {
-    uint32_t node_id;          /* storage node id */
-    uint64_t local_estripe_id; /* estripe_id in that node's hive_data.ecblocks */
+    uint32_t storage_node_id;
+    uint32_t shard_id;
+    uint64_t estripe_id;
+    uint64_t block_offset;
 };
 
 enum hg_op_type {

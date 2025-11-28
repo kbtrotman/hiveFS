@@ -11,8 +11,11 @@
  * Minimal pthread-based wrapper that starts the Raft protocol in a second thread.
  */
 
+#include <errno.h>
+
 #include "hive_guard_raft.h"
 #include "hive_guard_sql.h"
+#include "hive_guard_kv.h"
 
 #include <pthread.h>
 #include <stdio.h>
@@ -127,6 +130,7 @@ int hg_raft_init(const struct hg_raft_config *cfg)
     return 0;
 }
 
+
 void hg_raft_shutdown(void)
 {
     if (!g_thread_started)
@@ -229,6 +233,7 @@ commitCb(struct uv_raft *raft,
         const struct RaftPutInode *pi = &cmd.u.inode;
         if (!hifs_volume_inode_store(pi->volume_id, &pi->inode))
             return -EIO;
+#if 0
         if (!hifs_volume_inode_fp_replace(pi->volume_id,
                                           pi->inode_id,
                                           pi->fp_index,
@@ -236,15 +241,12 @@ commitCb(struct uv_raft *raft,
                                           pi->fp_hash_algo,
                                           pi->fp_hash_hex))
             return -EIO;
+#endif
         return 0;
     }
 
     case HG_OP_PUT_BLOCK: {
-        struct RaftPutBlock cmd;
-        if (raft_put_block_deserialize(&cmd, buf) != 0) {
-            return 0;
-        }
-        hg_kv_apply_put_block(&cmd);
+        hg_kv_apply_put_block(&cmd.u.block);
         return 0;
     }
     default:
@@ -253,3 +255,16 @@ commitCb(struct uv_raft *raft,
     return 0;
 }
 
+
+int hifs_raft_submit_put_block(const struct RaftPutBlock *cmd)
+{
+    if (!cmd)
+        return -EINVAL;
+
+    if (!hg_guard_local_can_write())
+        return -EAGAIN;
+
+    /* TODO: integrate with real Raft log append sequence. For now, apply
+     * immediately so callers can exercise the pipeline end-to-end. */
+    return hg_kv_apply_put_block(cmd);
+}

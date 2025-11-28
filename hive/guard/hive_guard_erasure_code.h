@@ -18,13 +18,14 @@
 #define HIFS_EC_STRIPES 6  /* k + m */
 #define HIFS_SHARDS_PER_NODE 1  /* one shard per node until we have more ability in setup gui */
 
-int last_node_in_cascade;
-int cascade_length;
+extern int last_node_in_cascade;
+extern int cascade_length;
 
 struct HifsEstripeLocations {
-    uint32_t storage_node_id[HIFS_EC_STRIPES];
-    uint32_t shard_id[HIFS_EC_STRIPES];
-    uint64_t estripe_id[HIFS_EC_STRIPES];
+    uint32_t storage_node_id;
+    uint32_t shard_id;
+    uint64_t estripe_id;
+    uint64_t block_offset;
 };
 
 /* ======================= Internal helpers ======================= */
@@ -59,8 +60,6 @@ int hifs_recv_stripe_from_node(uint32_t storage_node_id,
 
 /* Submit the Raft command (this calls cowsql/raft) */
 int hifs_raft_submit_put_block(const struct RaftPutBlock *cmd);
-
-
 
 
 

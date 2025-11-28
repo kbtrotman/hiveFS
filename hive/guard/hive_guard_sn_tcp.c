@@ -1,4 +1,13 @@
 /**
+ * HiveFS
+ *
+ * Hive Mind Filesystem
+ * By K. B. Trotman
+ * License: GNU GPL as of 2023
+ *
+ */
+
+/**
  * Lightweight TCP helper for sending/receiving EC stripes between nodes.
  * This is intentionally simple and synchronous for now; it can evolve into
  * a more capable RPC transport later.
