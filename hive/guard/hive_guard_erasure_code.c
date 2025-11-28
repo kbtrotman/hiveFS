@@ -8,11 +8,14 @@
  */
 // hifs_erasure.c
 
+#include <errno.h>
 #include <rocksdb/c.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <openssl/sha.h>
 #include "hive_guard.h"
+#include "hive_guard_kv.h"
 #include "hive_guard_sn_tcp.h"
 #include "hive_guard_sql.h"
 #include "hive_guard_raft.h"
@@ -20,6 +23,8 @@
 
 
 static ec_ctx_t g_ec = { .desc = -1, .initialized = 0 };
+int last_node_in_cascade;
+int cascade_length;
 
 /* ======================= Internal helpers ======================= */
 
@@ -247,17 +252,24 @@ void hifs_ec_choose_placement(uint64_t volume_id,
                               uint64_t block_no,
                               struct HifsEstripeLocations out_stripes[HIFS_EC_STRIPES])
 {
-    
+	(void)volume_id;
 
-    memset(out_stripes, 0, sizeof(struct HifsEstripeLocations) * HIFS_EC_STRIPES);
+	if (cascade_length <= 0)
+		cascade_length = 1;
+	if (last_node_in_cascade <= 0)
+		last_node_in_cascade = 1;
 
-    for (size_t i = 0; i < HIFS_EC_STRIPES; ++i) {
-        out_stripes[i].storage_node_id = (uint32_t)last_node_in_cascade + i;
-        out_stripes[i].shard_id = (uint32_t)((block_no + i) % HIFS_SHARDS_PER_NODE);
-        out_stripes[i].estripe_id = hifs_alloc_estripe_id();
-    }
+	memset(out_stripes, 0, sizeof(struct HifsEstripeLocations) * HIFS_EC_STRIPES);
 
-    NEXT_STRIPE_NODE(last_node_in_cascade, cascade_length);
+	for (size_t i = 0; i < HIFS_EC_STRIPES; ++i) {
+		uint32_t node = (uint32_t)(((last_node_in_cascade - 1 + (int)i) % cascade_length) + 1);
+		out_stripes[i].storage_node_id = node;
+		out_stripes[i].shard_id = (uint32_t)((block_no + i) % HIFS_SHARDS_PER_NODE);
+		out_stripes[i].estripe_id = hifs_alloc_estripe_id();
+		out_stripes[i].block_offset = 0;
+	}
+
+	NEXT_STRIPE_NODE(last_node_in_cascade, cascade_length);
 }
 
 
@@ -317,150 +329,98 @@ fail:
 	return false;
 }
 
-bool hifs_volume_block_store(uint64_t volume_id, uint64_t block_no,
-                             const uint8_t *buf, uint32_t len)
+void hifs_volume_block_ec_free(struct hifs_ec_stripe_set *ec)
 {
-    /* 1) Compute content hash (global dedupe key) */
-    uint8_t hash[HIFS_HASH_LEN];
-    uint8_t hash_algo = HIFS_HASH_ALGO_SHA256; /* whatever constant you use */
-
-    if (!hifs_compute_hash(hash_algo, buf, len, hash)) {
-        return false;
-    }
-
-    /* 2) EC-encode into 6 stripes */
-    uint8_t *encoded[HIFS_EC_STRIPES] = {0};
-    uint32_t encoded_len[HIFS_EC_STRIPES] = {0};
-
-    if (!hifs_volume_block_ec_encode(buf, len, encoded, encoded_len)) {
-        /* free encoded[] if allocated inside encode */
-        return false;
-    }
-
-    /* 3) Choose placement & assign stripe IDs */
-    struct HifsEstripeLocations stripes[HIFS_EC_STRIPES];
-    memset(stripes, 0, sizeof(stripes));
-
-    hifs_ec_choose_placement(volume_id, block_no, stripes);
-    for (int i = 0; i < HIFS_EC_STRIPES; ++i) {
-        stripes[i].estripe_id = hifs_alloc_estripe_id();
-        /* hifs_ec_choose_placement should have already filled storage_node_id + shard_id */
-    }
-
-    /* 4) Send stripes to target nodes over TCP */
-    for (int i = 0; i < HIFS_EC_STRIPES; ++i) {
-        uint64_t offset = 0;
-        int rc = hifs_send_stripe_to_node(stripes[i].storage_node_id,
-                                          stripes[i].shard_id,
-                                          stripes[i].estripe_id,
-                                          encoded[i],
-                                          encoded_len[i],
-                                          &offset);
-        if (rc != 0) {
-            /* TODO: handle partial success / cleanup / retry */
-            /* For now, fail the whole operation */
-            return false;
-        }
-        stripes[i].block_offset = offset;
-    }
-
-    /* 5) Build RaftPutBlock command */
-    struct RaftPutBlock cmd;
-    memset(&cmd, 0, sizeof(cmd));
-    cmd.op_type   = OP_PUT_BLOCK;
-    cmd.hash_algo = hash_algo;
-    cmd.volume_id = volume_id;
-    cmd.block_no  = block_no;
-    memcpy(cmd.block_hash, hash, HIFS_HASH_LEN);
-
-    for (int i = 0; i < HIFS_EC_STRIPES; ++i) {
-        cmd.stripes[i] = stripes[i];
-    }
-
-    /* 6) Submit to Raft leader for metadata replication */
-    if (hifs_raft_submit_put_block(&cmd) != 0) {
-        /* You may choose to keep stripes and retry later, or GC them. */
-        return false;
-    }
-
-    /* 7) Free EC buffers if they were heap-allocated */
-    for (int i = 0; i < HIFS_EC_STRIPES; ++i) {
-        if (encoded[i]) {
-            free(encoded[i]);
-        }
-    }
-
-    return true;
+	if (!ec)
+		return;
+	if (ec->chunks) {
+		for (size_t i = 0; i < ec->chunk_count; ++i)
+			free(ec->chunks[i]);
+		free(ec->chunks);
+	}
+	memset(ec, 0, sizeof(*ec));
 }
 
-int hg_kv_apply_put_block(const struct RaftPutBlock *cmd)
+bool hifs_volume_block_store(uint64_t volume_id, uint64_t block_no,
+			     const uint8_t *buf, uint32_t len)
 {
-    if (!g_db || !cmd) return -1;
+	struct hifs_ec_stripe_set ec = {0};
+	bool ok = false;
 
-    /* 1) Build/update hash -> stripes mapping (h2s:) */
-    struct H2SEntry h2s;
-    memset(&h2s, 0, sizeof(h2s));
-    h2s.ref_count = 1;  /* you can merge if it already exists, or rely on Raft semantics */
+	if (!buf || len == 0)
+		return false;
 
-    for (int i = 0; i < HIFS_EC_STRIPES; ++i) {
-        h2s.estripe_ids[i] = cmd->stripes[i].estripe_id;
-    }
+	if (!hifs_volume_block_ec_encode(buf, len, HIFS_HASH_ALGO_SHA256, &ec))
+		return false;
 
-    /* 2) Build volume/block -> hash mapping (vb:) */
-    struct VbEntry vb;
-    memset(&vb, 0, sizeof(vb));
-    vb.hash_algo = cmd->hash_algo;
-    memcpy(vb.block_hash, cmd->block_hash, HIFS_HASH_LEN);
+	if (hifs_put_block_stripes(volume_id, block_no, &ec, ec.hash_algo) == 0)
+		ok = true;
 
-    /* 3) Prepare write batch */
-    rocksdb_writebatch_t *wb = rocksdb_writebatch_create();
+	hifs_volume_block_ec_free(&ec);
+	return ok;
+}
 
-    /* Put h2s: */
-    char h_key[3 + HIFS_HASH_LEN];
-    size_t h_key_len = 0;
-    make_h2s_key(cmd->hash_algo, cmd->block_hash, h_key, &h_key_len);
-    rocksdb_writebatch_put(wb,
-                           h_key, h_key_len,
-                           (const char *)&h2s, sizeof(h2s));
+int hifs_put_block(uint64_t volume_id, uint64_t block_no,
+		   const void *data, size_t len,
+		   enum hifs_hash_algorithm algo)
+{
+	struct hifs_ec_stripe_set ec = {0};
+	int rc;
 
-    /* Put vb: */
-    char vb_key[2 + 8 + 8];
-    size_t vb_key_len = 0;
-    make_vb_key(cmd->volume_id, cmd->block_no, vb_key, &vb_key_len);
-    rocksdb_writebatch_put(wb,
-                           vb_key, vb_key_len,
-                           (const char *)&vb, sizeof(vb));
+	if (!hg_guard_local_can_write())
+		return -EAGAIN;
+	if (!data || len == 0 || len > HIFS_DEFAULT_BLOCK_SIZE)
+		return -EINVAL;
 
-    /* Put estripe: entries for each stripe */
-    for (int i = 0; i < HIFS_EC_STRIPES; ++i) {
-        struct EstripeLoc loc;
-        loc.shard_id        = cmd->stripes[i].shard_id;
-        loc.storage_node_id = cmd->stripes[i].storage_node_id;
-        loc.block_offset    = cmd->stripes[i].block_offset;
+	if (!hifs_volume_block_ec_encode(data, (uint32_t)len, algo, &ec))
+		return -EIO;
 
-        char es_key[2 + 8];
-        size_t es_key_len = 0;
-        make_estripe_key(cmd->stripes[i].estripe_id, es_key, &es_key_len);
+	rc = hifs_put_block_stripes(volume_id, block_no, &ec, algo);
+	hifs_volume_block_ec_free(&ec);
+	return rc;
+}
 
-        rocksdb_writebatch_put(wb,
-                               es_key, es_key_len,
-                               (const char *)&loc, sizeof(loc));
-    }
+int hifs_put_block_stripes(uint64_t volume_id, uint64_t block_no,
+			   const struct hifs_ec_stripe_set *ec,
+			   enum hifs_hash_algorithm algo)
+{
+	struct HifsEstripeLocations stripes[HIFS_EC_STRIPES];
+	struct RaftPutBlock cmd;
 
-    /* 4) Commit batch */
-    char *err = NULL;
-    rocksdb_writeoptions_t *wopt = rocksdb_writeoptions_create();
-    rocksdb_write(g_db, wopt, wb, &err);
-    rocksdb_writeoptions_destroy(wopt);
-    rocksdb_writebatch_destroy(wb);
+	if (!ec || !ec->chunks || ec->chunk_count != HIFS_EC_STRIPES)
+		return -EINVAL;
+	if (!hg_guard_local_can_write())
+		return -EAGAIN;
 
-    if (err != NULL) {
-        fprintf(stderr, "hg_kv_apply_put_block: rocksdb_write error: %s\n", err);
-        free(err);
-        return -1;
-    }
+	hifs_ec_choose_placement(volume_id, block_no, stripes);
 
-    return 0;
+	for (size_t i = 0; i < HIFS_EC_STRIPES; ++i) {
+		uint64_t offset = 0;
+		int rc = hifs_send_stripe_to_node(stripes[i].storage_node_id,
+						  stripes[i].shard_id,
+						  stripes[i].estripe_id,
+						  ec->chunks[i],
+						  (uint32_t)ec->chunk_len,
+						  &offset);
+		if (rc != 0)
+			return -EIO;
+		stripes[i].block_offset = offset;
+	}
+
+	memset(&cmd, 0, sizeof(cmd));
+	cmd.hash_algo = (uint8_t)algo;
+	cmd.volume_id = volume_id;
+	cmd.block_no = block_no;
+	memcpy(cmd.hash, ec->hash, HIFS_BLOCK_HASH_SIZE);
+
+	for (size_t i = 0; i < HIFS_EC_STRIPES; ++i) {
+		cmd.ec_stripes[i].storage_node_id = stripes[i].storage_node_id;
+		cmd.ec_stripes[i].shard_id = stripes[i].shard_id;
+		cmd.ec_stripes[i].estripe_id = stripes[i].estripe_id;
+		cmd.ec_stripes[i].block_offset = stripes[i].block_offset;
+	}
+
+	return hifs_raft_submit_put_block(&cmd);
 }
 
 int hifs_send_stripe_to_node(uint32_t storage_node_id,

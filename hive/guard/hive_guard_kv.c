@@ -15,6 +15,7 @@
  * Simple KV store interface using high-speed SSD-optimized RocksDB key/value store
  */
 #include "hive_guard_kv.h"
+#include "hive_guard_erasure_code.h"
 #include <string.h>
 #include <stdio.h>
 #include <rocksdb/c.h>
@@ -59,6 +60,28 @@ static void make_h2s_key(uint8_t hash_algo,
     key_out[2] = (char)hash_algo;
     memcpy(&key_out[3], hash, 32);
     *key_len_out = 3 + 32;
+}
+
+static void make_vb_key(uint64_t volume_id,
+			uint64_t block_no,
+			char *key_out,
+			size_t *key_len_out)
+{
+	key_out[0] = 'v';
+	key_out[1] = 'b';
+	memcpy(&key_out[2], &volume_id, sizeof(volume_id));
+	memcpy(&key_out[2 + sizeof(volume_id)], &block_no, sizeof(block_no));
+	*key_len_out = 2 + sizeof(volume_id) + sizeof(block_no);
+}
+
+static void make_estripe_key(uint64_t estripe_id,
+			     char *key_out,
+			     size_t *key_len_out)
+{
+	key_out[0] = 'e';
+	key_out[1] = 's';
+	memcpy(&key_out[2], &estripe_id, sizeof(estripe_id));
+	*key_len_out = 2 + sizeof(estripe_id);
 }
 
 int hg_kv_put_h2s(uint8_t hash_algo,
@@ -127,6 +150,65 @@ int hg_kv_get_h2s(uint8_t hash_algo,
     memcpy(out, val, sizeof(*out));
     free(val);
     return 0;
+}
+
+int hg_kv_apply_put_block(const struct RaftPutBlock *cmd)
+{
+	if (!g_db || !cmd)
+		return -1;
+
+	struct H2SEntry h2s = {0};
+	h2s.ref_count = 1;
+	for (size_t i = 0; i < HIFS_EC_STRIPES; ++i)
+		h2s.estripe_ids[i] = cmd->ec_stripes[i].estripe_id;
+
+	struct VbEntry vb = {0};
+	vb.hash_algo = cmd->hash_algo;
+	memcpy(vb.block_hash, cmd->hash, HIFS_BLOCK_HASH_SIZE);
+
+	rocksdb_writebatch_t *wb = rocksdb_writebatch_create();
+
+    char h_key[3 + 32];
+	size_t h_key_len = 0;
+	make_h2s_key(cmd->hash_algo, cmd->hash, h_key, &h_key_len);
+	rocksdb_writebatch_put(wb,
+			       h_key, h_key_len,
+			       (const char *)&h2s, sizeof(h2s));
+
+	char vb_key[2 + sizeof(uint64_t) * 2];
+	size_t vb_key_len = 0;
+	make_vb_key(cmd->volume_id, cmd->block_no, vb_key, &vb_key_len);
+	rocksdb_writebatch_put(wb,
+			       vb_key, vb_key_len,
+			       (const char *)&vb, sizeof(vb));
+
+	for (size_t i = 0; i < HIFS_EC_STRIPES; ++i) {
+		struct EstripeLoc loc = {
+			.shard_id = cmd->ec_stripes[i].shard_id,
+			.storage_node_id = cmd->ec_stripes[i].storage_node_id,
+			.block_offset = cmd->ec_stripes[i].block_offset,
+		};
+		char es_key[2 + sizeof(uint64_t)];
+		size_t es_key_len = 0;
+		make_estripe_key(cmd->ec_stripes[i].estripe_id, es_key, &es_key_len);
+		rocksdb_writebatch_put(wb,
+				       es_key, es_key_len,
+				       (const char *)&loc, sizeof(loc));
+	}
+
+	char *err = NULL;
+	rocksdb_writeoptions_t *wopt = rocksdb_writeoptions_create();
+	rocksdb_write(g_db, wopt, wb, &err);
+	rocksdb_writeoptions_destroy(wopt);
+	rocksdb_writebatch_destroy(wb);
+
+	if (err != NULL) {
+		fprintf(stderr, "hg_kv_apply_put_block: rocksdb_write error: %s\n", err);
+		free(err);
+		return -1;
+	}
+
+	return 0;
 }
 
 /* Now that we've de-coupled rocks, I need to re-make the SQL commitcb raft routine so that it calls

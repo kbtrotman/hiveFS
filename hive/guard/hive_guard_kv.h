@@ -14,6 +14,8 @@
 #include <stdint.h>
 #include <stddef.h>
 
+#include "hive_guard_raft.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -65,6 +67,8 @@ int hg_kv_put_h2s(uint8_t hash_algo,
 int hg_kv_get_h2s(uint8_t hash_algo,
                   const uint8_t hash[32],
                   struct H2SEntry *out);  /* returns 0 on success, <0 on error */
+
+int hg_kv_apply_put_block(const struct RaftPutBlock *cmd);
 
 #ifdef __cplusplus
 }
