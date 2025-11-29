@@ -18,33 +18,116 @@
 #include "hive_guard.h"
 #include "hive_guard_sn_tcp.h"
 #include "hive_guard_erasure_code.h"
+#include "hive_guard_sql.h"
+
+static void free_peer_buffers(struct hg_raft_peer *peers,
+				      char **addr_bufs,
+				      size_t count)
+{
+	if (addr_bufs) {
+		for (size_t i = 0; i < count; ++i)
+			free(addr_bufs[i]);
+	}
+	free(addr_bufs);
+	free(peers);
+}
+
+static bool load_peers_from_db(struct hg_raft_peer **out_peers,
+				   char ***out_addr_bufs,
+				   size_t *out_count,
+				   uint64_t *out_self_id,
+				   const char **out_self_addr)
+{
+	const uint16_t default_port = 7000;
+	const char *fallback_host = "127.0.0.1";
+	size_t node_count = 0;
+	const struct hive_storage_node *nodes;
+	struct hg_raft_peer *peers;
+	char **addr_bufs;
+
+	if (!out_peers || !out_addr_bufs || !out_count ||
+	    !out_self_id || !out_self_addr)
+		return false;
+
+	init_hive_link();
+	if (!hifs_load_storage_nodes())
+		return false;
+
+	nodes = hifs_get_storage_nodes(&node_count);
+	if (!nodes || node_count == 0)
+		return false;
+
+	peers = calloc(node_count, sizeof(*peers));
+	addr_bufs = calloc(node_count, sizeof(*addr_bufs));
+	if (!peers || !addr_bufs) {
+		free(peers);
+		free(addr_bufs);
+		return false;
+	}
+
+	for (size_t i = 0; i < node_count; ++i) {
+		const char *host = nodes[i].address[0] ? nodes[i].address : fallback_host;
+		uint16_t port = nodes[i].guard_port ? nodes[i].guard_port : default_port;
+		size_t len = (size_t)snprintf(NULL, 0, "%s:%u", host, port);
+		char *addr = malloc(len + 1);
+		if (!addr) {
+			free_peer_buffers(peers, addr_bufs, node_count);
+			return false;
+		}
+		snprintf(addr, len + 1, "%s:%u", host, port);
+		addr_bufs[i] = addr;
+		peers[i].id = nodes[i].id ? nodes[i].id : (uint64_t)(i + 1);
+		peers[i].address = addr;
+	}
+
+	*out_peers = peers;
+	*out_addr_bufs = addr_bufs;
+	*out_count = node_count;
+	*out_self_id = peers[0].id;
+	*out_self_addr = peers[0].address;
+	return true;
+}
 
 int main(void)
 {
-    /* TODO: read these from config or env */
-    struct hg_raft_peer peers[] = {
-        { .id = 1, .address = "127.0.0.1:7000" },
-        /* Add other nodes here when you run a real cluster */
-    };
+	struct hg_raft_peer fallback_peers[] = {
+		{ .id = 1, .address = "127.0.0.1:7000" },
+	};
+	struct hg_raft_peer *dynamic_peers = NULL;
+	char **peer_addr_bufs = NULL;
+	struct hg_raft_peer *peers = fallback_peers;
+	size_t peer_count = sizeof(fallback_peers) / sizeof(fallback_peers[0]);
+	uint64_t self_id = fallback_peers[0].id;
+	const char *self_address = fallback_peers[0].address;
 
-    struct hg_raft_config rcfg = {
-        .self_id      = 1,
-        .self_address = "127.0.0.1:7000",
-        .data_dir     = "/tmp/hive_guard_raft",
-        .peers        = peers,
-        .num_peers    = sizeof(peers) / sizeof(peers[0]),
-    };
+	if (load_peers_from_db(&dynamic_peers,
+			      &peer_addr_bufs,
+			      &peer_count,
+			      &self_id,
+			      &self_address)) {
+		peers = dynamic_peers;
+	}
+
+	struct hg_raft_config rcfg = {
+		.self_id      = self_id,
+		.self_address = self_address,
+		.data_dir     = "/tmp/hive_guard_raft",
+		.peers        = peers,
+		.num_peers    = (unsigned)peer_count,
+	};
 
     fprintf(stderr, "main: starting\n");
     fflush(stderr);
 
-    if (hg_raft_init(&rcfg) != 0) {
-        fprintf(stderr, "main: hg_raft_init failed, running without Raft\n");
-        /* You can choose to exit here instead: return 1; */
-    }
-    if (hifs_sn_tcp_start(0, hifs_recv_stripe_from_node) != 0) {
-        fprintf(stderr, "main: failed to start stripe listener\n");
-    }
+	if (hg_raft_init(&rcfg) != 0) {
+		fprintf(stderr, "main: hg_raft_init failed, running without Raft\n");
+		/* You can choose to exit here instead: return 1; */
+	}
+	if (dynamic_peers)
+		free_peer_buffers(dynamic_peers, peer_addr_bufs, peer_count);
+	if (hifs_sn_tcp_start(0, hifs_recv_stripe_from_node) != 0) {
+		fprintf(stderr, "main: failed to start stripe listener\n");
+	}
 
     /* Now start the existing epoll-based TCP server.
      * Raft is running in its own thread; both will make progress.

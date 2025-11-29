@@ -16,10 +16,20 @@
 
 #include "hive_guard.h"
 #include "hive_guard_sql.h"
+#include "hive_guard_kv.h"
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 
 struct SQLDB sqldb;
+static struct hive_storage_node *loaded_storage_nodes;
+static size_t loaded_storage_node_count;
+
+const struct hive_storage_node *hifs_get_storage_nodes(size_t *count)
+{
+	if (count)
+		*count = loaded_storage_node_count;
+	return loaded_storage_nodes;
+}
 
 static void bytes_to_hex(const uint8_t *src, size_t len, char *dst)
 {
@@ -837,36 +847,15 @@ bool hifs_volume_inode_load(uint64_t volume_id, uint64_t inode,
 	out->i_hash_count = htole16((uint16_t)sql_to_u32(row[idx++]));
 	out->i_hash_reserved = htole16((uint16_t)sql_to_u32(row[idx++]));
 
-	/* Load fingerprints */
-	{
-		MYSQL_RES *fp_res = NULL;
-		MYSQL_ROW fp_row;
-		unsigned long *fp_lens;
-
-		snprintf(sql_query, sizeof(sql_query), SQL_VOLUME_INODE_FP_SELECT,
-			 (unsigned long long)volume_id,
-			 (unsigned long long)inode);
-		fp_res = hifs_execute_sql(sql_query);
-		if (fp_res) {
-			while ((fp_row = mysql_fetch_row(fp_res)) != NULL) {
-				fp_lens = mysql_fetch_lengths(fp_res);
-				if (!fp_lens)
-					break;
-				unsigned int fp_idx = sql_to_u32(fp_row[0]);
-				if (fp_idx >= HIFS_MAX_BLOCK_HASHES)
-					continue;
-				out->i_block_fingerprints[fp_idx].block_no =
-					htole32(sql_to_u32(fp_row[1]));
-				out->i_block_fingerprints[fp_idx].hash_algo =
-					fp_row[2] ? (uint8_t)strtoul(fp_row[2], NULL, 10) : 0;
-				if (!fp_row[3] ||
-				    !hex_to_bytes(fp_row[3], fp_lens[3],
-						  out->i_block_fingerprints[fp_idx].hash,
-						  sizeof(out->i_block_fingerprints[fp_idx].hash)))
-					continue;
-			}
-			mysql_free_result(fp_res);
-			sqldb.last_query = NULL;
+	/* Load fingerprints from RocksDB */
+	uint16_t hash_count_host = le16toh(out->i_hash_count);
+	for (uint16_t i = 0; i < hash_count_host && i < HIFS_MAX_BLOCK_HASHES; ++i) {
+		struct hifs_block_fingerprint_wire fp = {0};
+		if (hg_kv_get_vif_entry(volume_id, inode, i, &fp) == 0) {
+			out->i_block_fingerprints[i] = fp;
+		} else {
+			memset(&out->i_block_fingerprints[i], 0,
+			       sizeof(out->i_block_fingerprints[i]));
 		}
 	}
 
@@ -980,14 +969,11 @@ bool hifs_volume_inode_store(uint64_t volume_id,
 bool hifs_volume_block_load(uint64_t volume_id, uint64_t block_no,
                             uint8_t *buf, uint32_t *len)
 {
-    char sql_query[MAX_QUERY_SIZE];
-    MYSQL_RES *res = NULL;
-    MYSQL_ROW row;
-    unsigned long *lengths;
     bool ok = false;
-
     unsigned int hash_algo = 0;
-    char hash_hex[SHA256_DIGEST_LENGTH * 2 + 1];
+    char hash_hex[sizeof(((struct VbEntry *)0)->block_hash) * 2 + 1];
+    struct VbEntry vb_entry = {0};
+    struct H2SEntry h2s = {0};
 
     if (!sqldb.sql_init || !sqldb.conn || !buf || !len)
         return false;
@@ -1000,202 +986,82 @@ bool hifs_volume_block_load(uint64_t volume_id, uint64_t block_no,
         }
     }
 
-    /* 1) volume_id+block_no -> (hash_algo, block_hash) */
-    snprintf(sql_query, sizeof(sql_query), SQL_VOLUME_BLOCK_MAP_SELECT,
-             (unsigned long long)volume_id,
-             (unsigned long long)block_no);
-
-    res = hifs_execute_sql(sql_query);
-    if (!res) return false;
-    if (mysql_num_rows(res) == 0) goto out;
-
-    row = mysql_fetch_row(res);
-    lengths = mysql_fetch_lengths(res);
-    if (!row || !lengths) goto out;
-
-    hash_algo = row[0] ? (unsigned int)strtoul(row[0], NULL, 10) : HIFS_HASH_ALGO_NONE;
-    if (!row[1] || lengths[1] == 0) goto out;
-
-    {
-        unsigned long hex_len = lengths[1];
-        if (hex_len >= sizeof(hash_hex)) hex_len = sizeof(hash_hex) - 1;
-        memcpy(hash_hex, row[1], hex_len);
-        hash_hex[hex_len] = '\0';
+    if (hg_kv_get_vb_entry(volume_id, block_no, &vb_entry) != 0) {
+        hifs_warning("No block metadata for volume=%llu block=%llu",
+                     (unsigned long long)volume_id,
+                     (unsigned long long)block_no);
+        return false;
     }
 
-    mysql_free_result(res);
-    sqldb.last_query = NULL;
-    res = NULL;
+    hash_algo = vb_entry.hash_algo;
+    if (hash_algo == HIFS_HASH_ALGO_NONE) {
+        hifs_warning("Invalid hash algo for volume=%llu block=%llu",
+                     (unsigned long long)volume_id,
+                     (unsigned long long)block_no);
+        return false;
+    }
+    bytes_to_hex(vb_entry.block_hash, sizeof(vb_entry.block_hash), hash_hex);
 
-    /* 2) block_hash -> stripe IDs (data then parity) */
-    snprintf(sql_query, sizeof(sql_query), SQL_HASH_TO_ESTRIPES_SELECT,
-             hash_algo, hash_hex);
-
-    res = hifs_execute_sql(sql_query);
-    if (!res) return false;
-    if (mysql_num_rows(res) == 0) goto out;
-
-    row = mysql_fetch_row(res);
-    lengths = mysql_fetch_lengths(res);
-    if (!row || !lengths) goto out;
+    if (hg_kv_get_h2s(hash_algo, vb_entry.block_hash, &h2s) != 0) {
+        hifs_warning("Missing hash->stripe mapping for volume=%llu block=%llu",
+                     (unsigned long long)volume_id,
+                     (unsigned long long)block_no);
+        return false;
+    }
 
     enum { NUM_DATA = HIFS_EC_K, NUM_PARITY = HIFS_EC_M, TOTAL = HIFS_EC_K + HIFS_EC_M };
-    uint64_t stripe_ids[TOTAL] = {0};
+    uint64_t stripe_ids[TOTAL];
+    size_t h2s_count = sizeof(h2s.estripe_ids) / sizeof(h2s.estripe_ids[0]);
+    size_t copy = (TOTAL < h2s_count) ? TOTAL : h2s_count;
+    memcpy(stripe_ids, h2s.estripe_ids, copy * sizeof(uint64_t));
+    for (size_t i = copy; i < TOTAL; ++i)
+        stripe_ids[i] = 0;
 
-    for (size_t i = 0; i < TOTAL; ++i) {
-        stripe_ids[i] = row[i] ? (uint64_t)strtoull(row[i], NULL, 10) : 0ULL;
-    }
-
-    mysql_free_result(res);
-    sqldb.last_query = NULL;
-    res = NULL;
-
-    /* 3) Fetch fragments until we have at least k (prefer data first) */
     uint8_t *encoded_chunks[TOTAL] = {0};
-    size_t   frag_size = 0;
-    size_t   found = 0;
+    size_t frag_size = 0;
+    size_t found = 0;
 
-    for (size_t i = 0; i < TOTAL && found < NUM_DATA; ++i) {
-        if (stripe_ids[i] == 0) continue; /* missing id: try others */
-
-        snprintf(sql_query, sizeof(sql_query), SQL_ECBLOCK_SELECT,
-                 (unsigned long long)stripe_ids[i]);
-
-        res = hifs_execute_sql(sql_query);
-        if (!res) goto fail_chunks;
-
-        if (mysql_num_rows(res) == 0) {
-            mysql_free_result(res);
-            sqldb.last_query = NULL;
-            res = NULL;
-            continue; /* missing row; try others */
-        }
-
-        row = mysql_fetch_row(res);
-        lengths = mysql_fetch_lengths(res);
-        if (!row || !lengths) {
-            mysql_free_result(res);
-            sqldb.last_query = NULL;
-            res = NULL;
-            goto fail_chunks;
-        }
-
-        unsigned long hex_len = lengths[0];
-        if (!row[0] || hex_len == 0) {
-            mysql_free_result(res);
-            sqldb.last_query = NULL;
-            res = NULL;
+    for (size_t i = 0; i < NUM_DATA && found < NUM_DATA; ++i) {
+        if (stripe_ids[i] == 0)
+            continue;
+        uint8_t *chunk = NULL;
+        size_t chunk_len = 0;
+        if (hg_kv_get_estripe_chunk(stripe_ids[i], &chunk, &chunk_len) != 0)
+            continue;
+        if (frag_size == 0) {
+            frag_size = chunk_len;
+        } else if (chunk_len != frag_size) {
+            hifs_warning("Fragment size mismatch: expected %zu, got %zu", frag_size, chunk_len);
+            free(chunk);
             continue;
         }
-
-        size_t this_frag = hex_len / 2; /* HEX -> bytes */
-        if (frag_size == 0) {
-            frag_size = this_frag;
-        } else if (this_frag != frag_size) {
-            hifs_warning("Fragment size mismatch: expected %zu, got %zu", frag_size, this_frag);
-            mysql_free_result(res);
-            sqldb.last_query = NULL;
-            res = NULL;
-            goto fail_chunks;
-        }
-
-        encoded_chunks[i] = (uint8_t *)malloc(frag_size);
-        if (!encoded_chunks[i]) {
-            hifs_warning("OOM for fragment %zu", i);
-            mysql_free_result(res);
-            sqldb.last_query = NULL;
-            res = NULL;
-            goto fail_chunks;
-        }
-
-        if (!hex_to_bytes(row[0], hex_len, encoded_chunks[i], frag_size)) {
-            hifs_warning("hex_to_bytes failed for stripe %llu",
-                         (unsigned long long)stripe_ids[i]);
-            mysql_free_result(res);
-            sqldb.last_query = NULL;
-            res = NULL;
-            goto fail_chunks;
-        }
-
+        encoded_chunks[i] = chunk;
         ++found;
+    }
 
-        mysql_free_result(res);
-        sqldb.last_query = NULL;
-        res = NULL;
+    if (found < NUM_DATA) {
+        for (size_t i = NUM_DATA; i < TOTAL && found < NUM_DATA; ++i) {
+            if (stripe_ids[i] == 0)
+                continue;
+            uint8_t *chunk = NULL;
+            size_t chunk_len = 0;
+            if (hg_kv_get_estripe_chunk(stripe_ids[i], &chunk, &chunk_len) != 0)
+                continue;
+            if (frag_size == 0) {
+                frag_size = chunk_len;
+            } else if (chunk_len != frag_size) {
+                hifs_warning("Fragment size mismatch: expected %zu, got %zu", frag_size, chunk_len);
+                free(chunk);
+                continue;
+            }
+            encoded_chunks[i] = chunk;
+            ++found;
+        }
     }
 
     if (frag_size == 0) {
         hifs_warning("No EC fragments found for hash %s", hash_hex);
         goto fail_chunks;
-    }
-
-    /* 4) If we didn’t get k yet, try the remaining IDs (parity) */
-    for (size_t i = NUM_DATA; i < TOTAL && found < NUM_DATA; ++i) {
-        if (encoded_chunks[i]) continue;           /* already fetched */
-        if (stripe_ids[i] == 0) continue;
-
-        snprintf(sql_query, sizeof(sql_query), SQL_ECBLOCK_SELECT,
-                 (unsigned long long)stripe_ids[i]);
-
-        res = hifs_execute_sql(sql_query);
-        if (!res) goto fail_chunks;
-
-        if (mysql_num_rows(res) == 0) { /* still missing */
-            mysql_free_result(res);
-            sqldb.last_query = NULL;
-            res = NULL;
-            continue;
-        }
-
-        row = mysql_fetch_row(res);
-        lengths = mysql_fetch_lengths(res);
-        if (!row || !lengths) {
-            mysql_free_result(res);
-            sqldb.last_query = NULL;
-            res = NULL;
-            goto fail_chunks;
-        }
-
-        unsigned long hex_len = lengths[0];
-        if (!row[0] || hex_len == 0) {
-            mysql_free_result(res);
-            sqldb.last_query = NULL;
-            res = NULL;
-            continue;
-        }
-
-        size_t this_frag = hex_len / 2;
-        if (this_frag != frag_size) {
-            hifs_warning("Fragment size mismatch: expected %zu, got %zu", frag_size, this_frag);
-            mysql_free_result(res);
-            sqldb.last_query = NULL;
-            res = NULL;
-            goto fail_chunks;
-        }
-
-        encoded_chunks[i] = (uint8_t *)malloc(frag_size);
-        if (!encoded_chunks[i]) {
-            hifs_warning("OOM for fragment %zu", i);
-            mysql_free_result(res);
-            sqldb.last_query = NULL;
-            res = NULL;
-            goto fail_chunks;
-        }
-
-        if (!hex_to_bytes(row[0], hex_len, encoded_chunks[i], frag_size)) {
-            hifs_warning("hex_to_bytes failed for stripe %llu",
-                         (unsigned long long)stripe_ids[i]);
-            mysql_free_result(res);
-            sqldb.last_query = NULL;
-            res = NULL;
-            goto fail_chunks;
-        }
-
-        ++found;
-
-        mysql_free_result(res);
-        sqldb.last_query = NULL;
-        res = NULL;
     }
 
     /* 5) Decode */
@@ -1241,11 +1107,6 @@ fail_chunks:
         encoded_chunks[i] = NULL;
     }
 
-out:
-    if (res) {
-        mysql_free_result(res);
-        sqldb.last_query = NULL;
-    }
     return ok;
 }
 
@@ -1255,9 +1116,103 @@ hash_bytes_to_hex(const uint8_t *src, size_t len, char *dst)
 	bytes_to_hex(src, len, dst);
 }
 
+/*
 int save_binary_data(char *data_block, char *hash)
 {
 	(void)data_block;
 	(void)hash;
 	return 0;
 }
+*/
+
+bool hifs_load_storage_nodes(void)
+{
+	MYSQL_RES *res;
+	MYSQL_ROW row;
+	size_t row_count;
+	struct hive_storage_node *nodes;
+
+	if (!sqldb.sql_init || !sqldb.conn)
+		return false;
+
+	res = hifs_execute_sql(SQL_STORAGE_NODES_SELECT);
+	if (!res)
+		return false;
+
+	row_count = (size_t)mysql_num_rows(res);
+	if (row_count == 0) {
+		mysql_free_result(res);
+		sqldb.last_query = NULL;
+		sqldb.rows = 0;
+		return false;
+	}
+
+	nodes = calloc(row_count, sizeof(*nodes));
+	if (!nodes) {
+		mysql_free_result(res);
+		sqldb.last_query = NULL;
+		return false;
+	}
+
+	for (size_t i = 0; i < row_count; ++i) {
+		row = mysql_fetch_row(res);
+		if (!row) {
+			free(nodes);
+			mysql_free_result(res);
+			sqldb.last_query = NULL;
+			return false;
+		}
+
+		nodes[i].id = row[0] ? (uint32_t)strtoul(row[0], NULL, 10) : 0;
+		if (row[1]) {
+			strncpy(nodes[i].name, row[1], sizeof(nodes[i].name) - 1);
+			nodes[i].name[sizeof(nodes[i].name) - 1] = '\0';
+		}
+		if (row[2]) {
+			strncpy(nodes[i].address, row[2], sizeof(nodes[i].address) - 1);
+			nodes[i].address[sizeof(nodes[i].address) - 1] = '\0';
+		}
+		if (row[3]) {
+			strncpy(nodes[i].uid, row[3], sizeof(nodes[i].uid) - 1);
+			nodes[i].uid[sizeof(nodes[i].uid) - 1] = '\0';
+		}
+		if (row[4]) {
+			strncpy(nodes[i].serial, row[4], sizeof(nodes[i].serial) - 1);
+			nodes[i].serial[sizeof(nodes[i].serial) - 1] = '\0';
+		}
+		nodes[i].guard_port = row[5] ? (uint16_t)strtoul(row[5], NULL, 10) : 0;
+		nodes[i].fenced = row[9] ? (uint8_t)strtoul(row[9], NULL, 10) : 0;
+
+		hifs_debug("node_id=%u address=%s guard_port=%u",
+			  nodes[i].id,
+			  nodes[i].address,
+			  nodes[i].guard_port);
+	}
+	mysql_free_result(res);
+	sqldb.last_query = NULL;
+	sqldb.rows = (int)row_count;
+
+	free(loaded_storage_nodes);
+	loaded_storage_nodes = nodes;
+	loaded_storage_node_count = row_count;
+	return true;
+}
+
+/*
+bool hifs_persist_storage_node(uint64_t node_id,
+				 const char *node_address,
+				 uint16_t node_port)
+{
+	char sql_query[MAX_QUERY_SIZE];
+
+	if (!sqldb.sql_init || !sqldb.conn)
+		return false;
+
+	snprintf(sql_query, sizeof(sql_query), SQL_STORAGE_NODE_UPSERT,
+		 (unsigned long long)node_id,
+		 node_address,
+		 node_port);
+
+	return hifs_insert_sql(sql_query);
+}
+*/

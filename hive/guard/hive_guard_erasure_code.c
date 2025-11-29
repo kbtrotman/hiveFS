@@ -405,6 +405,11 @@ int hifs_put_block_stripes(uint64_t volume_id, uint64_t block_no,
 		if (rc != 0)
 			return -EIO;
 		stripes[i].block_offset = offset;
+		if (hg_kv_put_estripe_chunk(stripes[i].estripe_id,
+					    ec->chunks[i],
+					    ec->chunk_len) != 0) {
+			return -EIO;
+		}
 	}
 
 	memset(&cmd, 0, sizeof(cmd));

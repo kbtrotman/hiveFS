@@ -16,6 +16,7 @@
 #include "hive_guard_raft.h"
 #include "hive_guard_sql.h"
 #include "hive_guard_kv.h"
+#include "hive_guard.h"
 
 #include <pthread.h>
 #include <stdio.h>
@@ -78,6 +79,10 @@ static void free_ctx(struct raft_thread_ctx *ctx)
     if (!ctx) return;
     free(ctx->self_addr_copy);
     free(ctx->data_dir_copy);
+    if (ctx->peers_copy) {
+        for (unsigned i = 0; i < ctx->cfg.num_peers; ++i)
+            free((char *)ctx->peers_copy[i].address);
+    }
     free(ctx->peers_copy);
     memset(ctx, 0, sizeof(*ctx));
 }
@@ -130,7 +135,21 @@ int hg_raft_init(const struct hg_raft_config *cfg)
             free_ctx(&g_ctx);
             return -1;
         }
-        memcpy(g_ctx.peers_copy, cfg->peers, cfg->num_peers * sizeof(*cfg->peers));
+        for (unsigned i = 0; i < cfg->num_peers; ++i) {
+            g_ctx.peers_copy[i] = cfg->peers[i];
+            if (cfg->peers[i].address) {
+                char *dup = strdup(cfg->peers[i].address);
+                if (!dup) {
+                    for (unsigned j = 0; j < i; ++j)
+                        free((char *)g_ctx.peers_copy[j].address);
+                    free(g_ctx.peers_copy);
+                    g_ctx.peers_copy = NULL;
+                    free_ctx(&g_ctx);
+                    return -1;
+                }
+                g_ctx.peers_copy[i].address = dup;
+            }
+        }
         g_ctx.cfg.peers = g_ctx.peers_copy;
     }
 
@@ -266,6 +285,10 @@ commitCb(struct uv_raft *raft,
 
     case HG_OP_PUT_BLOCK: {
         hg_kv_apply_put_block(&cmd.u.block);
+        hifs_guard_notify_fsync(cmd.u.block.volume_id,
+                                cmd.u.block.block_no,
+                                cmd.u.block.hash,
+                                HIFS_BLOCK_HASH_SIZE);
         return 0;
     }
     default:

@@ -13,7 +13,7 @@ USE hive_meta;
 CREATE TABLE IF NOT EXISTS storage_nodes (
   node_id INT PRIMARY KEY,
   node_name VARCHAR(100) NOT NULL,
-  node_address VARCHAR(255) NOT NULL,
+  node_address VARCHAR(64) NOT NULL,
   node_uid VARCHAR(128) NOT NULL,
   node_serial VARCHAR(100) NOT NULL,
   node_guard_port INT NOT NULL,
@@ -21,7 +21,6 @@ CREATE TABLE IF NOT EXISTS storage_nodes (
   last_heartbeat TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   hive_version INT NOT NULL,
   hive_patch_level INT NOT NULL,
-  ec_group INT NOT NULL,
   fenced BOOLEAN NOT NULL DEFAULT 0,
   last_maintenance TIMESTAMP NULL,
   maintenance_reason VARCHAR(255) NULL,

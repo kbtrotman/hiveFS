@@ -47,6 +47,19 @@
 
 #define MAXC 1024
 
+struct hive_storage_node {
+	uint32_t id;
+	char	 name[100];
+	char     address[64];  /* "ip:port" */
+	char     uid[128];
+	char     serial[100];
+	uint16_t guard_port;
+	uint16_t stripe_port;
+	uint64_t last_heartbeat;
+	uint8_t  online;
+	uint8_t  fenced;
+};
+
 // Prototypes
 int hive_guard_server_main(void);
 
@@ -83,3 +96,5 @@ int hifs_put_block_stripes(uint64_t volume_id, uint64_t block_no,
 int hifs_put_block(uint64_t volume_id, uint64_t block_no,
 		   const void *data, size_t len,
 		   enum hifs_hash_algorithm algo);
+void hifs_guard_notify_fsync(uint64_t volume_id, uint64_t block_no,
+				 const uint8_t *hash, size_t hash_len);
