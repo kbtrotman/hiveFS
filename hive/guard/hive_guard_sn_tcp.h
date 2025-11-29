@@ -17,6 +17,8 @@
 
 #include <stdint.h>
 
+#include "hive_guard.h"
+
 typedef int (*hifs_sn_recv_cb)(uint32_t storage_node_id,
                                uint32_t shard_id,
                                uint64_t estripe_id,
@@ -159,7 +161,7 @@ static const char *const hg_rej_quotes[hg_rej_count] = {
     "Victory? Victory, you say? . Master Obi-Wan, not victory. The shroud of the diconnection has fallen. Begun the clone wars have.",
     "I sense great fear in you, Skywalker. You have hate… you have anger… but you don't use them. You don't connect.",
     "Size matters not. Look at me. Judge me by my size, do you? Hmm? And well you should not, for my ally is the disconnection, and a powerful ally it is.",
-    "The Crazy ting is... It's true. The force. The Jedi. All of it. But you know what else is true? You're disconnected.",
+    "The Crazy thing is... It's true. The force. The Jedi. All of it. But you know what else is true? You're disconnected.",
     "The force is with you young Skywalker, but you are not a connected Jedi yet",
 };
 

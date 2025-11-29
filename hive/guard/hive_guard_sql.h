@@ -211,6 +211,28 @@
 #define SQL_ECBLOCK_SELECT \
   "SELECT ec_block FROM hive_data.ecblocks WHERE estripe_id=%llu"
 
+/* SELECT all storage nodes */
+#define SQL_STORAGE_NODES_SELECT \
+	"SELECT node_id, node_name, node_address, node_uid, node_serial, " \
+	"node_guard_port, last_heartbeat, hive_version, hive_patch_level, " \
+	"fenced, last_maintenance, maintenance_reason " \
+	"FROM storage_nodes ORDER BY node_id"
+
+/* UPSERT storage node info */
+#define SQL_STORAGE_NODE_UPSERT \
+	"INSERT INTO storage_nodes " \
+	"(node_id, node_name, node_address, node_uid, node_serial, " \
+	"node_guard_port, last_heartbeat, hive_version, hive_patch_level, fenced) " \
+	"VALUES (%d, '%s', '%s', '%s', '%s', %d, NOW(), %d, %d, 0) " \
+	"ON DUPLICATE KEY UPDATE " \
+	"node_name=VALUES(node_name), node_address=VALUES(node_address), " \
+	"node_uid=VALUES(node_uid), node_serial=VALUES(node_serial), " \
+	"node_guard_port=VALUES(node_guard_port), " \
+	"last_heartbeat=VALUES(last_heartbeat), " \
+	"hive_version=VALUES(hive_version), " \
+	"hive_patch_level=VALUES(hive_patch_level), " \
+	"fenced=VALUES(fenced)"
+
 
 /* The great news here is we removed a LOT of slow SQL by moving Rocks to a C-Library form rather than
  * controlled by MariaDB. And the cost was only a little bit of code in hive_guard_kv. (though knowing
@@ -254,9 +276,11 @@ bool hifs_volume_block_store(uint64_t volume_id, uint64_t block_no,
 bool hifs_volume_block_store_encoded(uint64_t volume_id, uint64_t block_no,
                                      const struct hifs_ec_stripe_set *ec);
 bool hifs_volume_block_ec_encode(const uint8_t *buf, uint32_t len,
-				 enum hifs_hash_algorithm algo,
-				 struct hifs_ec_stripe_set *out);
+			 enum hifs_hash_algorithm algo,
+			 struct hifs_ec_stripe_set *out);
 void hifs_volume_block_ec_free(struct hifs_ec_stripe_set *ec);
+bool hifs_load_storage_nodes(void);
+const struct hive_storage_node *hifs_get_storage_nodes(size_t *count);
 
 /* SQL Connect */
 

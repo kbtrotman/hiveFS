@@ -22,6 +22,8 @@
 #include "hive_guard_sql.h"
 #include "../../hifs_shared_defs.h"
 #include <errno.h>
+#include <pthread.h>
+#include <openssl/sha.h>
 
 
 /* -------------------------------------------------------------------------- */
@@ -421,11 +423,247 @@ typedef struct {
 	uint64_t next_session;
 } ServerState;
 
+static Client *g_clients[MAXC];
+static int g_epoll_fd = -1;
+
+struct pending_write {
+	uint64_t volume_id;
+	uint64_t block_no;
+	uint8_t hash[HIFS_BLOCK_HASH_SIZE];
+	int fd;
+	struct pending_write *next;
+};
+
+struct fsync_event {
+	int fd;
+	uint64_t volume_id;
+	uint64_t block_no;
+	struct fsync_event *next;
+};
+
+static pthread_mutex_t g_pending_mu = PTHREAD_MUTEX_INITIALIZER;
+static struct pending_write *g_pending_writes;
+
+static pthread_mutex_t g_fsync_mu = PTHREAD_MUTEX_INITIALIZER;
+static struct fsync_event *g_fsync_head;
+static struct fsync_event *g_fsync_tail;
+
+static bool pending_write_register(int fd, uint64_t volume_id,
+				       uint64_t block_no,
+				       const uint8_t hash[HIFS_BLOCK_HASH_SIZE]);
+static void pending_write_cancel(int fd, uint64_t volume_id,
+			      uint64_t block_no,
+			      const uint8_t hash[HIFS_BLOCK_HASH_SIZE]);
+static void pending_write_drop_fd(int fd);
+static void fsync_event_remove_fd(int fd);
+static void fsync_event_enqueue(int fd, uint64_t volume_id, uint64_t block_no);
+static struct fsync_event *fsync_event_drain(void);
+static Client *guard_find_client_by_fd(int fd, int *slot_out);
+static bool send_fsync_frame(Client *cl, uint64_t volume_id, uint64_t block_no);
+static void flush_pending_fsyncs(void);
+static void guard_close_client(int slot);
+
 static uint64_t now_ms(void)
 {
 	struct timespec ts;
 	clock_gettime(CLOCK_REALTIME, &ts);
 	return (uint64_t)ts.tv_sec * 1000ULL + ts.tv_nsec / 1000000ULL;
+}
+
+static bool pending_write_register(int fd, uint64_t volume_id,
+				       uint64_t block_no,
+				       const uint8_t hash[HIFS_BLOCK_HASH_SIZE])
+{
+	struct pending_write *w = malloc(sizeof(*w));
+	if (!w)
+		return false;
+	w->fd = fd;
+	w->volume_id = volume_id;
+	w->block_no = block_no;
+	memcpy(w->hash, hash, HIFS_BLOCK_HASH_SIZE);
+	pthread_mutex_lock(&g_pending_mu);
+	w->next = g_pending_writes;
+	g_pending_writes = w;
+	pthread_mutex_unlock(&g_pending_mu);
+	return true;
+}
+
+static void pending_write_cancel(int fd, uint64_t volume_id,
+			      uint64_t block_no,
+			      const uint8_t hash[HIFS_BLOCK_HASH_SIZE])
+{
+	pthread_mutex_lock(&g_pending_mu);
+	struct pending_write **cur = &g_pending_writes;
+	while (*cur) {
+		if ((*cur)->fd == fd &&
+		    (*cur)->volume_id == volume_id &&
+		    (*cur)->block_no == block_no &&
+		    memcmp((*cur)->hash, hash, HIFS_BLOCK_HASH_SIZE) == 0) {
+			struct pending_write *dead = *cur;
+			*cur = dead->next;
+			free(dead);
+			break;
+		}
+		cur = &(*cur)->next;
+	}
+	pthread_mutex_unlock(&g_pending_mu);
+}
+
+static void fsync_event_remove_fd(int fd)
+{
+	pthread_mutex_lock(&g_fsync_mu);
+	struct fsync_event **cur = &g_fsync_head;
+	while (*cur) {
+		if ((*cur)->fd == fd) {
+			struct fsync_event *dead = *cur;
+			*cur = dead->next;
+			free(dead);
+		} else {
+			cur = &(*cur)->next;
+		}
+	}
+	g_fsync_tail = NULL;
+	struct fsync_event *scan = g_fsync_head;
+	while (scan) {
+		if (!scan->next)
+			g_fsync_tail = scan;
+		scan = scan->next;
+	}
+	pthread_mutex_unlock(&g_fsync_mu);
+}
+
+static void pending_write_drop_fd(int fd)
+{
+	pthread_mutex_lock(&g_pending_mu);
+	struct pending_write **cur = &g_pending_writes;
+	while (*cur) {
+		if ((*cur)->fd == fd) {
+			struct pending_write *dead = *cur;
+			*cur = dead->next;
+			free(dead);
+		} else {
+			cur = &(*cur)->next;
+		}
+	}
+	pthread_mutex_unlock(&g_pending_mu);
+	fsync_event_remove_fd(fd);
+}
+
+static void fsync_event_enqueue(int fd, uint64_t volume_id, uint64_t block_no)
+{
+	struct fsync_event *ev = malloc(sizeof(*ev));
+	if (!ev)
+		return;
+	ev->fd = fd;
+	ev->volume_id = volume_id;
+	ev->block_no = block_no;
+	ev->next = NULL;
+	pthread_mutex_lock(&g_fsync_mu);
+	if (g_fsync_tail)
+		g_fsync_tail->next = ev;
+	else
+		g_fsync_head = ev;
+	g_fsync_tail = ev;
+	pthread_mutex_unlock(&g_fsync_mu);
+}
+
+static struct fsync_event *fsync_event_drain(void)
+{
+	pthread_mutex_lock(&g_fsync_mu);
+	struct fsync_event *head = g_fsync_head;
+	g_fsync_head = NULL;
+	g_fsync_tail = NULL;
+	pthread_mutex_unlock(&g_fsync_mu);
+	return head;
+}
+
+void hifs_guard_notify_fsync(uint64_t volume_id, uint64_t block_no,
+				 const uint8_t *hash, size_t hash_len)
+{
+	if (!hash)
+		return;
+	struct pending_write *match = NULL;
+	pthread_mutex_lock(&g_pending_mu);
+	struct pending_write **cur = &g_pending_writes;
+	size_t cmp_len = hash_len < HIFS_BLOCK_HASH_SIZE ? hash_len : HIFS_BLOCK_HASH_SIZE;
+	while (*cur) {
+		if ((*cur)->volume_id == volume_id &&
+		    (*cur)->block_no == block_no &&
+		    memcmp((*cur)->hash, hash, cmp_len) == 0) {
+			match = *cur;
+			*cur = match->next;
+			break;
+		}
+		cur = &(*cur)->next;
+	}
+	pthread_mutex_unlock(&g_pending_mu);
+	if (!match)
+		return;
+	fsync_event_enqueue(match->fd, match->volume_id, match->block_no);
+	free(match);
+}
+
+static Client *guard_find_client_by_fd(int fd, int *slot_out)
+{
+	for (int i = 0; i < MAXC; ++i) {
+		Client *cl = g_clients[i];
+		if (cl && cl->fd == fd) {
+			if (slot_out)
+				*slot_out = i;
+			return cl;
+		}
+	}
+	return NULL;
+}
+
+static bool send_fsync_frame(Client *cl, uint64_t volume_id, uint64_t block_no)
+{
+	char *json = NULL;
+	if (asprintf(&json,
+		     "{\"ok\":true,\"type\":\"fsync\",\"volume_id\":%llu,\"block_no\":%llu}",
+		     (unsigned long long)volume_id,
+		     (unsigned long long)block_no) < 0)
+		return false;
+	int rc = write_framed_json(cl->fd, json);
+	free(json);
+	return rc == 0;
+}
+
+static void flush_pending_fsyncs(void)
+{
+	struct fsync_event *ev = fsync_event_drain();
+	uint64_t ts = now_ms();
+	while (ev) {
+		struct fsync_event *next = ev->next;
+		int slot = -1;
+		Client *cl = guard_find_client_by_fd(ev->fd, &slot);
+		if (cl) {
+			if (!send_fsync_frame(cl, ev->volume_id, ev->block_no)) {
+				hifs_warning("fsync notify failed for fd=%d", cl->fd);
+				guard_close_client(slot);
+			} else {
+				cl->last_active_ms = ts;
+			}
+		}
+		free(ev);
+		ev = next;
+	}
+}
+
+static void guard_close_client(int slot)
+{
+	if (slot < 0 || slot >= MAXC)
+		return;
+	Client *cl = g_clients[slot];
+	if (!cl)
+		return;
+	if (g_epoll_fd >= 0)
+		epoll_ctl(g_epoll_fd, EPOLL_CTL_DEL, cl->fd, NULL);
+	pending_write_drop_fd(cl->fd);
+	close(cl->fd);
+	free(cl->rbuf);
+	free(cl);
+	g_clients[slot] = NULL;
 }
 
 static int set_nonblock(int fd)
@@ -803,13 +1041,27 @@ static bool handle_volume_block_put(Client *c, const JVal *root)
 		return send_error_json(c->fd, "bad_request", "block too large");
 	}
 
+	uint8_t digest[SHA256_DIGEST_LENGTH];
+	SHA256(blob, blob_len, digest);
+	uint8_t hash_bytes[HIFS_BLOCK_HASH_SIZE];
+	memcpy(hash_bytes, digest, HIFS_BLOCK_HASH_SIZE);
+
+	if (!pending_write_register(c->fd, volume_id, block_no, hash_bytes)) {
+		free(blob);
+		return send_error_json(c->fd, "server_busy", "unable to queue write ack");
+	}
+
 	int rc = hifs_put_block(volume_id, block_no, blob, blob_len, HIFS_HASH_ALGO_SHA256);
 	free(blob);
-	if (rc == -EAGAIN)
+	if (rc == -EAGAIN) {
+		pending_write_cancel(c->fd, volume_id, block_no, hash_bytes);
 		return send_error_json(c->fd, "not_leader", "forward to leader");
-	if (rc != 0)
+	}
+	if (rc != 0) {
+		pending_write_cancel(c->fd, volume_id, block_no, hash_bytes);
 		return send_error_json(c->fd, "db_error", "unable to store block");
-	return send_simple_ok(c->fd, "volume_block_put");
+	}
+	return true;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1015,21 +1267,9 @@ int hive_guard_server_main(void)
 		.data.fd = sfd,
 	};
 	epoll_ctl(ep, EPOLL_CTL_ADD, sfd, &ev);
-
-
-	Client *clients[MAXC] = {0};
+	g_epoll_fd = ep;
+	memset(g_clients, 0, sizeof(g_clients));
 	ServerState S = {.idle_timeout_ms = idle_ms, .next_session = 0 };
-	void close_client(int idx)
-	{
-		Client *cl = clients[idx];
-		if (!cl)
-			return;
-		epoll_ctl(ep, EPOLL_CTL_DEL, cl->fd, NULL);
-		close(cl->fd);
-		free(cl->rbuf);
-		free(cl);
-		clients[idx] = NULL;
-	}
 
 	struct epoll_event events[128];
 	while (!g_stop) {
@@ -1050,7 +1290,7 @@ int hive_guard_server_main(void)
 					set_nonblock(cfd);
 					int slot = -1;
 					for (int idx = 0; idx < MAXC; ++idx) {
-						if (!clients[idx]) {
+						if (!g_clients[idx]) {
 							slot = idx;
 							break;
 						}
@@ -1063,7 +1303,7 @@ int hive_guard_server_main(void)
 					Client *cl = calloc(1, sizeof(Client));
 					cl->fd = cfd;
 					cl->last_active_ms = now;
-					clients[slot] = cl;
+					g_clients[slot] = cl;
 					struct epoll_event cev = {
 						.events = EPOLLIN | EPOLLET,
 						.data.u32 = (uint32_t)(slot + 1),
@@ -1073,31 +1313,33 @@ int hive_guard_server_main(void)
 				}
 			} else {
 				int slot = (int)events[i].data.u32 - 1;
-				if (slot < 0 || slot >= MAXC || !clients[slot])
+				if (slot < 0 || slot >= MAXC || !g_clients[slot])
 					continue;
-				Client *cl = clients[slot];
+				Client *cl = g_clients[slot];
 				int rc = handle_one(cl, &S);
 				if (rc != 0) {
 					hifs_info("Closing client slot=%d rc=%d", slot, rc);
-					close_client(slot);
+					guard_close_client(slot);
 				}
 			}
 		}
+		flush_pending_fsyncs();
 
 		for (int i = 0; i < MAXC; ++i) {
-			Client *cl = clients[i];
+			Client *cl = g_clients[i];
 			if (!cl)
 				continue;
 			if (now - cl->last_active_ms > (uint64_t)S.idle_timeout_ms) {
 				hifs_info("Idle timeout slot=%d", i);
-				close_client(i);
+				guard_close_client(i);
 			}
 		}
 	}
 
+	flush_pending_fsyncs();
 	for (int i = 0; i < MAXC; ++i)
-		if (clients[i])
-			close_client(i);
+		if (g_clients[i])
+			guard_close_client(i);
 	close(ep);
 	close(sfd);
 	close_hive_link();

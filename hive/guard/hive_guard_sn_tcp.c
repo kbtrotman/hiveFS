@@ -10,7 +10,8 @@
 /**
  * Lightweight TCP helper for sending/receiving EC stripes between nodes.
  * This is intentionally simple and synchronous for now; it can evolve into
- * a more capable RPC transport later.
+ * a fully-fledged inter-cluster communication as encryption and security is
+ * added later.
  */
 
 #include "hive_guard_sn_tcp.h"

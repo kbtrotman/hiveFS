@@ -69,6 +69,21 @@ int hg_kv_get_h2s(uint8_t hash_algo,
                   struct H2SEntry *out);  /* returns 0 on success, <0 on error */
 
 int hg_kv_apply_put_block(const struct RaftPutBlock *cmd);
+int hg_kv_get_vb_entry(uint64_t volume_id,
+		       uint64_t block_no,
+		       struct VbEntry *out);
+int hg_kv_get_estripe_loc(uint64_t estripe_id,
+			  struct EstripeLoc *out);
+int hg_kv_get_vif_entry(uint64_t volume_id,
+			uint64_t inode_id,
+			uint16_t fp_index,
+			struct hifs_block_fingerprint_wire *out);
+int hg_kv_put_estripe_chunk(uint64_t estripe_id,
+			    const uint8_t *data,
+			    size_t len);
+int hg_kv_get_estripe_chunk(uint64_t estripe_id,
+			    uint8_t **out_data,
+			    size_t *out_len);
 
 bool hifs_volume_inode_fp_replace(uint64_t volume_id,
                                   uint64_t inode_id,

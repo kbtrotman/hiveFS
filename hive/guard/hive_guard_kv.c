@@ -84,6 +84,16 @@ static void make_estripe_key(uint64_t estripe_id,
 	*key_len_out = 2 + sizeof(estripe_id);
 }
 
+static void make_estripe_data_key(uint64_t estripe_id,
+				  char *key_out,
+				  size_t *key_len_out)
+{
+	key_out[0] = 'e';
+	key_out[1] = 'd';
+	memcpy(&key_out[2], &estripe_id, sizeof(estripe_id));
+	*key_len_out = 2 + sizeof(estripe_id);
+}
+
 static void make_vif_key(uint64_t volume_id,
 			 uint64_t inode_id,
 			 uint16_t fp_index,
@@ -169,6 +179,175 @@ int hg_kv_get_h2s(uint8_t hash_algo,
     memcpy(out, val, sizeof(*out));
     free(val);
     return 0;
+}
+
+int hg_kv_get_vb_entry(uint64_t volume_id,
+		       uint64_t block_no,
+		       struct VbEntry *out)
+{
+	if (!g_db || !out)
+		return -1;
+
+	char key[2 + sizeof(uint64_t) * 2];
+	size_t klen = 0;
+	make_vb_key(volume_id, block_no, key, &klen);
+
+	char *err = NULL;
+	size_t vlen = 0;
+	rocksdb_readoptions_t *ropt = rocksdb_readoptions_create();
+	char *val = rocksdb_get(g_db, ropt,
+				key, klen,
+				&vlen, &err);
+	rocksdb_readoptions_destroy(ropt);
+
+	if (err != NULL) {
+		fprintf(stderr, "hg_kv_get_vb_entry: rocksdb_get error: %s\n", err);
+		free(err);
+		return -1;
+	}
+	if (!val)
+		return -1;
+	if (vlen != sizeof(*out)) {
+		fprintf(stderr, "hg_kv_get_vb_entry: size mismatch (%zu != %zu)\n",
+			vlen, sizeof(*out));
+		free(val);
+		return -1;
+	}
+	memcpy(out, val, sizeof(*out));
+	free(val);
+	return 0;
+}
+
+int hg_kv_get_estripe_loc(uint64_t estripe_id,
+			  struct EstripeLoc *out)
+{
+	if (!g_db || !out)
+		return -1;
+
+	char key[2 + sizeof(uint64_t)];
+	size_t klen = 0;
+	make_estripe_key(estripe_id, key, &klen);
+
+	char *err = NULL;
+	size_t vlen = 0;
+	rocksdb_readoptions_t *ropt = rocksdb_readoptions_create();
+	char *val = rocksdb_get(g_db, ropt,
+				key, klen,
+				&vlen, &err);
+	rocksdb_readoptions_destroy(ropt);
+
+	if (err != NULL) {
+		fprintf(stderr, "hg_kv_get_estripe_loc: rocksdb_get error: %s\n", err);
+		free(err);
+		return -1;
+	}
+	if (!val)
+		return -1;
+	if (vlen != sizeof(*out)) {
+		fprintf(stderr, "hg_kv_get_estripe_loc: size mismatch (%zu != %zu)\n",
+			vlen, sizeof(*out));
+		free(val);
+		return -1;
+	}
+	memcpy(out, val, sizeof(*out));
+	free(val);
+	return 0;
+}
+
+int hg_kv_get_vif_entry(uint64_t volume_id,
+			uint64_t inode_id,
+			uint16_t fp_index,
+			struct hifs_block_fingerprint_wire *out)
+{
+	if (!g_db || !out)
+		return -1;
+
+	char key[3 + sizeof(volume_id) + sizeof(inode_id) + sizeof(fp_index)];
+	size_t klen = 0;
+	make_vif_key(volume_id, inode_id, fp_index, key, &klen);
+
+	char *err = NULL;
+	size_t vlen = 0;
+	rocksdb_readoptions_t *ropt = rocksdb_readoptions_create();
+	char *val = rocksdb_get(g_db, ropt,
+				key, klen,
+				&vlen, &err);
+	rocksdb_readoptions_destroy(ropt);
+
+	if (err != NULL) {
+		fprintf(stderr, "hg_kv_get_vif_entry: rocksdb_get error: %s\n", err);
+		free(err);
+		return -1;
+	}
+	if (!val)
+		return -1;
+	if (vlen != sizeof(*out)) {
+		fprintf(stderr, "hg_kv_get_vif_entry: size mismatch (%zu != %zu)\n",
+			vlen, sizeof(*out));
+		free(val);
+		return -1;
+	}
+	memcpy(out, val, sizeof(*out));
+	free(val);
+	return 0;
+}
+
+int hg_kv_put_estripe_chunk(uint64_t estripe_id,
+			    const uint8_t *data,
+			    size_t len)
+{
+	if (!g_db || !data || len == 0)
+		return -1;
+
+	char key[2 + sizeof(uint64_t)];
+	size_t klen = 0;
+	make_estripe_data_key(estripe_id, key, &klen);
+
+	char *err = NULL;
+	rocksdb_writeoptions_t *wopt = rocksdb_writeoptions_create();
+	rocksdb_put(g_db, wopt,
+		    key, klen,
+		    (const char *)data, len,
+		    &err);
+	rocksdb_writeoptions_destroy(wopt);
+	if (err != NULL) {
+		fprintf(stderr, "hg_kv_put_estripe_chunk: rocksdb_put error: %s\n", err);
+		free(err);
+		return -1;
+	}
+	return 0;
+}
+
+int hg_kv_get_estripe_chunk(uint64_t estripe_id,
+			    uint8_t **out_data,
+			    size_t *out_len)
+{
+	if (!g_db || !out_data || !out_len)
+		return -1;
+
+	char key[2 + sizeof(uint64_t)];
+	size_t klen = 0;
+	make_estripe_data_key(estripe_id, key, &klen);
+
+	char *err = NULL;
+	size_t vlen = 0;
+	rocksdb_readoptions_t *ropt = rocksdb_readoptions_create();
+	char *val = rocksdb_get(g_db, ropt,
+				key, klen,
+				&vlen, &err);
+	rocksdb_readoptions_destroy(ropt);
+
+	if (err != NULL) {
+		fprintf(stderr, "hg_kv_get_estripe_chunk: rocksdb_get error: %s\n", err);
+		free(err);
+		return -1;
+	}
+	if (!val)
+		return -1;
+
+	*out_data = (uint8_t *)val;
+	*out_len = vlen;
+	return 0;
 }
 
 int hg_kv_apply_put_block(const struct RaftPutBlock *cmd)
