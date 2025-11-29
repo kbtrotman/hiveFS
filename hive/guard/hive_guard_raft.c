@@ -39,6 +39,25 @@ static struct raft_thread_ctx g_ctx;
 static pthread_mutex_t      g_state_mu = PTHREAD_MUTEX_INITIALIZER;
 static int                  g_is_leader = 0;
 static int                  g_should_stop = 0;
+static pthread_mutex_t      g_log_mu = PTHREAD_MUTEX_INITIALIZER;
+
+struct raft_log_state {
+    struct RaftCmd *entries;
+    size_t          capacity;
+    size_t          head;
+    size_t          size;
+    uint64_t        next_index;
+    uint64_t        committed_index;
+};
+
+static struct raft_log_state g_raft_log = {
+    .entries = NULL,
+    .capacity = 0,
+    .head = 0,
+    .size = 0,
+    .next_index = 1,
+    .committed_index = 0,
+};
 
 
 /* Convert binary to hex string; out must be at least 2*len + 1 bytes. */
@@ -233,15 +252,15 @@ commitCb(struct uv_raft *raft,
         const struct RaftPutInode *pi = &cmd.u.inode;
         if (!hifs_volume_inode_store(pi->volume_id, &pi->inode))
             return -EIO;
-#if 0
-        if (!hifs_volume_inode_fp_replace(pi->volume_id,
-                                          pi->inode_id,
-                                          pi->fp_index,
-                                          pi->fp_block_no,
-                                          pi->fp_hash_algo,
-                                          pi->fp_hash_hex))
-            return -EIO;
-#endif
+        if (pi->fp_index < HIFS_MAX_BLOCK_HASHES) {
+            const struct hifs_block_fingerprint_wire *fp =
+                &pi->inode.i_block_fingerprints[pi->fp_index];
+            if (!hifs_volume_inode_fp_replace(pi->volume_id,
+                                              pi->inode_id,
+                                              pi->fp_index,
+                                              fp))
+                return -EIO;
+        }
         return 0;
     }
 
@@ -255,6 +274,112 @@ commitCb(struct uv_raft *raft,
     return 0;
 }
 
+static int raft_log_ensure_capacity_locked(size_t extra)
+{
+    if (extra == 0)
+        return 0;
+
+    size_t needed = g_raft_log.size + extra;
+    if (needed <= g_raft_log.capacity) {
+        if (g_raft_log.size == 0)
+            g_raft_log.head = 0;
+        if (g_raft_log.head + needed <= g_raft_log.capacity || g_raft_log.size == 0)
+            return 0;
+        if (g_raft_log.size > 0) {
+            memmove(g_raft_log.entries,
+                    g_raft_log.entries + g_raft_log.head,
+                    g_raft_log.size * sizeof(*g_raft_log.entries));
+        }
+        g_raft_log.head = 0;
+        return 0;
+    }
+
+    size_t new_cap = g_raft_log.capacity ? g_raft_log.capacity : 16;
+    while (new_cap < needed)
+        new_cap *= 2;
+
+    struct RaftCmd *new_entries = malloc(new_cap * sizeof(*new_entries));
+    if (!new_entries)
+        return -ENOMEM;
+
+    if (g_raft_log.size > 0 && g_raft_log.entries) {
+        memcpy(new_entries,
+               g_raft_log.entries + g_raft_log.head,
+               g_raft_log.size * sizeof(*new_entries));
+    }
+
+    free(g_raft_log.entries);
+    g_raft_log.entries = new_entries;
+    g_raft_log.capacity = new_cap;
+    g_raft_log.head = 0;
+    return 0;
+}
+
+static int raft_log_append_entry(const struct RaftCmd *cmd, uint64_t *out_idx)
+{
+    if (!cmd || !out_idx)
+        return -EINVAL;
+
+    pthread_mutex_lock(&g_log_mu);
+    int rc = raft_log_ensure_capacity_locked(1);
+    if (rc != 0) {
+        pthread_mutex_unlock(&g_log_mu);
+        return rc;
+    }
+
+    size_t pos = g_raft_log.head + g_raft_log.size;
+    g_raft_log.entries[pos] = *cmd;
+    uint64_t idx = g_raft_log.next_index++;
+    g_raft_log.size++;
+    pthread_mutex_unlock(&g_log_mu);
+
+    *out_idx = idx;
+    return 0;
+}
+
+static int raft_log_commit_up_to(uint64_t idx)
+{
+    if (idx == 0)
+        return -EINVAL;
+
+    for (;;) {
+        struct RaftCmd entry;
+
+        pthread_mutex_lock(&g_log_mu);
+        uint64_t highest = g_raft_log.next_index ? (g_raft_log.next_index - 1) : 0;
+        if (idx > highest) {
+            pthread_mutex_unlock(&g_log_mu);
+            return -EINVAL;
+        }
+        if (g_raft_log.committed_index >= idx) {
+            pthread_mutex_unlock(&g_log_mu);
+            break;
+        }
+        if (g_raft_log.size == 0) {
+            pthread_mutex_unlock(&g_log_mu);
+            return -EIO;
+        }
+
+        entry = g_raft_log.entries[g_raft_log.head];
+        g_raft_log.head++;
+        g_raft_log.size--;
+        g_raft_log.committed_index++;
+        if (g_raft_log.size == 0)
+            g_raft_log.head = 0;
+        pthread_mutex_unlock(&g_log_mu);
+
+        uv_buf_t buf = {
+            .base = (char *)&entry,
+            .len = sizeof(entry),
+        };
+        int rc = commitCb(NULL, RAFT_COMMAND, &buf);
+        if (rc != 0)
+            return rc;
+    }
+
+    return 0;
+}
+
 
 int hifs_raft_submit_put_block(const struct RaftPutBlock *cmd)
 {
@@ -264,7 +389,14 @@ int hifs_raft_submit_put_block(const struct RaftPutBlock *cmd)
     if (!hg_guard_local_can_write())
         return -EAGAIN;
 
-    /* TODO: integrate with real Raft log append sequence. For now, apply
-     * immediately so callers can exercise the pipeline end-to-end. */
-    return hg_kv_apply_put_block(cmd);
+    struct RaftCmd entry = {0};
+    entry.op_type = HG_OP_PUT_BLOCK;
+    entry.u.block = *cmd;
+
+    uint64_t idx = 0;
+    int rc = raft_log_append_entry(&entry, &idx);
+    if (rc != 0)
+        return rc;
+
+    return raft_log_commit_up_to(idx);
 }

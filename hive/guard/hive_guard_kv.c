@@ -84,6 +84,25 @@ static void make_estripe_key(uint64_t estripe_id,
 	*key_len_out = 2 + sizeof(estripe_id);
 }
 
+static void make_vif_key(uint64_t volume_id,
+			 uint64_t inode_id,
+			 uint16_t fp_index,
+			 char *key_out,
+			 size_t *key_len_out)
+{
+	key_out[0] = 'v';
+	key_out[1] = 'i';
+	key_out[2] = 'f';
+	size_t off = 3;
+	memcpy(&key_out[off], &volume_id, sizeof(volume_id));
+	off += sizeof(volume_id);
+	memcpy(&key_out[off], &inode_id, sizeof(inode_id));
+	off += sizeof(inode_id);
+	memcpy(&key_out[off], &fp_index, sizeof(fp_index));
+	off += sizeof(fp_index);
+	*key_len_out = off;
+}
+
 int hg_kv_put_h2s(uint8_t hash_algo,
                   const uint8_t hash[32],
                   const struct H2SEntry *e)
@@ -211,11 +230,45 @@ int hg_kv_apply_put_block(const struct RaftPutBlock *cmd)
 	return 0;
 }
 
-/* Now that we've de-coupled rocks, I need to re-make the SQL commitcb raft routine so that it calls
- * these routines and also updates the bits of mariaDB sql metadata we still have in Maria. This is
- * the bulk of the data, however, and will be very fast compared to the overhead of using SQL to 
- * talk to rocks.
- * */
+bool hifs_volume_inode_fp_replace(uint64_t volume_id,
+				  uint64_t inode_id,
+				  uint16_t fp_index,
+				  const struct hifs_block_fingerprint_wire *fp)
+{
+	if (!g_db || fp_index >= HIFS_MAX_BLOCK_HASHES)
+		return false;
+
+	char key[3 + sizeof(volume_id) + sizeof(inode_id) + sizeof(fp_index)];
+	size_t key_len = 0;
+	make_vif_key(volume_id, inode_id, fp_index, key, &key_len);
+
+	char *err = NULL;
+	rocksdb_writeoptions_t *wopt = rocksdb_writeoptions_create();
+	bool do_delete = (!fp) ||
+			 ((fp->block_no == 0) && (fp->hash_algo == 0));
+
+	if (do_delete) {
+		rocksdb_delete(g_db, wopt, key, key_len, &err);
+	} else {
+		rocksdb_put(g_db, wopt,
+			    key, key_len,
+			    (const char *)fp, sizeof(*fp),
+			    &err);
+	}
+
+	rocksdb_writeoptions_destroy(wopt);
+
+	if (err != NULL) {
+		fprintf(stderr,
+			"hifs_volume_inode_fp_replace: rocksdb_%s error: %s\n",
+			do_delete ? "delete" : "put",
+			err);
+		free(err);
+		return false;
+	}
+
+	return true;
+}
 
  long long get_next_auto_increment_id(rocksdb_t* db, rocksdb_readoptions_t* ropts, rocksdb_writeoptions_t* wopts) {
     char* err = NULL;
