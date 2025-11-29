@@ -70,6 +70,11 @@ int hg_kv_get_h2s(uint8_t hash_algo,
 
 int hg_kv_apply_put_block(const struct RaftPutBlock *cmd);
 
+bool hifs_volume_inode_fp_replace(uint64_t volume_id,
+                                  uint64_t inode_id,
+                                  uint16_t fp_index,
+                                  const struct hifs_block_fingerprint_wire *fp);
+
 #ifdef __cplusplus
 }
 #endif
