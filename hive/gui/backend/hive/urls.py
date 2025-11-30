@@ -17,7 +17,6 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from accounts.views import AccountsRootView
 from tree.views import TreeNodeViewSet
 from settings.views import SettingsRootView
 from audit.views import AuditRootView
@@ -25,7 +24,6 @@ from monitor.views import MonitorRootView
 from tenant.views import TenantRootView
 
 router = DefaultRouter(trailing_slash=False)
-router.register(r'accounts', AccountsRootView, basename='accounts')
 #router.register(r'groups', GroupViewSet, basename='group')
 router.register(r'tree', TreeNodeViewSet, basename='tree')
 router.register(r'settings', SettingsRootView, basename='settings')
@@ -36,6 +34,6 @@ router.register(r'tenant', TenantRootView, basename='tenant')
 
 urlpatterns = [
     path("api/v1/", include(router.urls)),
+    path("api/v1/accounts/", include("accounts.urls")),
     path('admin/', admin.site.urls),
 ]
-

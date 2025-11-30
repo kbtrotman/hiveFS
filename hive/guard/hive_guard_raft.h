@@ -113,5 +113,7 @@ void hg_raft_shutdown(void);
 
 /* Helper: is this node currently the Raft leader? */
 bool hg_guard_local_can_write(void);
+int hifs_raft_submit_put_block(const struct RaftPutBlock *cmd);
+int hifs_raft_submit_put_dirent(const struct RaftPutDirent *cmd);
 
 #endif /* HIVE_GUARD_RAFT_H */

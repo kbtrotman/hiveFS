@@ -1207,7 +1207,7 @@ static void on_signal(int s)
 }
 
 /* -------------------------------------------------------------------------- */
-/* Server main loop                                                            */
+/* tcp Server main loop (FROM CLIENT CONNECTIONS)                                                            */
 /* -------------------------------------------------------------------------- */
 int hive_guard_server_main(void)
 {

@@ -5,4 +5,7 @@ tzdata==2025.1
 djangorestframework
 django-cors-headers
 django-extensions
+django-allauth
+dj-rest-auth
 mysqlclient
+requests

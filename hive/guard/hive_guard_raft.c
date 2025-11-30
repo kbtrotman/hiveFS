@@ -291,6 +291,13 @@ commitCb(struct uv_raft *raft,
                                 HIFS_BLOCK_HASH_SIZE);
         return 0;
     }
+    case HG_OP_PUT_DIRENT: {
+        const struct RaftPutDirent *pd = &cmd.u.dirent;
+        if (!hifs_volume_dentry_store(pd->volume_id,
+                                      (const struct hifs_volume_dentry *)&pd->dirent))
+            return -EIO;
+        return 0;
+    }
     default:
         break;
     }
@@ -421,5 +428,23 @@ int hifs_raft_submit_put_block(const struct RaftPutBlock *cmd)
     if (rc != 0)
         return rc;
 
+    return raft_log_commit_up_to(idx);
+}
+
+int hifs_raft_submit_put_dirent(const struct RaftPutDirent *cmd)
+{
+    if (!cmd)
+        return -EINVAL;
+    if (!hg_guard_local_can_write())
+        return -EAGAIN;
+
+    struct RaftCmd entry = {0};
+    entry.op_type = HG_OP_PUT_DIRENT;
+    entry.u.dirent = *cmd;
+
+    uint64_t idx = 0;
+    int rc = raft_log_append_entry(&entry, &idx);
+    if (rc != 0)
+        return rc;
     return raft_log_commit_up_to(idx);
 }
