@@ -1,27 +1,33 @@
-from rest_framework.response import Response
-from rest_framework.viewsets import ViewSet
+from django.contrib.auth import get_user_model
+from rest_framework import permissions, viewsets
 from rest_framework.decorators import action
+from rest_framework.response import Response
+from rest_framework.views import APIView
 
-class AccountsRootView(ViewSet):
-    """Root of the Accounts API: /api/v1/accounts/"""
+from .serializers import UserProfileSerializer
 
-    # GET /api/v1/accounts/
-    def list(self, request):
-        return Response({"detail": "Accounts API root"})
+User = get_user_model()
 
-    # GET /api/v1/accounts/status/
-    @action(detail=False, methods=["get"])
-    def status(self, request):
-        return Response({"ok": True})
 
-    # POST /api/v1/accounts/auth/login/
-    @action(detail=False, methods=["post"], url_path="auth/login")
-    def auth_login(self, request):
-        # ... handle login payload ...
-        return Response({"token": "..."})
+class UserViewSet(viewsets.GenericViewSet):
+    """Endpoints for authenticated users to inspect their profile."""
 
-    # POST /api/v1/accounts/{pk}/reset-password/
-    @action(detail=True, methods=["post"], url_path="reset-password")
-    def reset_password(self, request, pk=None):
-        # ... reset password for user pk ...
-        return Response({"done": True})
+    serializer_class = UserProfileSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    queryset = User.objects.all()
+
+    @action(detail=False, methods=["get"], url_path="me")
+    def me(self, request):
+        serializer = self.get_serializer(request.user)
+        return Response(serializer.data)
+
+
+class SessionStatusView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        authenticated = request.user.is_authenticated
+        data = {"authenticated": authenticated}
+        if authenticated:
+            data["user"] = UserProfileSerializer(request.user).data
+        return Response(data)
