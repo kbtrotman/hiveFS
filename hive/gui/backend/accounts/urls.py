@@ -3,10 +3,21 @@ from rest_framework.routers import DefaultRouter
 from allauth.account.views import ConfirmEmailView
 from dj_rest_auth.registration.views import VerifyEmailView
 
-from .views import SessionStatusView, UserViewSet
+from .views import (
+    GroupMembershipViewSet,
+    GroupViewSet,
+    RoleAssignmentViewSet,
+    RoleViewSet,
+    SessionStatusView,
+    UserViewSet,
+)
 
 router = DefaultRouter(trailing_slash=False)
 router.register(r"users", UserViewSet, basename="users")
+router.register(r"groups", GroupViewSet, basename="groups")
+router.register(r"group-memberships", GroupMembershipViewSet, basename="group-memberships")
+router.register(r"roles", RoleViewSet, basename="roles")
+router.register(r"role-assignments", RoleAssignmentViewSet, basename="role-assignments")
 
 urlpatterns = [
     path("", include(router.urls)),
