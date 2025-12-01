@@ -2,9 +2,6 @@
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  experimental: {
-    esmExternals: "loose",
-  },
 
   trailingSlash: false,
 
@@ -33,7 +30,7 @@ const nextConfig = {
     ];
   },
 
-  webpack(config) {
+  turbopack(config) {
     config.resolve.alias["rc-util/es"] = "rc-util/lib";
     config.resolve.alias["rc-tree/es"] = "rc-tree/lib";
     config.resolve.alias["rc-motion/es"] = "rc-motion/lib";

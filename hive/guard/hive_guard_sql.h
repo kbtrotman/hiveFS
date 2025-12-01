@@ -155,61 +155,13 @@
 	"i_links=VALUES(i_links), i_hash_count=VALUES(i_hash_count), " \
 	"i_hash_reserved=VALUES(i_hash_reserved), epoch=VALUES(epoch)"
 
-#define SQL_VOLUME_INODE_FP_SELECT \
-	"SELECT fp_index, block_no, hash_algo, HEX(block_hash) " \
-	"FROM volume_inode_fingerprints WHERE volume_id=%llu AND inode=%llu " \
-	"ORDER BY fp_index"
-
-#define SQL_VOLUME_INODE_FP_DELETE \
-	"DELETE FROM volume_inode_fingerprints WHERE volume_id=%llu AND inode=%llu"
-
-#define SQL_VOLUME_INODE_FP_REPLACE \
-	"REPLACE INTO volume_inode_fingerprints " \
-	"(volume_id, inode, fp_index, block_no, hash_algo, block_hash) " \
-	"VALUES (%llu, %llu, %u, %u, %u, UNHEX('%s'))"
-
-/* SELECT: volume → (hash_algo, block_hash as HEX) */
-#define SQL_VOLUME_BLOCK_MAP_SELECT \
-  "SELECT hash_algo, HEX(block_hash) FROM volume_block_mappings " \
-  "WHERE volume_id=%llu AND block_no=%llu"
-
-/* volume_id + block_no -> hash mapping */
-#define SQL_VOLUME_BLOCK_MAP_UPSERT \
-  "INSERT INTO volume_block_mappings (volume_id, block_no, hash_algo, block_hash) " \
-  "VALUES (%llu, %llu, %u, UNHEX('%s')) " \
-  "ON DUPLICATE KEY UPDATE hash_algo=VALUES(hash_algo), block_hash=VALUES(block_hash)"
-
-/* block_hash -> 4 data + 2 parity stripe ids + ref_count (4+2 EC) */
-#define SQL_HASH_TO_ESTRIPES_SELECT \
-  "SELECT estripe_1_id, estripe_2_id, estripe_3_id, estripe_4_id, " \
-  "       estripe_p1_id, estripe_p2_id, ref_count " \
-  "FROM hive_meta.hash_to_estripes " \
-  "WHERE hash_algo=%u AND block_hash=UNHEX('%s')"
-
-/* UPSERT: block_hash -> 4 data + 2 parity stripe ids, bump ref_count */
-#define SQL_HASH_TO_ESTRIPES_UPSERT \
-  "INSERT INTO hive_meta.hash_to_estripes (" \
-  "  hash_algo, block_hash, ref_count, " \
-  "  estripe_1_id, estripe_2_id, estripe_3_id, estripe_4_id, " \
-  "  estripe_p1_id, estripe_p2_id, block_bck_hash) " \
-  "VALUES (%u, UNHEX('%s'), %llu, %llu, %llu, %llu, %llu, %llu, %llu, NULL) " \
-  "ON DUPLICATE KEY UPDATE " \
-  "  ref_count = ref_count + VALUES(ref_count), " \
-  "  estripe_1_id = VALUES(estripe_1_id), " \
-  "  estripe_2_id = VALUES(estripe_2_id), " \
-  "  estripe_3_id = VALUES(estripe_3_id), " \
-  "  estripe_4_id = VALUES(estripe_4_id), " \
-  "  estripe_p1_id = VALUES(estripe_p1_id), " \
-  "  estripe_p2_id = VALUES(estripe_p2_id)"
-
-/* Insert a single EC stripe payload as binary, with version */
-#define SQL_ECBLOCKS_INSERT_HEX \
-  "INSERT INTO hive_data.ecblocks (estripe_version, ec_block) " \
-  "VALUES (%llu, UNHEX('%s'))"
-
-/* Lookup the 6 stripe ids by binary block hash, SELECT the raw BLOB */
-#define SQL_ECBLOCK_SELECT \
-  "SELECT ec_block FROM hive_data.ecblocks WHERE estripe_id=%llu"
+struct stripe_location {
+	uint8_t stripe_index;
+	uint32_t storage_node_id;
+	uint32_t shard_id;
+	uint64_t estripe_id;
+	uint64_t block_offset;
+};
 
 /* SELECT all storage nodes */
 #define SQL_STORAGE_NODES_SELECT \
@@ -281,6 +233,12 @@ bool hifs_volume_block_ec_encode(const uint8_t *buf, uint32_t len,
 void hifs_volume_block_ec_free(struct hifs_ec_stripe_set *ec);
 bool hifs_load_storage_nodes(void);
 const struct hive_storage_node *hifs_get_storage_nodes(size_t *count);
+bool hifs_store_block_to_stripe_locations(uint64_t volume_id,
+                                          uint64_t block_no,
+                                          uint8_t hash_algo,
+                                          const uint8_t hash[HIFS_BLOCK_HASH_SIZE],
+                                          const struct stripe_location *locations,
+                                          size_t count);
 
 /* SQL Connect */
 

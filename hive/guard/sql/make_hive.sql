@@ -3,7 +3,7 @@
 
 CREATE DATABASE IF NOT EXISTS hive_api;
 CREATE DATABASE IF NOT EXISTS hive_meta;
-CREATE DATABASE IF NOT EXISTS hive_data;
+-- CREATE DATABASE IF NOT EXISTS hive_data;
 
 -- =========================
 -- META SCHEMA (hive_meta)
@@ -85,7 +85,7 @@ CREATE TABLE IF NOT EXISTS host_auth (
   intended_ip VARBINARY(16) NULL,
   claims JSON,
   status ENUM('pending','approved','revoked') NOT NULL DEFAULT 'pending',
-  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS host_tokens (
@@ -153,6 +153,7 @@ CREATE TABLE IF NOT EXISTS volume_root_dentries (
   rd_uid      INT UNSIGNED NOT NULL,
   rd_gid      INT UNSIGNED NOT NULL,
   rd_flags    INT UNSIGNED NOT NULL,
+  rd_mode     INT UNSIGNED NOT NULL,
   rd_size     BIGINT UNSIGNED NOT NULL,
   rd_blocks   BIGINT UNSIGNED NOT NULL,
   rd_atime    INT UNSIGNED NOT NULL,
@@ -170,9 +171,10 @@ CREATE TABLE IF NOT EXISTS volume_root_dentries (
 
 -- Inode metadata per volume (used for stats and attributes)
 CREATE TABLE IF NOT EXISTS volume_inodes (
+  inode         BIGINT UNSIGNED NOT NULL,
   volume_id     BIGINT UNSIGNED NOT NULL,
-  inode         BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   type          CHAR(1),
+  i_name         VARBINARY(256) NOT NULL, -- inode name (for quick lookup)
   i_msg_flags   INT UNSIGNED NOT NULL,
   i_version     TINYINT UNSIGNED NOT NULL,
   i_flags       TINYINT UNSIGNED NOT NULL,
@@ -197,6 +199,22 @@ CREATE TABLE IF NOT EXISTS volume_inodes (
   KEY idx_name (i_ino),
   CONSTRAINT fk_volume_inode FOREIGN KEY (volume_id)
     REFERENCES volume_superblocks(volume_id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE block_stripe_locations (
+    volume_id  BIGINT NOT NULL,
+    block_no   BIGINT NOT NULL,
+    hash_algo  TINYINT NOT NULL,
+    block_hash BINARY(16) NOT NULL,
+    stripe_index TINYINT NOT NULL,  -- 0..5 for k+m
+    storage_node_id INT NOT NULL,
+    shard_id  INT NOT NULL,
+    estripe_id BIGINT NOT NULL,
+    block_offset BIGINT NOT NULL,
+    ref_count INT UNSIGNED NOT NULL DEFAULT 1,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (volume_id, block_no, stripe_index),
+    KEY idx_hash (hash_algo, block_hash)
 ) ENGINE=InnoDB;
 
 -- Extended attributes per inode (optional GUI exposure)
@@ -231,7 +249,7 @@ CREATE TABLE IF NOT EXISTS volume_stats (
 USE hive_api;
 
 CREATE OR REPLACE VIEW v_dentries AS SELECT * FROM hive_meta.volume_dentries;
-CREATE OR REPLACE VIEW v_inodes   AS SELECT * FROM hive_meta.inodes;
+CREATE OR REPLACE VIEW v_inodes   AS SELECT * FROM hive_meta.volume_inodes;
 CREATE OR REPLACE VIEW v_roots    AS SELECT * FROM hive_meta.volume_root_dentries;
 
 -- Virtual nodes for GUI
@@ -281,7 +299,7 @@ SELECT
   END AS parent_node_id,
   v.name,
   'virtual' AS node_kind,
-  NULL     AS inode_id,
+  NULL     AS inode,
   NULL     AS dentry_id,
   v.id     AS virtual_id,
   m.mount_id IS NOT NULL AS is_mount,
@@ -315,7 +333,7 @@ SELECT
               WHEN 'l' THEN 'symlink'
               WHEN 'f' THEN 'file'
               ELSE 'node' END AS node_kind,
-  i.inode_id AS inode_id,
+  i.inode AS inode,
   d.dentry_id AS dentry_id,
   NULL AS virtual_id,
   (mm.mount_id IS NOT NULL) AS is_mount,
@@ -327,8 +345,8 @@ SELECT
     LIMIT 1
   ) AS has_children
 FROM hive_meta.volume_dentries d
-LEFT JOIN hive_meta.inodes i
-  ON i.inode_id = d.de_inode
+LEFT JOIN hive_meta.volume_inodes i
+  ON i.inode = d.de_inode
 LEFT JOIN hive_meta.volume_dentries p
   ON p.volume_id = d.volume_id
  AND p.de_inode  = d.de_parent

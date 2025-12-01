@@ -36,7 +36,7 @@ class UnifiedTreeSerializer(serializers.ModelSerializer):
             "parent_node_id", 
             "name", 
             "node_kind",
-            "inode_id",
+            "inode",
             "dentry_id",
             "has_children",
         ]
