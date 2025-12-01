@@ -73,7 +73,7 @@ class UnifiedTree(models.Model):
     parent_node_id = models.CharField(max_length=64, null=True)
     name = models.CharField(max_length=255)
     node_kind = models.CharField(max_length=32)
-    inode_id = models.BigIntegerField(null=True)
+    inode = models.BigIntegerField(null=True)
     dentry_id = models.BigIntegerField(null=True)
     has_children = models.BooleanField()
 

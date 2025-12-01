@@ -62,7 +62,7 @@ class TreeNodeViewSet(ViewSet):
                 "isLeaf": not node.has_children,
                 "hasChildren": bool(node.has_children),
                 "nodeKind": node.node_kind,
-                "inodeId": node.inode_id,
+                "inodeId": node.inode,
                 "dentryId": node.dentry_id,
             }
             for node in qs

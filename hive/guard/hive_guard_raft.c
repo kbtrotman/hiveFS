@@ -13,6 +13,7 @@
 
 #include <errno.h>
 
+#include "hive_guard_erasure_code.h"
 #include "hive_guard_raft.h"
 #include "hive_guard_sql.h"
 #include "hive_guard_kv.h"
@@ -285,6 +286,21 @@ commitCb(struct uv_raft *raft,
 
     case HG_OP_PUT_BLOCK: {
         hg_kv_apply_put_block(&cmd.u.block);
+        struct stripe_location locs[HIFS_EC_STRIPES];
+        for (size_t i = 0; i < HIFS_EC_STRIPES; ++i) {
+            locs[i].stripe_index = i;
+            locs[i].storage_node_id = cmd.u.block.ec_stripes[i].storage_node_id;
+            locs[i].shard_id = cmd.u.block.ec_stripes[i].shard_id;
+            locs[i].estripe_id = cmd.u.block.ec_stripes[i].estripe_id;
+            locs[i].block_offset = cmd.u.block.ec_stripes[i].block_offset;
+        }
+        hifs_store_block_to_stripe_locations(cmd.u.block.volume_id,
+                                            cmd.u.block.block_no,
+                                            cmd.u.block.hash_algo,
+                                            cmd.u.block.hash,
+                                            locs,
+                                            HIFS_EC_STRIPES);
+
         hifs_guard_notify_fsync(cmd.u.block.volume_id,
                                 cmd.u.block.block_no,
                                 cmd.u.block.hash,

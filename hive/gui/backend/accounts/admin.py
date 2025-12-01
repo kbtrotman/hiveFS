@@ -59,7 +59,7 @@ class GroupAdmin(admin.ModelAdmin):
     list_display = ("name", "tenant", "created_at", "updated_at")
     search_fields = ("name",)
     list_filter = ("tenant",)
-    filter_horizontal = ("roles",)
+    #filter_horizontal = ("roles",)
 
 
 @admin.register(GroupMembership)

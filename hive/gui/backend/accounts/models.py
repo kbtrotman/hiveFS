@@ -43,7 +43,7 @@ class CustomUserManager(BaseUserManager):
 
 
 class CustomUser(AbstractBaseUser, PermissionsMixin):
-    user_id = models.BigAutoField(primary_key=True)
+    id = models.BigAutoField(primary_key=True)
     email = models.EmailField(_("email address"), unique=True)
     username = models.CharField(_("username"), max_length=150)
     first_name = models.CharField(_("first name"), max_length=150, blank=True)
@@ -118,8 +118,8 @@ class Group(models.Model):
     )
     name = models.CharField(max_length=150, unique=True)
     description = models.TextField(blank=True)
-    roles = models.ManyToManyField(
-        Role, through="GroupRole", related_name="groups", blank=True
+    roles = models.ForeignKey(
+        Role, on_delete=models.CASCADE, related_name="roles"
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

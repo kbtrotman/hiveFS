@@ -17,6 +17,7 @@
 #include "hive_guard.h"
 #include "hive_guard_sql.h"
 #include "hive_guard_kv.h"
+#include "hive_guard_erasure_code.h"
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 
@@ -1196,6 +1197,53 @@ bool hifs_load_storage_nodes(void)
 	loaded_storage_nodes = nodes;
 	loaded_storage_node_count = row_count;
 	return true;
+}
+
+bool hifs_store_block_to_stripe_locations(uint64_t volume_id, uint64_t block_no,
+                                          uint8_t hash_algo, const uint8_t hash[HIFS_BLOCK_HASH_SIZE],
+                                          const struct stripe_location *locations, size_t count)
+{
+	char sql_query[MAX_QUERY_SIZE];
+	char hash_hex[HIFS_BLOCK_HASH_SIZE * 2 + 1];
+	size_t used = 0;
+
+	if (!sqldb.sql_init || !sqldb.conn || !locations || count == 0)
+		return false;
+
+	bytes_to_hex(hash, HIFS_BLOCK_HASH_SIZE, hash_hex);
+
+	used += snprintf(sql_query + used, sizeof(sql_query) - used,
+			 "INSERT INTO block_stripe_locations "
+			 "(volume_id, block_no, hash_algo, block_hash, stripe_index, "
+			 "storage_node_id, shard_id, estripe_id, block_offset, ref_count) VALUES ");
+
+	for (size_t i = 0; i < count; ++i) {
+		const struct stripe_location *loc = &locations[i];
+		used += snprintf(sql_query + used, sizeof(sql_query) - used,
+				 "(%llu,%llu,%u,UNHEX('%s'),%u,%u,%u,%llu,%llu,1)%s",
+				 (unsigned long long)volume_id,
+				 (unsigned long long)block_no,
+				 (unsigned)hash_algo,
+				 hash_hex,
+				 (unsigned)loc->stripe_index,
+				 loc->storage_node_id,
+				 loc->shard_id,
+				 (unsigned long long)loc->estripe_id,
+				 (unsigned long long)loc->block_offset,
+				 (i + 1 == count) ? "" : ",");
+		if (used >= sizeof(sql_query))
+			return false;
+	}
+
+	used += snprintf(sql_query + used, sizeof(sql_query) - used,
+			 " ON DUPLICATE KEY UPDATE "
+			 "storage_node_id=VALUES(storage_node_id), "
+			 "shard_id=VALUES(shard_id), "
+			 "estripe_id=VALUES(estripe_id), "
+			 "block_offset=VALUES(block_offset), "
+			 "ref_count=ref_count+1");
+
+	return hifs_insert_sql(sql_query);
 }
 
 /*

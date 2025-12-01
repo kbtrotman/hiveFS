@@ -64,6 +64,7 @@ import { usePlasmicDataSourceContext } from "@plasmicapp/data-sources-context";
 
 import TextField from "../../TextField"; // plasmic-import: OfVdG6fCBlg2/component
 import { AntdButton } from "@plasmicpkgs/antd5/skinny/registerButton";
+import { TableBrowser } from "@/components/TableBrowser"; // plasmic-import: jVQANZxExoPl/codeComponent
 import { TreeBrowser } from "@/components/TreeBrowser"; // plasmic-import: lDT68TVAGwod/codeComponent
 import { Fetcher } from "@plasmicapp/react-web/lib/data-sources";
 import { _useGlobalVariants } from "./plasmic"; // plasmic-import: c8gT28iq7v39gxBJ6CcbGP/projectModule
@@ -92,6 +93,8 @@ export type PlasmicFilesystemConfig__OverridesType = {
   dashboard?: Flex__<"div">;
   textField?: Flex__<typeof TextField>;
   svg?: Flex__<"svg">;
+  tableBrowser?: Flex__<typeof TableBrowser>;
+  link?: Flex__<"a"> & Partial<LinkProps>;
   treeBrowser?: Flex__<typeof TreeBrowser>;
 };
 
@@ -387,69 +390,27 @@ function PlasmicFilesystemConfig__RenderFunc(props: {
           </div>
           <div className={classNames(projectcss.all, sty.freeBox__oRyBh)}>
             <div className={classNames(projectcss.all, sty.freeBox__saB2Q)}>
-              <div className={classNames(projectcss.all, sty.freeBox__i3Qsa)}>
-                <PlasmicLink__
-                  className={classNames(
-                    projectcss.all,
-                    projectcss.a,
-                    projectcss.__wab_text,
-                    sty.link__zSb2D
-                  )}
-                  component={Link}
-                  href={"https://www.plasmic.app/"}
-                  platform={"nextjs"}
-                >
-                  {"Files"}
-                </PlasmicLink__>
-                <PlasmicLink__
-                  className={classNames(
-                    projectcss.all,
-                    projectcss.a,
-                    projectcss.__wab_text,
-                    sty.link___8KqsW
-                  )}
-                  component={Link}
-                  href={"https://www.plasmic.app/"}
-                  platform={"nextjs"}
-                >
-                  {"Hosts"}
-                </PlasmicLink__>
-                <PlasmicLink__
-                  className={classNames(
-                    projectcss.all,
-                    projectcss.a,
-                    projectcss.__wab_text,
-                    sty.link__g4Kar
-                  )}
-                  component={Link}
-                  href={"https://www.plasmic.app/"}
-                  platform={"nextjs"}
-                >
-                  {"Solitaries"}
-                </PlasmicLink__>
-                <PlasmicLink__
-                  className={classNames(
-                    projectcss.all,
-                    projectcss.a,
-                    projectcss.__wab_text,
-                    sty.link__xLp8N
-                  )}
-                  component={Link}
-                  href={"https://www.plasmic.app/"}
-                  platform={"nextjs"}
-                >
-                  {"Tennants"}
-                </PlasmicLink__>
-              </div>
+              <TableBrowser
+                data-plasmic-name={"tableBrowser"}
+                data-plasmic-override={overrides.tableBrowser}
+                baseUrl={"/api/v1/filelist"}
+                className={classNames("__wab_instance", sty.tableBrowser)}
+                designTimeSample={true}
+                enableSearch={false}
+                height={"60vh"}
+                rowKey={"id"}
+              />
             </div>
           </div>
           <div className={classNames(projectcss.all, sty.freeBox__apTkU)}>
             <PlasmicLink__
+              data-plasmic-name={"link"}
+              data-plasmic-override={overrides.link}
               className={classNames(
                 projectcss.all,
                 projectcss.a,
                 projectcss.__wab_text,
-                sty.link__rsKzz
+                sty.link
               )}
               component={Link}
               href={"https://www.plasmic.app/"}
@@ -514,9 +475,18 @@ function PlasmicFilesystemConfig__RenderFunc(props: {
 }
 
 const PlasmicDescendants = {
-  dashboard: ["dashboard", "textField", "svg", "treeBrowser"],
+  dashboard: [
+    "dashboard",
+    "textField",
+    "svg",
+    "tableBrowser",
+    "link",
+    "treeBrowser"
+  ],
   textField: ["textField"],
   svg: ["svg"],
+  tableBrowser: ["tableBrowser"],
+  link: ["link"],
   treeBrowser: ["treeBrowser"]
 } as const;
 type NodeNameType = keyof typeof PlasmicDescendants;
@@ -526,6 +496,8 @@ type NodeDefaultElementType = {
   dashboard: "div";
   textField: typeof TextField;
   svg: "svg";
+  tableBrowser: typeof TableBrowser;
+  link: "a";
   treeBrowser: typeof TreeBrowser;
 };
 
@@ -618,6 +590,8 @@ export const PlasmicFilesystemConfig = Object.assign(
     // Helper components rendering sub-elements
     textField: makeNodeComponent("textField"),
     svg: makeNodeComponent("svg"),
+    tableBrowser: makeNodeComponent("tableBrowser"),
+    link: makeNodeComponent("link"),
     treeBrowser: makeNodeComponent("treeBrowser"),
 
     // Metadata about props expected for PlasmicFilesystemConfig
