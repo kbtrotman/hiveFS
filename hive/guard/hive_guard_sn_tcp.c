@@ -15,6 +15,7 @@
  */
 
 #include "hive_guard_sn_tcp.h"
+#include "hive_guard_kv.h"
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -28,7 +29,6 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#define HIFS_STRIPE_TCP_DEFAULT_PORT 17071
 #define HIFS_STRIPE_TCP_BACKLOG      8
 
 struct stripe_msg_header {
@@ -58,6 +58,22 @@ static uint64_t ntohll(uint64_t v)
 	return htonll(v);
 }
 
+static ssize_t write_full(int fd, const void *buf, size_t len)
+{
+	size_t total = 0;
+	const uint8_t *in = buf;
+	while (total < len) {
+		ssize_t n = write(fd, in + total, len - total);
+		if (n < 0) {
+			if (errno == EINTR)
+				continue;
+			return -1;
+		}
+		total += (size_t)n;
+	}
+	return (ssize_t)total;
+}
+
 static ssize_t read_full(int fd, void *buf, size_t len)
 {
 	size_t total = 0;
@@ -74,6 +90,82 @@ static ssize_t read_full(int fd, void *buf, size_t len)
 		total += (size_t)n;
 	}
 	return (ssize_t)total;
+}
+
+static int connect_to_host_port(const char *host, uint16_t port)
+{
+	if (!host || !*host)
+		host = "127.0.0.1";
+	if (!port)
+		port = HIFS_STRIPE_TCP_DEFAULT_PORT;
+
+	char port_str[16];
+	snprintf(port_str, sizeof(port_str), "%u", port);
+
+	struct addrinfo hints = {
+		.ai_family = AF_UNSPEC,
+		.ai_socktype = SOCK_STREAM,
+	};
+	struct addrinfo *res = NULL;
+	int rc = getaddrinfo(host, port_str, &hints, &res);
+	if (rc != 0) {
+		fprintf(stderr, "stripe tcp: getaddrinfo(%s:%s) failed: %s\n",
+		        host, port_str, gai_strerror(rc));
+		return -1;
+	}
+
+	int fd = -1;
+	for (struct addrinfo *ai = res; ai; ai = ai->ai_next) {
+		fd = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
+		if (fd < 0)
+			continue;
+		if (connect(fd, ai->ai_addr, ai->ai_addrlen) == 0)
+			break;
+		close(fd);
+		fd = -1;
+	}
+	freeaddrinfo(res);
+	return fd;
+}
+
+static void handle_fetch_request(int fd, const struct stripe_msg_header *req)
+{
+	if (fd < 0 || !req) {
+		if (fd >= 0)
+			close(fd);
+		return;
+	}
+
+	uint8_t *chunk = NULL;
+	size_t chunk_len = 0;
+	if (hg_kv_get_estripe_chunk(req->estripe_id, &chunk, &chunk_len) != 0) {
+		chunk = NULL;
+		chunk_len = 0;
+	}
+
+	struct stripe_msg_header resp = {
+		.storage_node_id = htonl(req->storage_node_id),
+		.shard_id = htonl(req->shard_id),
+		.estripe_id = htonll(req->estripe_id),
+		.payload_len = htonl((uint32_t)chunk_len),
+	};
+
+	if (write_full(fd, &resp, sizeof(resp)) != (ssize_t)sizeof(resp)) {
+		free(chunk);
+		close(fd);
+		return;
+	}
+
+	if (chunk_len > 0) {
+		if (write_full(fd, chunk, chunk_len) != (ssize_t)chunk_len) {
+			free(chunk);
+			close(fd);
+			return;
+		}
+	}
+
+	free(chunk);
+	close(fd);
 }
 
 static void *sn_listener_thread(void *arg)
@@ -102,6 +194,11 @@ static void *sn_listener_thread(void *arg)
 			.estripe_id      = ntohll(hdr.estripe_id),
 			.payload_len     = ntohl(hdr.payload_len),
 		};
+
+		if (local.payload_len == 0) {
+			handle_fetch_request(fd, &local);
+			continue;
+		}
 
 		uint8_t *payload = NULL;
 		if (local.payload_len) {
@@ -199,37 +296,18 @@ static int connect_to_target(uint16_t port)
 	if (!host || !*host)
 		host = "127.0.0.1";
 
-	char port_str[16];
+	uint16_t target_port = port;
 	const char *port_env = getenv("HIFS_STRIPE_TARGET_PORT");
-	if (port_env && *port_env)
-		snprintf(port_str, sizeof(port_str), "%s", port_env);
-	else
-		snprintf(port_str, sizeof(port_str), "%u", port);
-
-	struct addrinfo hints = {
-		.ai_family = AF_UNSPEC,
-		.ai_socktype = SOCK_STREAM,
-	};
-	struct addrinfo *res = NULL;
-	int rc = getaddrinfo(host, port_str, &hints, &res);
-	if (rc != 0) {
-		fprintf(stderr, "stripe tcp: getaddrinfo(%s:%s) failed: %s\n",
-		        host, port_str, gai_strerror(rc));
-		return -1;
+	if (port_env && *port_env) {
+		char *endptr = NULL;
+		long val = strtol(port_env, &endptr, 10);
+		if (!endptr || *endptr == '\0') {
+			if (val > 0 && val <= 0xFFFF)
+				target_port = (uint16_t)val;
+		}
 	}
 
-	int fd = -1;
-	for (struct addrinfo *ai = res; ai; ai = ai->ai_next) {
-		fd = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
-		if (fd < 0)
-			continue;
-		if (connect(fd, ai->ai_addr, ai->ai_addrlen) == 0)
-			break;
-		close(fd);
-		fd = -1;
-	}
-	freeaddrinfo(res);
-	return fd;
+	return connect_to_host_port(host, target_port);
 }
 
 int hifs_sn_tcp_send(uint32_t storage_node_id,
@@ -272,5 +350,61 @@ int hifs_sn_tcp_send(uint32_t storage_node_id,
 	}
 
 	close(fd);
+	return 0;
+}
+
+int hifs_sn_tcp_fetch(uint32_t storage_node_id,
+			  uint32_t shard_id,
+			  const char *host,
+			  uint16_t port,
+			  uint64_t estripe_id,
+			  uint8_t **out_data,
+			  size_t *out_len)
+{
+	if (!out_data || !out_len || estripe_id == 0)
+		return -1;
+
+	int fd = connect_to_host_port(host, port);
+	if (fd < 0)
+		return -1;
+
+	struct stripe_msg_header hdr = {
+		.storage_node_id = htonl(storage_node_id),
+		.shard_id        = htonl(shard_id),
+		.estripe_id      = htonll(estripe_id),
+		.payload_len     = htonl(0),
+	};
+
+	if (write_full(fd, &hdr, sizeof(hdr)) != (ssize_t)sizeof(hdr)) {
+		close(fd);
+		return -1;
+	}
+
+	if (read_full(fd, &hdr, sizeof(hdr)) != (ssize_t)sizeof(hdr)) {
+		close(fd);
+		return -1;
+	}
+
+	uint32_t payload_len = ntohl(hdr.payload_len);
+	if (payload_len == 0) {
+		close(fd);
+		return -1;
+	}
+
+	uint8_t *buf = malloc(payload_len);
+	if (!buf) {
+		close(fd);
+		return -1;
+	}
+
+	if (read_full(fd, buf, payload_len) != (ssize_t)payload_len) {
+		free(buf);
+		close(fd);
+		return -1;
+	}
+
+	close(fd);
+	*out_data = buf;
+	*out_len = payload_len;
 	return 0;
 }

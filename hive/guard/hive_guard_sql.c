@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <endian.h>
 #include <netdb.h>
+#include <limits.h>
 #include <sys/utsname.h>
 #include <openssl/sha.h>
 
@@ -18,12 +19,24 @@
 #include "hive_guard_sql.h"
 #include "hive_guard_kv.h"
 #include "hive_guard_erasure_code.h"
+#include "hive_guard_sn_tcp.h"
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 
 struct SQLDB sqldb;
 static struct hive_storage_node *loaded_storage_nodes;
 static size_t loaded_storage_node_count;
+
+struct stripe_locations {
+	struct stripe_location entries[HIFS_EC_STRIPES];
+	size_t count;
+	bool ok;
+};
+
+static struct stripe_locations hifs_read_block_to_stripe_locations(uint64_t volume_id,
+							      uint64_t block_no,
+							      const uint8_t hash[HIFS_BLOCK_HASH_SIZE],
+							      size_t count);
 
 const struct hive_storage_node *hifs_get_storage_nodes(size_t *count)
 {
@@ -967,6 +980,189 @@ bool hifs_volume_inode_store(uint64_t volume_id,
 	return true;
 }
 
+static size_t count_present_chunks(uint8_t **chunks, size_t total)
+{
+	size_t present = 0;
+	if (!chunks)
+		return 0;
+	for (size_t i = 0; i < total; ++i) {
+		if (chunks[i])
+			++present;
+	}
+	return present;
+}
+
+static const struct hive_storage_node *find_storage_node(uint32_t node_id)
+{
+	size_t count = 0;
+	const struct hive_storage_node *nodes = hifs_get_storage_nodes(&count);
+	if (!nodes)
+		return NULL;
+	for (size_t i = 0; i < count; ++i) {
+		if (nodes[i].id == node_id)
+			return &nodes[i];
+	}
+	return NULL;
+}
+
+static bool resolve_node_endpoint(const struct hive_storage_node *node,
+					 char *host,
+					 size_t host_len,
+					 uint16_t *port_out)
+{
+	if (!node || !host || host_len == 0 || !port_out)
+		return false;
+
+	const char *addr = node->address;
+	const char *host_start = addr;
+	size_t copy_len = 0;
+	const char *port_str = NULL;
+
+	if (addr && *addr) {
+		if (addr[0] == '[') {
+			const char *end = strchr(addr, ']');
+			if (end && end > addr + 1) {
+				host_start = addr + 1;
+				copy_len = (size_t)(end - host_start);
+				if (*(end + 1) == ':')
+					port_str = end + 2;
+			}
+		}
+		if (!port_str) {
+			const char *colon = strrchr(addr, ':');
+			if (colon && strchr(colon + 1, ':') == NULL) {
+				host_start = addr;
+				copy_len = (size_t)(colon - addr);
+				port_str = colon + 1;
+			}
+		}
+		if (copy_len == 0)
+			copy_len = strlen(host_start);
+	} else {
+		host_start = "127.0.0.1";
+		copy_len = strlen(host_start);
+	}
+
+	if (copy_len >= host_len)
+		copy_len = host_len - 1;
+	memcpy(host, host_start, copy_len);
+	host[copy_len] = '\0';
+	if (!*host)
+		snprintf(host, host_len, "%s", "127.0.0.1");
+
+	uint16_t port = node->stripe_port;
+	if (port_str) {
+		char *endptr = NULL;
+		unsigned long val = strtoul(port_str, &endptr, 10);
+		if (endptr && *endptr == '\0' && val > 0 && val <= UINT16_MAX)
+			port = (uint16_t)val;
+	}
+	if (!port)
+		port = HIFS_STRIPE_TCP_DEFAULT_PORT;
+	*port_out = port;
+	return true;
+}
+
+static bool fetch_stripe_via_tcp(const struct stripe_location *loc,
+				   uint8_t **out_data,
+				   size_t *out_len)
+{
+	if (!loc || !out_data || !out_len)
+		return false;
+	if (loc->storage_node_id == 0 || loc->estripe_id == 0)
+		return false;
+
+	const struct hive_storage_node *node = find_storage_node(loc->storage_node_id);
+	if (!node) {
+		hifs_warning("stripe fetch: storage node %u missing for estripe %llu",
+			     loc->storage_node_id,
+			     (unsigned long long)loc->estripe_id);
+		return false;
+	}
+
+	char host[64];
+	uint16_t port = 0;
+	if (!resolve_node_endpoint(node, host, sizeof(host), &port))
+		return false;
+
+	if (hifs_sn_tcp_fetch(node->id,
+			        loc->shard_id,
+			        host,
+			        port,
+			        loc->estripe_id,
+			        out_data,
+			        out_len) != 0) {
+		hifs_warning("stripe fetch: TCP fetch failed for node %u (%s:%u) estripe %llu",
+			     node->id,
+			     host,
+			     (unsigned)port,
+			     (unsigned long long)loc->estripe_id);
+		return false;
+	}
+
+	return true;
+}
+
+static bool fetch_stripe_from_node(const struct stripe_location *loc,
+				     uint8_t **out_data,
+				     size_t *out_len)
+{
+	if (!loc || !out_data || !out_len || loc->estripe_id == 0)
+		return false;
+
+	if (fetch_stripe_via_tcp(loc, out_data, out_len))
+		return true;
+
+	if (hg_kv_get_estripe_chunk(loc->estripe_id, out_data, out_len) == 0)
+		return true;
+
+	hifs_warning("stripe fetch: unable to locate estripe %llu (node %u shard %u)",
+		     (unsigned long long)loc->estripe_id,
+		     loc->storage_node_id,
+		     loc->shard_id);
+	return false;
+}
+
+static void fetch_remote_stripes(const struct stripe_locations *locs,
+					   uint8_t **encoded_chunks,
+					   size_t total_slots,
+					   size_t *frag_size,
+					   size_t min_required)
+{
+	if (!locs || !locs->ok || locs->count == 0 || !encoded_chunks || total_slots == 0)
+		return;
+
+	size_t have = count_present_chunks(encoded_chunks, total_slots);
+	for (size_t i = 0; i < locs->count; ++i) {
+		const struct stripe_location *loc = &locs->entries[i];
+		if (loc->stripe_index >= total_slots)
+			continue;
+		if (encoded_chunks[loc->stripe_index])
+			continue;
+
+		uint8_t *chunk = NULL;
+		size_t chunk_len = 0;
+		if (!fetch_stripe_from_node(loc, &chunk, &chunk_len))
+			continue;
+
+		if (*frag_size == 0) {
+			*frag_size = chunk_len;
+		} else if (chunk_len != *frag_size) {
+			hifs_warning("Remote stripe %u size mismatch: expected %zu got %zu",
+				     (unsigned)loc->stripe_index,
+				     *frag_size,
+				     chunk_len);
+			free(chunk);
+			continue;
+		}
+
+		encoded_chunks[loc->stripe_index] = chunk;
+		++have;
+		if (min_required && have >= min_required)
+			break;
+	}
+}
+
 bool hifs_volume_block_load(uint64_t volume_id, uint64_t block_no,
                             uint8_t *buf, uint32_t *len)
 {
@@ -987,9 +1183,10 @@ bool hifs_volume_block_load(uint64_t volume_id, uint64_t block_no,
         }
     }
 
-    if (hg_kv_get_vb_entry(volume_id, block_no, &vb_entry) != 0) {
-        hifs_warning("No block metadata for volume=%llu block=%llu",
-                     (unsigned long long)volume_id,
+
+	    if (hg_kv_get_vb_entry(volume_id, block_no, &vb_entry) != 0) {
+	        hifs_warning("No block metadata for volume=%llu block=%llu",
+	                     (unsigned long long)volume_id,
                      (unsigned long long)block_no);
         return false;
     }
@@ -1011,22 +1208,26 @@ bool hifs_volume_block_load(uint64_t volume_id, uint64_t block_no,
     }
 
     enum { NUM_DATA = HIFS_EC_K, NUM_PARITY = HIFS_EC_M, TOTAL = HIFS_EC_K + HIFS_EC_M };
-    uint64_t stripe_ids[TOTAL];
-    size_t h2s_count = sizeof(h2s.estripe_ids) / sizeof(h2s.estripe_ids[0]);
-    size_t copy = (TOTAL < h2s_count) ? TOTAL : h2s_count;
-    memcpy(stripe_ids, h2s.estripe_ids, copy * sizeof(uint64_t));
-    for (size_t i = copy; i < TOTAL; ++i)
-        stripe_ids[i] = 0;
+	    uint64_t stripe_ids[TOTAL];
+	    size_t h2s_count = sizeof(h2s.estripe_ids) / sizeof(h2s.estripe_ids[0]);
+	    size_t copy = (TOTAL < h2s_count) ? TOTAL : h2s_count;
+	    memcpy(stripe_ids, h2s.estripe_ids, copy * sizeof(uint64_t));
+	    for (size_t i = copy; i < TOTAL; ++i)
+	        stripe_ids[i] = 0;
 
-    uint8_t *encoded_chunks[TOTAL] = {0};
-    size_t frag_size = 0;
-    size_t found = 0;
+	    uint8_t *encoded_chunks[TOTAL] = {0};
+	    size_t frag_size = 0;
+	    struct stripe_locations stripe_locs =
+	        hifs_read_block_to_stripe_locations(volume_id, block_no,
+	                                            vb_entry.block_hash, TOTAL);
+	    fetch_remote_stripes(&stripe_locs, encoded_chunks, TOTAL, &frag_size, NUM_DATA);
+	    size_t found = count_present_chunks(encoded_chunks, TOTAL);
 
-    for (size_t i = 0; i < NUM_DATA && found < NUM_DATA; ++i) {
-        if (stripe_ids[i] == 0)
-            continue;
-        uint8_t *chunk = NULL;
-        size_t chunk_len = 0;
+	    for (size_t i = 0; i < NUM_DATA && found < NUM_DATA; ++i) {
+	        if (stripe_ids[i] == 0 || encoded_chunks[i])
+	            continue;
+	        uint8_t *chunk = NULL;
+	        size_t chunk_len = 0;
         if (hg_kv_get_estripe_chunk(stripe_ids[i], &chunk, &chunk_len) != 0)
             continue;
         if (frag_size == 0) {
@@ -1040,12 +1241,12 @@ bool hifs_volume_block_load(uint64_t volume_id, uint64_t block_no,
         ++found;
     }
 
-    if (found < NUM_DATA) {
-        for (size_t i = NUM_DATA; i < TOTAL && found < NUM_DATA; ++i) {
-            if (stripe_ids[i] == 0)
-                continue;
-            uint8_t *chunk = NULL;
-            size_t chunk_len = 0;
+	    if (found < NUM_DATA) {
+	        for (size_t i = NUM_DATA; i < TOTAL && found < NUM_DATA; ++i) {
+	            if (stripe_ids[i] == 0 || encoded_chunks[i])
+	                continue;
+	            uint8_t *chunk = NULL;
+	            size_t chunk_len = 0;
             if (hg_kv_get_estripe_chunk(stripe_ids[i], &chunk, &chunk_len) != 0)
                 continue;
             if (frag_size == 0) {
@@ -1244,6 +1445,69 @@ bool hifs_store_block_to_stripe_locations(uint64_t volume_id, uint64_t block_no,
 			 "ref_count=ref_count+1");
 
 	return hifs_insert_sql(sql_query);
+}
+
+static struct stripe_locations hifs_read_block_to_stripe_locations(uint64_t volume_id, uint64_t block_no,
+						      const uint8_t hash[HIFS_BLOCK_HASH_SIZE],
+						      size_t count)
+{
+	struct stripe_locations out = {0};
+	char sql_query[MAX_QUERY_SIZE];
+	char hash_hex[HIFS_BLOCK_HASH_SIZE * 2 + 1];
+	size_t limit = count;
+
+	if (!sqldb.sql_init || !sqldb.conn || !hash || count == 0)
+		return out;
+	if (limit > ARRAY_SIZE(out.entries))
+		limit = ARRAY_SIZE(out.entries);
+
+	bytes_to_hex(hash, HIFS_BLOCK_HASH_SIZE, hash_hex);
+	int written = snprintf(sql_query, sizeof(sql_query),
+			       "SELECT stripe_index, storage_node_id, shard_id, estripe_id, block_offset "
+			       "FROM block_stripe_locations "
+			       "WHERE volume_id=%llu AND block_no=%llu AND block_hash=UNHEX('%s') "
+			       "ORDER BY stripe_index LIMIT %zu",
+			       (unsigned long long)volume_id,
+			       (unsigned long long)block_no,
+			       hash_hex,
+			       limit);
+	if (written < 0 || (size_t)written >= sizeof(sql_query))
+		return out;
+
+	MYSQL_RES *res = hifs_execute_sql(sql_query);
+	if (!res)
+		return out;
+
+	MYSQL_ROW row;
+	size_t idx = 0;
+	while (idx < limit && (row = mysql_fetch_row(res)) != NULL) {
+		struct stripe_location *loc = &out.entries[idx];
+		loc->stripe_index = (uint8_t)sql_to_u32(row[0]);
+		loc->storage_node_id = sql_to_u32(row[1]);
+		loc->shard_id = sql_to_u32(row[2]);
+		loc->estripe_id = sql_to_u64(row[3]);
+		loc->block_offset = sql_to_u64(row[4]);
+		++idx;
+	}
+
+	mysql_free_result(res);
+	sqldb.last_query = NULL;
+	out.count = idx;
+	out.ok = (idx > 0);
+	if (idx == 0) {
+		hifs_warning("stripe location rows missing for volume=%llu block=%llu hash=%s",
+			     (unsigned long long)volume_id,
+			     (unsigned long long)block_no,
+			     hash_hex);
+	} else if (idx < limit) {
+		hifs_notice("stripe location gap for volume=%llu block=%llu hash=%s: have %zu/%zu rows",
+			    (unsigned long long)volume_id,
+			    (unsigned long long)block_no,
+			    hash_hex,
+			    idx,
+			    limit);
+	}
+	return out;
 }
 
 /*
