@@ -434,19 +434,19 @@ struct pending_write {
 	struct pending_write *next;
 };
 
-struct fsync_event {
+struct write_ack_event {
 	int fd;
 	uint64_t volume_id;
 	uint64_t block_no;
-	struct fsync_event *next;
+	struct write_ack_event *next;
 };
 
 static pthread_mutex_t g_pending_mu = PTHREAD_MUTEX_INITIALIZER;
 static struct pending_write *g_pending_writes;
 
-static pthread_mutex_t g_fsync_mu = PTHREAD_MUTEX_INITIALIZER;
-static struct fsync_event *g_fsync_head;
-static struct fsync_event *g_fsync_tail;
+static pthread_mutex_t g_ack_mu = PTHREAD_MUTEX_INITIALIZER;
+static struct write_ack_event *g_ack_head;
+static struct write_ack_event *g_ack_tail;
 
 static bool pending_write_register(int fd, uint64_t volume_id,
 				       uint64_t block_no,
@@ -455,12 +455,12 @@ static void pending_write_cancel(int fd, uint64_t volume_id,
 			      uint64_t block_no,
 			      const uint8_t hash[HIFS_BLOCK_HASH_SIZE]);
 static void pending_write_drop_fd(int fd);
-static void fsync_event_remove_fd(int fd);
-static void fsync_event_enqueue(int fd, uint64_t volume_id, uint64_t block_no);
-static struct fsync_event *fsync_event_drain(void);
+static void write_ack_event_remove_fd(int fd);
+static void write_ack_event_enqueue(int fd, uint64_t volume_id, uint64_t block_no);
+static struct write_ack_event *write_ack_event_drain(void);
 static Client *guard_find_client_by_fd(int fd, int *slot_out);
-static bool send_fsync_frame(Client *cl, uint64_t volume_id, uint64_t block_no);
-static void flush_pending_fsyncs(void);
+static bool send_write_ack_frame(Client *cl, uint64_t volume_id, uint64_t block_no);
+static void flush_pending_write_acks(void);
 static void guard_close_client(int slot);
 
 static uint64_t now_ms(void)
@@ -509,27 +509,27 @@ static void pending_write_cancel(int fd, uint64_t volume_id,
 	pthread_mutex_unlock(&g_pending_mu);
 }
 
-static void fsync_event_remove_fd(int fd)
+static void write_ack_event_remove_fd(int fd)
 {
-	pthread_mutex_lock(&g_fsync_mu);
-	struct fsync_event **cur = &g_fsync_head;
+	pthread_mutex_lock(&g_ack_mu);
+	struct write_ack_event **cur = &g_ack_head;
 	while (*cur) {
 		if ((*cur)->fd == fd) {
-			struct fsync_event *dead = *cur;
+			struct write_ack_event *dead = *cur;
 			*cur = dead->next;
 			free(dead);
 		} else {
 			cur = &(*cur)->next;
 		}
 	}
-	g_fsync_tail = NULL;
-	struct fsync_event *scan = g_fsync_head;
+	g_ack_tail = NULL;
+	struct write_ack_event *scan = g_ack_head;
 	while (scan) {
 		if (!scan->next)
-			g_fsync_tail = scan;
+			g_ack_tail = scan;
 		scan = scan->next;
 	}
-	pthread_mutex_unlock(&g_fsync_mu);
+	pthread_mutex_unlock(&g_ack_mu);
 }
 
 static void pending_write_drop_fd(int fd)
@@ -546,39 +546,39 @@ static void pending_write_drop_fd(int fd)
 		}
 	}
 	pthread_mutex_unlock(&g_pending_mu);
-	fsync_event_remove_fd(fd);
+	write_ack_event_remove_fd(fd);
 }
 
-static void fsync_event_enqueue(int fd, uint64_t volume_id, uint64_t block_no)
+static void write_ack_event_enqueue(int fd, uint64_t volume_id, uint64_t block_no)
 {
-	struct fsync_event *ev = malloc(sizeof(*ev));
+	struct write_ack_event *ev = malloc(sizeof(*ev));
 	if (!ev)
 		return;
 	ev->fd = fd;
 	ev->volume_id = volume_id;
 	ev->block_no = block_no;
 	ev->next = NULL;
-	pthread_mutex_lock(&g_fsync_mu);
-	if (g_fsync_tail)
-		g_fsync_tail->next = ev;
+	pthread_mutex_lock(&g_ack_mu);
+	if (g_ack_tail)
+		g_ack_tail->next = ev;
 	else
-		g_fsync_head = ev;
-	g_fsync_tail = ev;
-	pthread_mutex_unlock(&g_fsync_mu);
+		g_ack_head = ev;
+	g_ack_tail = ev;
+	pthread_mutex_unlock(&g_ack_mu);
 }
 
-static struct fsync_event *fsync_event_drain(void)
+static struct write_ack_event *write_ack_event_drain(void)
 {
-	pthread_mutex_lock(&g_fsync_mu);
-	struct fsync_event *head = g_fsync_head;
-	g_fsync_head = NULL;
-	g_fsync_tail = NULL;
-	pthread_mutex_unlock(&g_fsync_mu);
+	pthread_mutex_lock(&g_ack_mu);
+	struct write_ack_event *head = g_ack_head;
+	g_ack_head = NULL;
+	g_ack_tail = NULL;
+	pthread_mutex_unlock(&g_ack_mu);
 	return head;
 }
 
-void hifs_guard_notify_fsync(uint64_t volume_id, uint64_t block_no,
-				 const uint8_t *hash, size_t hash_len)
+void hifs_guard_notify_write_ack(uint64_t volume_id, uint64_t block_no,
+			 const uint8_t *hash, size_t hash_len)
 {
 	if (!hash)
 		return;
@@ -599,7 +599,7 @@ void hifs_guard_notify_fsync(uint64_t volume_id, uint64_t block_no,
 	pthread_mutex_unlock(&g_pending_mu);
 	if (!match)
 		return;
-	fsync_event_enqueue(match->fd, match->volume_id, match->block_no);
+	write_ack_event_enqueue(match->fd, match->volume_id, match->block_no);
 	free(match);
 }
 
@@ -616,11 +616,11 @@ static Client *guard_find_client_by_fd(int fd, int *slot_out)
 	return NULL;
 }
 
-static bool send_fsync_frame(Client *cl, uint64_t volume_id, uint64_t block_no)
+static bool send_write_ack_frame(Client *cl, uint64_t volume_id, uint64_t block_no)
 {
 	char *json = NULL;
 	if (asprintf(&json,
-		     "{\"ok\":true,\"type\":\"fsync\",\"volume_id\":%llu,\"block_no\":%llu}",
+		     "{\"ok\":true,\"type\":\"volume_block_put\",\"volume_id\":%llu,\"block_no\":%llu}",
 		     (unsigned long long)volume_id,
 		     (unsigned long long)block_no) < 0)
 		return false;
@@ -629,17 +629,17 @@ static bool send_fsync_frame(Client *cl, uint64_t volume_id, uint64_t block_no)
 	return rc == 0;
 }
 
-static void flush_pending_fsyncs(void)
+static void flush_pending_write_acks(void)
 {
-	struct fsync_event *ev = fsync_event_drain();
+	struct write_ack_event *ev = write_ack_event_drain();
 	uint64_t ts = now_ms();
 	while (ev) {
-		struct fsync_event *next = ev->next;
+		struct write_ack_event *next = ev->next;
 		int slot = -1;
 		Client *cl = guard_find_client_by_fd(ev->fd, &slot);
 		if (cl) {
-			if (!send_fsync_frame(cl, ev->volume_id, ev->block_no)) {
-				hifs_warning("fsync notify failed for fd=%d", cl->fd);
+			if (!send_write_ack_frame(cl, ev->volume_id, ev->block_no)) {
+				hifs_warning("write ack notify failed for fd=%d", cl->fd);
 				guard_close_client(slot);
 			} else {
 				cl->last_active_ms = ts;
@@ -1323,7 +1323,7 @@ int hive_guard_server_main(void)
 				}
 			}
 		}
-		flush_pending_fsyncs();
+		flush_pending_write_acks();
 
 		for (int i = 0; i < MAXC; ++i) {
 			Client *cl = g_clients[i];
@@ -1336,7 +1336,7 @@ int hive_guard_server_main(void)
 		}
 	}
 
-	flush_pending_fsyncs();
+	flush_pending_write_acks();
 	for (int i = 0; i < MAXC; ++i)
 		if (g_clients[i])
 			guard_close_client(i);

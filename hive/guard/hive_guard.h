@@ -96,5 +96,5 @@ int hifs_put_block_stripes(uint64_t volume_id, uint64_t block_no,
 int hifs_put_block(uint64_t volume_id, uint64_t block_no,
 		   const void *data, size_t len,
 		   enum hifs_hash_algorithm algo);
-void hifs_guard_notify_fsync(uint64_t volume_id, uint64_t block_no,
-				 const uint8_t *hash, size_t hash_len);
+void hifs_guard_notify_write_ack(uint64_t volume_id, uint64_t block_no,
+			 const uint8_t *hash, size_t hash_len);

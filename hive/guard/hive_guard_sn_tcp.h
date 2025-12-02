@@ -10,7 +10,7 @@
 /**
  * Simple TCP helper for shipping EC stripes between nodes.
  * For now this is a minimal implementation that listens on a dedicated
- * port for inbound stripes and provides a blocking send helper.
+ * port for inbound stripes and provides blocking send/fetch helpers.
  */
 
 #pragma once
@@ -18,6 +18,8 @@
 #include <stdint.h>
 
 #include "hive_guard.h"
+
+#define HIFS_STRIPE_TCP_DEFAULT_PORT 17071
 
 typedef int (*hifs_sn_recv_cb)(uint32_t storage_node_id,
                                uint32_t shard_id,
@@ -33,6 +35,13 @@ int hifs_sn_tcp_send(uint32_t storage_node_id,
                      uint64_t estripe_id,
                      const uint8_t *data,
                      uint32_t len);
+int hifs_sn_tcp_fetch(uint32_t storage_node_id,
+                      uint32_t shard_id,
+                      const char *host,
+                      uint16_t port,
+                      uint64_t estripe_id,
+                      uint8_t **out_data,
+                      size_t *out_len);
 
 #include <stdlib.h>
 
