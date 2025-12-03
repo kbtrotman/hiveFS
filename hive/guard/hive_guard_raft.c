@@ -275,6 +275,8 @@ commitCb(struct uv_raft *raft,
         if (pi->fp_index < HIFS_MAX_BLOCK_HASHES) {
             const struct hifs_block_fingerprint_wire *fp =
                 &pi->inode.i_block_fingerprints[pi->fp_index];
+            
+            if (storage_node_id)
             if (!hifs_volume_inode_fp_replace(pi->volume_id,
                                               pi->inode_id,
                                               pi->fp_index,
@@ -285,7 +287,13 @@ commitCb(struct uv_raft *raft,
     }
 
     case HG_OP_PUT_BLOCK: {
-        hg_kv_apply_put_block(&cmd.u.block);
+        ///// THIS NEEDS TO BE CHANGED TO HANDLE STRIPE LOCATIONS ////
+        ///// BASED ON ERASURE CODING ////////////////////////////////
+        /////////////////////////////////////////////////////////////
+        ///// THE FOLLOWING IS A TEMPORARY PLACEHOLDER //////////////
+        /////// FOR TESTING PURPOSES ONLY //////////////////////////
+        hg_kv_apply_put_block(&cmd.u.block); /////TESTING ONLY/////
+        ////////////////////////////////////////////////////////////
         struct stripe_location locs[HIFS_EC_STRIPES];
         for (size_t i = 0; i < HIFS_EC_STRIPES; ++i) {
             locs[i].stripe_index = i;
@@ -294,13 +302,25 @@ commitCb(struct uv_raft *raft,
             locs[i].estripe_id = cmd.u.block.ec_stripes[i].estripe_id;
             locs[i].block_offset = cmd.u.block.ec_stripes[i].block_offset;
         }
-        hifs_store_block_to_stripe_locations(cmd.u.block.volume_id,
+
+        // TODO:
+        //NO! This test is not actually right! It will just loop 6 times on every node
+        //and still write on every node. Need to figure out how raft keeps an index
+        // for the hosts in a cluster.
+        if (locs[0].storage_node_id == storage_node_id) {
+            /* This is the driod we're looking for */
+
+            // Commented out for testing purposes only.
+            //hg_kv_apply_put_block(storage_node_id, &cmd.u.block); 
+
+            hifs_store_block_to_stripe_locations(cmd.u.block.volume_id,
                                             cmd.u.block.block_no,
                                             cmd.u.block.hash_algo,
                                             cmd.u.block.hash,
                                             locs,
                                             HIFS_EC_STRIPES);
-
+        }
+        
         hifs_guard_notify_write_ack(cmd.u.block.volume_id,
                                     cmd.u.block.block_no,
                                     cmd.u.block.hash,

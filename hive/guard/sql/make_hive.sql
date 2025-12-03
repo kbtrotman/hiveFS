@@ -251,6 +251,8 @@ USE hive_api;
 CREATE OR REPLACE VIEW v_dentries AS SELECT * FROM hive_meta.volume_dentries;
 CREATE OR REPLACE VIEW v_inodes   AS SELECT * FROM hive_meta.volume_inodes;
 CREATE OR REPLACE VIEW v_roots    AS SELECT * FROM hive_meta.volume_root_dentries;
+CREATE OR REPLACE VIEW v_nodes    AS SELECT * FROM hive_meta.storage_nodes;
+CREATE OR REPLACE VIEW v_stats    AS SELECT * FROM hive_meta.volume_stats;
 
 -- Virtual nodes for GUI
 CREATE TABLE IF NOT EXISTS ui_virtual_node (

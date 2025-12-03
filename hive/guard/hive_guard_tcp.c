@@ -25,6 +25,8 @@
 #include <pthread.h>
 #include <openssl/sha.h>
 
+static int write_framed_json(int fd, const char *json);
+
 
 /* -------------------------------------------------------------------------- */
 /* Logging bridge for hi_command macros                                       */

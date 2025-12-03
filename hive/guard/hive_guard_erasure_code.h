@@ -28,6 +28,8 @@ struct HifsEstripeLocations {
     uint64_t block_offset;
 };
 
+struct RaftPutBlock;
+
 /* ======================= Internal helpers ======================= */
 
 /* Advance 6 positions from last_node_in_cascade, wrapping within [1, cascade_length] */
@@ -60,6 +62,5 @@ int hifs_recv_stripe_from_node(uint32_t storage_node_id,
 
 /* Submit the Raft command (this calls cowsql/raft) */
 int hifs_raft_submit_put_block(const struct RaftPutBlock *cmd);
-
 
 

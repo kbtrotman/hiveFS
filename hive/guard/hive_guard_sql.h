@@ -155,6 +155,16 @@
 	"i_links=VALUES(i_links), i_hash_count=VALUES(i_hash_count), " \
 	"i_hash_reserved=VALUES(i_hash_reserved), epoch=VALUES(epoch)"
 
+#define SQL_VOLUME_INODE_FP_DELETE \
+	"DELETE FROM volume_inode_fingerprints WHERE volume_id=%llu AND inode=%llu"
+
+#define SQL_VOLUME_INODE_FP_REPLACE \
+	"INSERT INTO volume_inode_fingerprints " \
+	"(volume_id, inode, fp_index, block_no, hash_algo, block_hash) " \
+	"VALUES (%llu, %llu, %u, %u, %u, UNHEX('%s')) " \
+	"ON DUPLICATE KEY UPDATE " \
+	"block_no=VALUES(block_no), hash_algo=VALUES(hash_algo), block_hash=VALUES(block_hash)"
+
 struct stripe_location {
 	uint8_t stripe_index;
 	uint32_t storage_node_id;
@@ -165,25 +175,31 @@ struct stripe_location {
 
 /* SELECT all storage nodes */
 #define SQL_STORAGE_NODES_SELECT \
-	"SELECT node_id, node_name, node_address, node_uid, node_serial, " \
-	"node_guard_port, last_heartbeat, hive_version, hive_patch_level, " \
-	"fenced, last_maintenance, maintenance_reason " \
-	"FROM storage_nodes ORDER BY node_id"
+"SELECT node_id, node_name, node_address, node_uid, node_serial, " \
+"node_guard_port, node_data_port, UNIX_TIMESTAMP(last_heartbeat) AS last_heartbeat, " \
+"hive_version, hive_patch_level, fenced, " \
+"UNIX_TIMESTAMP(last_maintenance) AS last_maintenance, maintenance_reason " \
+"FROM storage_nodes ORDER BY node_id"
 
 /* UPSERT storage node info */
 #define SQL_STORAGE_NODE_UPSERT \
 	"INSERT INTO storage_nodes " \
 	"(node_id, node_name, node_address, node_uid, node_serial, " \
-	"node_guard_port, last_heartbeat, hive_version, hive_patch_level, fenced) " \
-	"VALUES (%d, '%s', '%s', '%s', '%s', %d, NOW(), %d, %d, 0) " \
+	"node_guard_port, node_data_port, last_heartbeat, hive_version, hive_patch_level, fenced, " \
+	"storage_capacity_bytes, storage_used_bytes, storage_reserved_bytes, storage_overhead_bytes) " \
+	"VALUES (%llu, '%s', '%s', '%s', '%s', %u, %u, NOW(), %d, %d, 0, %llu, %llu, %llu, %llu) " \
 	"ON DUPLICATE KEY UPDATE " \
 	"node_name=VALUES(node_name), node_address=VALUES(node_address), " \
 	"node_uid=VALUES(node_uid), node_serial=VALUES(node_serial), " \
-	"node_guard_port=VALUES(node_guard_port), " \
+	"node_guard_port=VALUES(node_guard_port), node_data_port=VALUES(node_data_port), " \
 	"last_heartbeat=VALUES(last_heartbeat), " \
 	"hive_version=VALUES(hive_version), " \
 	"hive_patch_level=VALUES(hive_patch_level), " \
-	"fenced=VALUES(fenced)"
+	"fenced=VALUES(fenced), " \
+	"storage_capacity_bytes=VALUES(storage_capacity_bytes), " \
+	"storage_used_bytes=VALUES(storage_used_bytes), " \
+	"storage_reserved_bytes=VALUES(storage_reserved_bytes), " \
+	"storage_overhead_bytes=VALUES(storage_overhead_bytes)"
 
 
 /* The great news here is we removed a LOT of slow SQL by moving Rocks to a C-Library form rather than
@@ -197,7 +213,7 @@ void init_hive_link(void);
 void close_hive_link(void);
 int get_hive_vers(void);
 MYSQL_RES *hifs_get_hive_host_data(char *machine_id);
-int register_hive_host(void);
+int get_host_info(void);
 char *hifs_get_quoted_value(const char *in_str);
 char *hifs_get_unquoted_value(const char *in_str);
 void hifs_release_query(void);
@@ -233,6 +249,7 @@ bool hifs_volume_block_ec_encode(const uint8_t *buf, uint32_t len,
 void hifs_volume_block_ec_free(struct hifs_ec_stripe_set *ec);
 bool hifs_load_storage_nodes(void);
 const struct hive_storage_node *hifs_get_storage_nodes(size_t *count);
+const struct hive_storage_node *hifs_get_local_storage_node(void);
 bool hifs_store_block_to_stripe_locations(uint64_t volume_id,
                                           uint64_t block_no,
                                           uint8_t hash_algo,
