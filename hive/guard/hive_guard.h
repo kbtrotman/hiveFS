@@ -47,6 +47,13 @@
 
 #define MAXC 1024
 
+extern int storage_node_id;
+extern char storage_node_name[50];
+extern char storage_node_address[64];
+extern char storage_node_uid[128];
+extern char storage_node_serial[100];
+extern uint16_t storage_node_guard_port;
+extern uint16_t storage_node_stripe_port;
 struct hive_storage_node {
 	uint32_t id;
 	char	 name[100];

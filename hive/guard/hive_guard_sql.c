@@ -22,10 +22,31 @@
 #include "hive_guard_sn_tcp.h"
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
+#define HIFS_STORAGE_NODE_HEARTBEAT_MAX_AGE 30
+#define HIFS_STORAGE_NODE_PERSIST_MIN_SECS 5
+
+static char *hifs_get_machine_id(void);
+static long hifs_get_host_id(void);
+static uint16_t hifs_local_guard_port(void);
+static void hifs_parse_version(int *version_out, int *patch_out);
+static bool hifs_get_local_node_identity(struct hive_storage_node *node);
+static bool hifs_persist_storage_node(uint64_t node_id,
+				      const char *node_address,
+				      uint16_t node_port);
+static void hifs_safe_strcpy(char *dst, size_t dst_len, const char *src);
 
 struct SQLDB sqldb;
+int storage_node_id;
+char storage_node_name[50];
+char storage_node_address[64];
+char storage_node_uid[128];
+char storage_node_serial[100];
+uint16_t storage_node_guard_port;
+uint16_t storage_node_stripe_port;
 static struct hive_storage_node *loaded_storage_nodes;
 static size_t loaded_storage_node_count;
+static struct hive_storage_node cached_local_node;
+static bool cached_local_node_valid;
 
 struct stripe_locations {
 	struct stripe_location entries[HIFS_EC_STRIPES];
@@ -43,6 +64,83 @@ const struct hive_storage_node *hifs_get_storage_nodes(size_t *count)
 	if (count)
 		*count = loaded_storage_node_count;
 	return loaded_storage_nodes;
+}
+
+const struct hive_storage_node *hifs_get_local_storage_node(void)
+{
+	return cached_local_node_valid ? &cached_local_node : NULL;
+}
+
+static const char *hifs_cached_host_serial(void)
+{
+	static char serial_buf[32];
+	static long cached_host_id = LONG_MIN;
+	long host_id = hifs_get_host_id();
+
+	if (host_id != cached_host_id) {
+		int len = snprintf(serial_buf, sizeof(serial_buf), "%ld", host_id);
+		if (len < 0 || (size_t)len >= sizeof(serial_buf))
+			serial_buf[0] = '\0';
+		cached_host_id = host_id;
+	}
+	return serial_buf;
+}
+
+static struct hive_storage_node *
+hifs_match_local_storage_node(struct hive_storage_node *nodes, size_t count)
+{
+	if (!nodes || count == 0)
+		return NULL;
+
+	uint32_t id_hint = (storage_node_id > 0) ? (uint32_t)storage_node_id : 0;
+	if (id_hint != 0) {
+		for (size_t i = 0; i < count; ++i) {
+			if (nodes[i].id == id_hint)
+				return &nodes[i];
+		}
+	}
+
+	const char *local_uid = hifs_get_machine_id();
+	const char *local_serial = hifs_cached_host_serial();
+	if (!local_uid || !*local_uid || !local_serial || !*local_serial)
+		return NULL;
+
+	for (size_t i = 0; i < count; ++i) {
+		if (nodes[i].uid[0] == '\0' || nodes[i].serial[0] == '\0')
+			continue;
+		if (strcmp(nodes[i].uid, local_uid) == 0 &&
+		    strcmp(nodes[i].serial, local_serial) == 0)
+			return &nodes[i];
+	}
+
+	return NULL;
+}
+
+static void hifs_update_local_storage_node(const struct hive_storage_node *node)
+{
+	if (!node) {
+		memset(&cached_local_node, 0, sizeof(cached_local_node));
+		cached_local_node_valid = false;
+		storage_node_id = 0;
+		storage_node_guard_port = 0;
+		storage_node_stripe_port = 0;
+		return;
+	}
+
+	cached_local_node = *node;
+	cached_local_node_valid = true;
+	storage_node_id = (int)node->id;
+	storage_node_guard_port = node->guard_port;
+	storage_node_stripe_port = node->stripe_port;
+}
+
+static void hifs_safe_strcpy(char *dst, size_t dst_len, const char *src)
+{
+	if (!dst || dst_len == 0)
+		return;
+	if (!src)
+		src = "";
+	snprintf(dst, dst_len, "%s", src);
 }
 
 static void bytes_to_hex(const uint8_t *src, size_t len, char *dst)
@@ -138,6 +236,100 @@ static long hifs_get_host_id(void)
 		}
 	}
 	return id;
+}
+
+static uint16_t hifs_local_guard_port(void)
+{
+	const char *env = getenv(ENV_LISTEN_PORT);
+	long port = env && *env ? strtol(env, NULL, 10) : 0;
+	if (port <= 0 || port > UINT16_MAX)
+		port = atoi(HIFS_GUARD_PORT_STR);
+	return (uint16_t)port;
+}
+
+static void hifs_parse_version(int *version_out, int *patch_out)
+{
+	int version = 0;
+	int patch = 0;
+	const char *ver = HIFS_VERSION;
+
+	if (ver && *ver) {
+		char *endptr = NULL;
+		long v = strtol(ver, &endptr, 10);
+		if (v >= 0)
+			version = (int)v;
+		if (endptr && *endptr == '.') {
+			long p = strtol(endptr + 1, NULL, 10);
+			if (p >= 0)
+				patch = (int)p;
+		}
+	}
+
+	if (version_out)
+		*version_out = version;
+	if (patch_out)
+		*patch_out = patch;
+}
+
+static bool hifs_get_local_node_identity(struct hive_storage_node *node)
+{
+	if (!node)
+		return false;
+
+	memset(node, 0, sizeof(*node));
+
+	char hostname[sizeof(node->name)] = {0};
+	if (gethostname(hostname, sizeof(hostname)) != 0)
+		hifs_safe_strcpy(hostname, sizeof(hostname), "hive_guard");
+	hostname[sizeof(hostname) - 1] = '\0';
+	hifs_safe_strcpy(node->name, sizeof(node->name), hostname);
+
+	const char *uid = hifs_get_machine_id();
+	if (uid)
+		hifs_safe_strcpy(node->uid, sizeof(node->uid), uid);
+
+	const char *serial = hifs_cached_host_serial();
+	if (serial)
+		hifs_safe_strcpy(node->serial, sizeof(node->serial), serial);
+
+	bool have_addr = false;
+	struct addrinfo hints = {0};
+	hints.ai_family = AF_INET;
+	hints.ai_socktype = SOCK_STREAM;
+	struct addrinfo *res = NULL;
+
+	if (getaddrinfo(hostname, NULL, &hints, &res) == 0) {
+		for (struct addrinfo *it = res; it && !have_addr; it = it->ai_next) {
+			if (it->ai_family != AF_INET)
+				continue;
+			struct sockaddr_in *sin = (struct sockaddr_in *)it->ai_addr;
+				if (inet_ntop(AF_INET, &sin->sin_addr,
+				      node->address, sizeof(node->address))) {
+					have_addr = true;
+				}
+			}
+			freeaddrinfo(res);
+		}
+
+	if (!have_addr) {
+		struct hostent *he = gethostbyname(hostname);
+		if (he && he->h_addr_list && he->h_addr_list[0]) {
+			struct in_addr addr;
+			memcpy(&addr, he->h_addr_list[0], sizeof(addr));
+			const char *ip = inet_ntoa(addr);
+			if (ip) {
+				strncpy(node->address, ip, sizeof(node->address) - 1);
+				have_addr = true;
+			}
+		}
+	}
+
+	if (!have_addr)
+		hifs_safe_strcpy(node->address, sizeof(node->address), "127.0.0.1");
+
+	node->guard_port = hifs_local_guard_port();
+	node->stripe_port = node->guard_port;
+	return true;
 }
 
 static bool hifs_execute_query(const char *sql, MYSQL_RES **out_res)
@@ -291,9 +483,8 @@ static long str_to_long(const char *s)
 	return strtol(s, NULL, 10);
 }
 
-int register_hive_host(void)
+int get_host_info(void)
 {
-	char sql_query[MAX_QUERY_SIZE];
 	char ip_address[64] = {0};
 	char *hive_mach_id = NULL;
 	long hive_host_id = 0;
@@ -325,9 +516,28 @@ int register_hive_host(void)
 
 	hive_mach_id = hifs_get_machine_id();
 	hive_host_id = hifs_get_host_id();
+	if (hive_mach_id)
+		hifs_safe_strcpy(storage_node_uid, sizeof(storage_node_uid), hive_mach_id);
+	snprintf(storage_node_serial, sizeof(storage_node_serial), "%ld", hive_host_id);
+	hifs_safe_strcpy(storage_node_name, sizeof(storage_node_name), name);
+	hifs_safe_strcpy(storage_node_address, sizeof(storage_node_address), ip_address);
 
-	hifs_info("Hive machine ID is [%s] and host ID is [%ld]\n", hive_mach_id, hive_host_id);
+	hifs_info("Hive machine ID is [%s] and host ID is [%ld]\n",
+		  hive_mach_id ? hive_mach_id : "unknown", hive_host_id);
+	return 1;
+}
 
+bool get_hive_host_data(void)
+{
+
+	char sql_query[MAX_QUERY_SIZE];
+	char ip_address[64] = {0};
+	char *hive_mach_id = hifs_get_machine_id();
+	long hive_host_id = hifs_get_host_id();
+	struct hostent *host_entry;
+	struct in_addr addr;
+	struct utsname uts;
+	char name[100] = {0};
 	MYSQL_RES *res = hifs_get_hive_host_data(hive_mach_id);
 	if (!res) {
 		hifs_err("Failed to query hive host data\n");
@@ -356,6 +566,28 @@ int register_hive_host(void)
 
 	if (row_count > 0)
 		return 1;
+
+	if (gethostname(name, sizeof(name)) != 0) {
+		hifs_err("gethostname failed: %s\n", strerror(errno));
+		return 0;
+	}
+
+	host_entry = gethostbyname(name);
+	if (!host_entry) {
+		hifs_err("gethostbyname failed: %s\n", hstrerror(h_errno));
+		return 0;
+	}
+
+	memcpy(&addr.s_addr, host_entry->h_addr_list[0], host_entry->h_length);
+	snprintf(ip_address, sizeof(ip_address), "%s", inet_ntoa(addr));
+
+	if (uname(&uts) != 0) {
+		hifs_err("uname failed: %s\n", strerror(errno));
+		return 0;
+	}
+
+	hive_mach_id = hifs_get_machine_id();
+	hive_host_id = hifs_get_host_id();
 
 	hifs_notice("This host does not exist in the hive. Filesystems cannot be mounted without a hive connection.");
 	hifs_notice("Would you like to add this host to the hive? [y/n]\n");
@@ -1329,10 +1561,26 @@ int save_binary_data(char *data_block, char *hash)
 
 bool hifs_load_storage_nodes(void)
 {
-	MYSQL_RES *res;
-	MYSQL_ROW row;
-	size_t row_count;
-	struct hive_storage_node *nodes;
+	enum {
+		COL_ID = 0,
+		COL_NAME,
+		COL_ADDRESS,
+		COL_UID,
+		COL_SERIAL,
+		COL_GUARD_PORT,
+		COL_DATA_PORT,
+		COL_LAST_HEARTBEAT,
+		COL_VERSION,
+		COL_PATCH_LEVEL,
+		COL_FENCED,
+		COL_LAST_MAINT,
+		COL_MAINT_REASON
+	};
+	MYSQL_RES *res = NULL;
+	size_t row_count = 0;
+	struct hive_storage_node *nodes = NULL;
+	struct hive_storage_node *old_nodes = NULL;
+	struct hive_storage_node *local = NULL;
 
 	if (!sqldb.sql_init || !sqldb.conn)
 		return false;
@@ -1342,62 +1590,111 @@ bool hifs_load_storage_nodes(void)
 		return false;
 
 	row_count = (size_t)mysql_num_rows(res);
-	if (row_count == 0) {
-		mysql_free_result(res);
-		sqldb.last_query = NULL;
-		sqldb.rows = 0;
-		return false;
-	}
+	if (row_count == 0)
+		goto fail;
 
 	nodes = calloc(row_count, sizeof(*nodes));
-	if (!nodes) {
-		mysql_free_result(res);
-		sqldb.last_query = NULL;
-		return false;
-	}
+	if (!nodes)
+		goto fail;
 
 	for (size_t i = 0; i < row_count; ++i) {
-		row = mysql_fetch_row(res);
-		if (!row) {
-			free(nodes);
-			mysql_free_result(res);
-			sqldb.last_query = NULL;
-			return false;
-		}
+		MYSQL_ROW row = mysql_fetch_row(res);
+		if (!row)
+			goto fail;
 
-		nodes[i].id = row[0] ? (uint32_t)strtoul(row[0], NULL, 10) : 0;
-		if (row[1]) {
-			strncpy(nodes[i].name, row[1], sizeof(nodes[i].name) - 1);
-			nodes[i].name[sizeof(nodes[i].name) - 1] = '\0';
-		}
-		if (row[2]) {
-			strncpy(nodes[i].address, row[2], sizeof(nodes[i].address) - 1);
-			nodes[i].address[sizeof(nodes[i].address) - 1] = '\0';
-		}
-		if (row[3]) {
-			strncpy(nodes[i].uid, row[3], sizeof(nodes[i].uid) - 1);
-			nodes[i].uid[sizeof(nodes[i].uid) - 1] = '\0';
-		}
-		if (row[4]) {
-			strncpy(nodes[i].serial, row[4], sizeof(nodes[i].serial) - 1);
-			nodes[i].serial[sizeof(nodes[i].serial) - 1] = '\0';
-		}
-		nodes[i].guard_port = row[5] ? (uint16_t)strtoul(row[5], NULL, 10) : 0;
-		nodes[i].fenced = row[9] ? (uint8_t)strtoul(row[9], NULL, 10) : 0;
+		nodes[i].id = sql_to_u32(row[COL_ID]);
+		if (row[COL_NAME])
+			strncpy(nodes[i].name, row[COL_NAME], sizeof(nodes[i].name) - 1);
+		if (row[COL_ADDRESS])
+			strncpy(nodes[i].address, row[COL_ADDRESS], sizeof(nodes[i].address) - 1);
+		if (row[COL_UID])
+			strncpy(nodes[i].uid, row[COL_UID], sizeof(nodes[i].uid) - 1);
+		if (row[COL_SERIAL])
+			strncpy(nodes[i].serial, row[COL_SERIAL], sizeof(nodes[i].serial) - 1);
+		nodes[i].guard_port = (uint16_t)sql_to_u32(row[COL_GUARD_PORT]);
+		nodes[i].stripe_port = (uint16_t)sql_to_u32(row[COL_DATA_PORT]);
+		nodes[i].fenced = (uint8_t)sql_to_u32(row[COL_FENCED]);
+		nodes[i].last_heartbeat = sql_to_u64(row[COL_LAST_HEARTBEAT]);
 
 		hifs_debug("node_id=%u address=%s guard_port=%u",
 			  nodes[i].id,
 			  nodes[i].address,
 			  nodes[i].guard_port);
 	}
+
 	mysql_free_result(res);
 	sqldb.last_query = NULL;
 	sqldb.rows = (int)row_count;
 
-	free(loaded_storage_nodes);
+	old_nodes = loaded_storage_nodes;
 	loaded_storage_nodes = nodes;
 	loaded_storage_node_count = row_count;
+	nodes = NULL;
+
+	local = hifs_match_local_storage_node(loaded_storage_nodes,
+					      loaded_storage_node_count);
+	if (local) {
+		bool need_persist = false;
+		struct hive_storage_node desired;
+		bool have_desired = hifs_get_local_node_identity(&desired);
+
+		if (have_desired) {
+				if (desired.address[0] &&
+				    strcmp(local->address, desired.address) != 0) {
+					hifs_safe_strcpy(local->address, sizeof(local->address), desired.address);
+					need_persist = true;
+				}
+			if (desired.guard_port &&
+			    local->guard_port != desired.guard_port) {
+				local->guard_port = desired.guard_port;
+				need_persist = true;
+			}
+			if (desired.stripe_port &&
+			    local->stripe_port != desired.stripe_port) {
+				local->stripe_port = desired.stripe_port;
+				need_persist = true;
+			}
+				if (desired.name[0] &&
+				    strcmp(local->name, desired.name) != 0) {
+					hifs_safe_strcpy(local->name, sizeof(local->name), desired.name);
+					need_persist = true;
+				}
+		}
+
+		time_t now = time(NULL);
+		time_t hb = (time_t)local->last_heartbeat;
+		if (hb == 0 ||
+		    now < hb ||
+		    (now - hb) >= HIFS_STORAGE_NODE_HEARTBEAT_MAX_AGE)
+			need_persist = true;
+
+		if (need_persist) {
+			const char *addr = (have_desired && desired.address[0]) ?
+					   desired.address : local->address;
+			uint16_t port = (have_desired && desired.guard_port) ?
+					desired.guard_port : local->guard_port;
+			hifs_persist_storage_node(local->id, addr, port);
+		}
+	}
+	if (!local) {
+		if (cached_local_node_valid)
+			hifs_update_local_storage_node(NULL);
+	} else if (!cached_local_node_valid ||
+		   memcmp(local, &cached_local_node, sizeof(*local)) != 0) {
+		hifs_update_local_storage_node(local);
+	}
+
+	free(old_nodes);
 	return true;
+
+fail:
+	free(nodes);
+	if (res) {
+		mysql_free_result(res);
+		sqldb.last_query = NULL;
+	}
+	sqldb.rows = 0;
+	return false;
 }
 
 bool hifs_store_block_to_stripe_locations(uint64_t volume_id, uint64_t block_no,
@@ -1510,21 +1807,66 @@ static struct stripe_locations hifs_read_block_to_stripe_locations(uint64_t volu
 	return out;
 }
 
-/*
-bool hifs_persist_storage_node(uint64_t node_id,
-				 const char *node_address,
-				 uint16_t node_port)
+
+static bool hifs_persist_storage_node(uint64_t node_id,
+				      const char *node_address,
+				      uint16_t node_port)
 {
+	static struct {
+		uint64_t node_id;
+		char address[64];
+		uint16_t port;
+		time_t ts;
+		bool ok;
+	} cache;
 	char sql_query[MAX_QUERY_SIZE];
 
-	if (!sqldb.sql_init || !sqldb.conn)
+	if (!sqldb.sql_init || !sqldb.conn || node_id == 0)
 		return false;
 
-	snprintf(sql_query, sizeof(sql_query), SQL_STORAGE_NODE_UPSERT,
-		 (unsigned long long)node_id,
-		 node_address,
-		 node_port);
+	struct hive_storage_node local = {0};
+	if (!hifs_get_local_node_identity(&local))
+		return false;
 
-	return hifs_insert_sql(sql_query);
+	if (node_address && *node_address)
+		hifs_safe_strcpy(local.address, sizeof(local.address), node_address);
+	if (node_port)
+		local.guard_port = node_port;
+	if (!local.stripe_port)
+		local.stripe_port = local.guard_port;
+
+	time_t now = time(NULL);
+	if (cache.node_id == node_id &&
+	    cache.port == local.guard_port &&
+	    cache.address[0] != '\0' &&
+	    strcmp(cache.address, local.address) == 0 &&
+	    cache.ts != 0 &&
+	    (now - cache.ts) < HIFS_STORAGE_NODE_PERSIST_MIN_SECS)
+		return cache.ok;
+
+	int version = 0;
+	int patch = 0;
+	hifs_parse_version(&version, &patch);
+
+	int written = snprintf(sql_query, sizeof(sql_query), SQL_STORAGE_NODE_UPSERT,
+			       (unsigned long long)node_id,
+			       local.name[0] ? local.name : "hive_guard",
+			       local.address[0] ? local.address : "127.0.0.1",
+			       local.uid[0] ? local.uid : hifs_get_machine_id(),
+			       local.serial[0] ? local.serial : hifs_cached_host_serial(),
+			       (unsigned)local.guard_port,
+			       (unsigned)local.stripe_port,
+			       version,
+			       patch,
+			       0ULL, 0ULL, 0ULL, 0ULL);
+	if (written < 0 || (size_t)written >= sizeof(sql_query))
+		return false;
+
+	bool ok = hifs_insert_sql(sql_query);
+	cache.node_id = node_id;
+	hifs_safe_strcpy(cache.address, sizeof(cache.address), local.address);
+	cache.port = local.guard_port;
+	cache.ts = now;
+	cache.ok = ok;
+	return ok;
 }
-*/

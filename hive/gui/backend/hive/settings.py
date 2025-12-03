@@ -57,20 +57,25 @@ INSTALLED_APPS = [
     'rest_framework.authtoken',
     'dj_rest_auth',
     'dj_rest_auth.registration', # For registration endpoints
+    'notifications',
     'settings',
     'accounts',
     'monitor',
+    'reports',
     'tenant',
     'audit',
     'tree',
+    'nodes',
+    'disk',
+    'perf',
     'api',
     'allauth.socialaccount.providers.okta',
     'allauth.socialaccount.providers.microsoft',
 ]
 
 MIDDLEWARE = [
-    'hive.middleware.DisableCORSMiddlewareForAPIs',
     'corsheaders.middleware.CorsMiddleware',
+    'hive.middleware.DisableCORSMiddlewareForAPIs',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     #'django.middleware.common.CommonMiddleware',
@@ -224,21 +229,15 @@ ACCOUNT_EMAIL_VERIFICATION = 'optional'
 #     "https://yourfrontenddomain.com",
 # ]
 
-CORS_ALLOW_HEADERS = [
-    "accept",
-    "accept-encoding",
-    "authorization",
-    "content-type",
-    "dnt",
-    "origin",
-    "user-agent",
-    "x-csrftoken",
-    "x-requested-with",
-    "x-auth-token",
+CSRF_TRUSTED_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+     
 ]
 
 HEADLESS_ONLY = True
-
 
 # allauth settings
 EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
