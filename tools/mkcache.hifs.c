@@ -254,8 +254,8 @@ static void init_root_inode(struct hifs_inode *inode, uint32_t block_size)
 	inode->i_size = block_size;
 	inode->i_blocks = 1;
 	inode->i_bytes = block_size;
-	inode->i_addrb[0] = dir_block;
-	inode->i_addre[0] = dir_block + 1;
+	inode->extents[0].block_start = dir_block;
+	inode->extents[0].block_count = 1;
 	inode->i_links = 2;
 	strncpy(inode->i_name, "/", sizeof(inode->i_name));
 }

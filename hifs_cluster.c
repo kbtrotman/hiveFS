@@ -12,7 +12,7 @@
 /**
  * HiveFS cluster/consistency stubs
  *
- * These are placeholders for future fencing/lease logic. For now they simply
+ * These are placeholders for future lease logic. For now they simply
  * succeed so VFS open/close work without additional wiring.
  */
 

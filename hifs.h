@@ -141,10 +141,11 @@ int hifs_publish_dentry(struct super_block *sb, uint64_t parent_ino, uint64_t ch
 int hifs_publish_inode(struct super_block *sb, const struct hifs_inode *hii,
                        bool request_only);
 int hifs_publish_block(struct super_block *sb, uint64_t block_no,
-		       const void *data, u32 data_len, bool request_only);
+		       const void *data, u32 data_len, bool request_only,
+		       u32 flags);
 int hifs_fetch_block(struct super_block *sb, uint64_t block_no);
 int hifs_push_block(struct super_block *sb, uint64_t block_no,
-		    const void *data, u32 data_len);
+		    const void *data, u32 data_len, u32 flags);
 int hifs_flush_dirty_cache_items(void);
 
 /*hicom_kern_mm.c*/
@@ -195,6 +196,9 @@ int hifs_readdir(struct file *filp, struct dir_context *ctx);
 ssize_t hifs_get_loffset(struct hifs_inode *hii, loff_t off);
 ssize_t hifs_read(struct kiocb *iocb, struct iov_iter *to);
 ssize_t hifs_write(struct kiocb *iocb, struct iov_iter *from);
+int hifs_inode_reserve_blocks(struct super_block *sb,
+			      struct hifs_inode *inode,
+			      uint32_t last_block_needed);
 int hifs_open_file(struct inode *inode, struct file *filp);
 int hifs_release_file(struct inode *inode, struct file *filp);
 
@@ -342,6 +346,12 @@ struct hifs_sb_info
     unsigned int io_wait_ms;
     bool io_wait_mount_override;
 };
+
+static inline uint32_t hifs_sb_block_size(const struct super_block *sb)
+{
+	const struct hifs_sb_info *info = sb ? sb->s_fs_info : NULL;
+	return (info && info->s_blocksize) ? info->s_blocksize : HIFS_DEFAULT_BLOCK_SIZE;
+}
 
 /* Return pointer to cached on-disk super in sb->s_fs_info (may be NULL). */
 static inline const struct hifs_disk_superblock *hifs_get_cached_superblock(struct super_block *sb)

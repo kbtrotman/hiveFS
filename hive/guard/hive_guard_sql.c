@@ -1078,14 +1078,10 @@ bool hifs_volume_inode_load(uint64_t volume_id, uint64_t inode,
 		goto out;
 	idx++;
 
-	out->i_addrb[0] = htole32(sql_to_u32(row[idx++]));
-	out->i_addrb[1] = htole32(sql_to_u32(row[idx++]));
-	out->i_addrb[2] = htole32(sql_to_u32(row[idx++]));
-	out->i_addrb[3] = htole32(sql_to_u32(row[idx++]));
-	out->i_addre[0] = htole32(sql_to_u32(row[idx++]));
-	out->i_addre[1] = htole32(sql_to_u32(row[idx++]));
-	out->i_addre[2] = htole32(sql_to_u32(row[idx++]));
-	out->i_addre[3] = htole32(sql_to_u32(row[idx++]));
+	for (size_t i = 0; i < HIFS_INODE_TSIZE; ++i)
+		out->extents[i].block_start = htole32(sql_to_u32(row[idx++]));
+	for (size_t i = 0; i < HIFS_INODE_TSIZE; ++i)
+		out->extents[i].block_count = htole32(sql_to_u32(row[idx++]));
 	out->i_blocks = htole32(sql_to_u32(row[idx++]));
 	out->i_bytes = htole32(sql_to_u32(row[idx++]));
 	out->i_links = row[idx] ? (uint8_t)strtoul(row[idx], NULL, 10) : 0;
@@ -1123,8 +1119,8 @@ bool hifs_volume_inode_store(uint64_t volume_id,
 	uint32_t epoch;
 	uint64_t ino_host;
 	uint32_t msg_flags, mode, atime, mtime, ctime, size;
-	uint32_t addrb[HIFS_INODE_TSIZE];
-	uint32_t addre[HIFS_INODE_TSIZE];
+	uint32_t extent_start[HIFS_INODE_TSIZE];
+	uint32_t extent_count[HIFS_INODE_TSIZE];
 	uint32_t blocks, bytes;
 	uint16_t uid, gid, hrd_lnk, hash_count, hash_reserved;
 	uint8_t version, flags, links;
@@ -1146,8 +1142,8 @@ bool hifs_volume_inode_store(uint64_t volume_id,
 	size = le32toh(inode->i_size);
 	bytes_to_hex((const uint8_t *)inode->i_name, sizeof(inode->i_name), name_hex);
 	for (size_t i = 0; i < HIFS_INODE_TSIZE; ++i) {
-		addrb[i] = le32toh(inode->i_addrb[i]);
-		addre[i] = le32toh(inode->i_addre[i]);
+		extent_start[i] = le32toh(inode->extents[i].block_start);
+		extent_count[i] = le32toh(inode->extents[i].block_count);
 	}
 	blocks = le32toh(inode->i_blocks);
 	bytes = le32toh(inode->i_bytes);
@@ -1162,8 +1158,8 @@ bool hifs_volume_inode_store(uint64_t volume_id,
 				  msg_flags, version, flags, mode,
 				  (unsigned long long)ino_host, uid, gid,
 				  hrd_lnk, atime, mtime, ctime, size, name_hex,
-				  addrb[0], addrb[1], addrb[2], addrb[3],
-				  addre[0], addre[1], addre[2], addre[3],
+				  extent_start[0], extent_start[1], extent_start[2], extent_start[3],
+				  extent_count[0], extent_count[1], extent_count[2], extent_count[3],
 				  blocks, bytes, links, hash_count, hash_reserved, epoch) + 1;
 	sql_query = malloc(sql_len);
 	if (!sql_query)
@@ -1175,8 +1171,8 @@ bool hifs_volume_inode_store(uint64_t volume_id,
 		 msg_flags, version, flags, mode,
 		 (unsigned long long)ino_host, uid, gid,
 		 hrd_lnk, atime, mtime, ctime, size, name_hex,
-		 addrb[0], addrb[1], addrb[2], addrb[3],
-		 addre[0], addre[1], addre[2], addre[3],
+		 extent_start[0], extent_start[1], extent_start[2], extent_start[3],
+		 extent_count[0], extent_count[1], extent_count[2], extent_count[3],
 		 blocks, bytes, links, hash_count, hash_reserved, epoch);
 
 	if (!hifs_insert_sql(sql_query)) {
