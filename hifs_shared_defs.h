@@ -228,11 +228,13 @@ extern struct
 #define HIFS_INODE_TSIZE		 4
 #define HIFS_BLOCK_HASH_SIZE      16
 #define HIFS_MAX_BLOCK_HASHES     128
+
 enum hifs_hash_algorithm {
 	HIFS_HASH_ALGO_NONE = 0,
 	HIFS_HASH_ALGO_SHA256 = 1,
 	HIFS_HASH_ALGO_SIPHASH = 2,
 };
+
 #define HIFS_BOOT_OFFSET		 0
 #define HIFS_BOOT_LEN            512
 #define HIFS_BOOT2_OFFSET		 (HIFS_BOOT_LEN + 512)
@@ -302,10 +304,25 @@ struct hifs_block_fingerprint_wire {
 #define HIFS_ROOT_INODE      11 /* Root inode nbr */
 #define HIFS_SUPER_POSITION 1024 
 
+struct hifs_extent {
+	uint32_t block_start;   /* first block (inclusive) */
+	uint32_t block_count;   /* number of contiguous blocks in this extent */
+};
+
+struct hifs_extent_wire {
+#ifdef __KERNEL__
+	__le32 block_start;
+	__le32 block_count;
+#else
+	uint32_t block_start;
+	uint32_t block_count;
+#endif
+};
+
 /**
  * The on-Disk inode
  **/
-struct hifs_inode 
+struct hifs_inode
 {
 	//const struct super_block	i_sb;      /* Superblock position */
     uint8_t     i_version;	/* inode version */
@@ -323,9 +340,7 @@ struct hifs_inode
 	//void		*i_private;  /* Private/Unpublished filesystrem member */
 	//const struct inode_operations	i_op;       /* operation */
 	//const struct file_operations	i_fop;	      /* file operation */
-	/* address begin - end block, range exclusive: addres end (last block) does not belogs to extend! */
-	uint32_t	i_addrb[HIFS_INODE_TSIZE];	/* Start block of extend ranges */
-	uint32_t	i_addre[HIFS_INODE_TSIZE];	/* End block of extend ranges */
+	struct hifs_extent extents[HIFS_INODE_TSIZE];
 	uint32_t	i_blocks;	/* Number of blocks */
 	uint32_t	i_bytes;	/* Number of bytes */
 	uint8_t		i_links;    /* Number of links to an inode */
@@ -718,8 +733,7 @@ struct hifs_inode_wire {
     __le32 i_ctime;
     __le32 i_size;
     __u8  i_name[HIFS_MAX_NAME_SIZE];
-    __le32 i_addrb[HIFS_INODE_TSIZE];
-    __le32 i_addre[HIFS_INODE_TSIZE];
+    struct hifs_extent_wire extents[HIFS_INODE_TSIZE];
     __le32 i_blocks;
     __le32 i_bytes;
     __u8  i_links;
@@ -741,8 +755,7 @@ struct hifs_inode_wire {
     uint32_t i_ctime;
     uint32_t i_size;
     uint8_t  i_name[HIFS_MAX_NAME_SIZE];
-    uint32_t i_addrb[HIFS_INODE_TSIZE];
-    uint32_t i_addre[HIFS_INODE_TSIZE];
+    struct hifs_extent_wire extents[HIFS_INODE_TSIZE];
     uint32_t i_blocks;
     uint32_t i_bytes;
     uint8_t  i_links;
