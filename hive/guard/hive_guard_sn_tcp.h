@@ -137,7 +137,7 @@ static const char *const hg_rej_quotes[hg_rej_count] = {
     "You underestimate the power of the dark side… of networking.",
     "There is another… port you could try.",
     "This is not the port you were promised.",
-    "I'm one with the Force. The Force is with me. The connection is not.",
+    "I'm one with the Force. The Force is with me. The connection is not with you.",
     "A communications disruption can mean only one thing: disconnect.",
     "Ben! Why didn't you tell me? Why?! The port was closed all along!",
     "The ability to destroy a planet is insignificant next to the power of a lost connection.",
