@@ -12,6 +12,8 @@
 
 #include <arpa/inet.h>
 #include <ctype.h>
+#include <limits.h>
+#include <endian.h>
 #include <fcntl.h>
 #include <netdb.h>
 #include <netinet/tcp.h>
@@ -1458,6 +1460,61 @@ bool hifs_volume_block_store(uint64_t volume_id, uint64_t block_no,
 	return guard_store_struct("volume_block_put",
 				  fields, ARRAY_SIZE(fields),
 				  buf, len);
+}
+
+bool hifs_contig_block_send(uint64_t volume_id, uint64_t block_start,
+			    const uint32_t *lengths, size_t block_count,
+			    const uint8_t *data, size_t data_len)
+{
+	struct guard_field fields[] = {
+		GUARD_FIELD_U64("volume_id", volume_id),
+		GUARD_FIELD_U64("block_start", block_start),
+		GUARD_FIELD_U64("block_count", block_count),
+	};
+	struct hifs_contig_block_stream header = {
+		.block_start = htole64(block_start),
+		.block_count = htole32(block_count),
+		.reserved = 0,
+	};
+	size_t lengths_bytes;
+	size_t expected = 0;
+	uint8_t *payload;
+	uint8_t *cursor;
+	bool ok;
+
+	if (!lengths || !data || !block_count)
+		return false;
+
+	for (size_t i = 0; i < block_count; ++i) {
+		expected += lengths[i];
+		if (lengths[i] == 0)
+			return false;
+	}
+	if (expected != data_len)
+		return false;
+
+	if (block_count > (SIZE_MAX - sizeof(header)) / sizeof(uint32_t))
+		return false;
+	lengths_bytes = block_count * sizeof(uint32_t);
+	if (data_len > SIZE_MAX - (sizeof(header) + lengths_bytes))
+		return false;
+	payload = malloc(sizeof(header) + lengths_bytes + data_len);
+	if (!payload)
+		return false;
+
+	memcpy(payload, &header, sizeof(header));
+	cursor = payload + sizeof(header);
+	for (size_t i = 0; i < block_count; ++i) {
+		uint32_t le = htole32(lengths[i]);
+		memcpy(cursor + i * sizeof(uint32_t), &le, sizeof(le));
+	}
+	memcpy(cursor + lengths_bytes, data, data_len);
+
+	ok = guard_store_struct("volume_block_put_contig",
+				fields, ARRAY_SIZE(fields),
+				payload, sizeof(header) + lengths_bytes + data_len);
+	free(payload);
+	return ok;
 }
 
 bool hifs_volume_block_recv(uint64_t volume_id, uint64_t block_no,

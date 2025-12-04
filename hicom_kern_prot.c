@@ -129,8 +129,8 @@ static void hifs_inode_host_to_wire(const struct hifs_inode *src,
     dst->i_size = cpu_to_le32(src->i_size);
     memcpy(dst->i_name, src->i_name, sizeof(dst->i_name));
     for (i = 0; i < HIFS_INODE_TSIZE; ++i) {
-        dst->i_addrb[i] = cpu_to_le32(src->i_addrb[i]);
-        dst->i_addre[i] = cpu_to_le32(src->i_addre[i]);
+        dst->extents[i].block_start = cpu_to_le32(src->extents[i].block_start);
+        dst->extents[i].block_count = cpu_to_le32(src->extents[i].block_count);
     }
     dst->i_blocks = cpu_to_le32(src->i_blocks);
     dst->i_bytes = cpu_to_le32(src->i_bytes);
@@ -168,8 +168,8 @@ static void hifs_inode_wire_to_host(const struct hifs_inode_wire *src,
     dst->i_size = le32_to_cpu(src->i_size);
     memcpy(dst->i_name, src->i_name, sizeof(dst->i_name));
     for (i = 0; i < HIFS_INODE_TSIZE; ++i) {
-        dst->i_addrb[i] = le32_to_cpu(src->i_addrb[i]);
-        dst->i_addre[i] = le32_to_cpu(src->i_addre[i]);
+        dst->extents[i].block_start = le32_to_cpu(src->extents[i].block_start);
+        dst->extents[i].block_count = le32_to_cpu(src->extents[i].block_count);
     }
     dst->i_blocks = le32_to_cpu(src->i_blocks);
     dst->i_bytes = le32_to_cpu(src->i_bytes);
@@ -332,8 +332,14 @@ static void hifs_apply_remote_dentry(struct super_block *sb,
     }
 
     for (i = 0; i < HIFS_INODE_TSIZE; ++i) {
-        u32 blk = parent_hifs->i_addrb[i];
-        u32 end = parent_hifs->i_addre[i];
+        u32 start = parent_hifs->extents[i].block_start;
+        u32 count = parent_hifs->extents[i].block_count;
+        u32 blk = start;
+        u32 end = start + count;
+
+        if (count == 0)
+            continue;
+
         while (blk < end) {
             bh = sb_bread(sb, blk);
             if (!bh) {
@@ -803,7 +809,8 @@ out:
 }
 
 int hifs_publish_block(struct super_block *sb, uint64_t block_no,
-                       const void *data, u32 data_len, bool request_only)
+                       const void *data, u32 data_len, bool request_only,
+                       u32 flags)
 {
     struct hifs_sb_info *info;
     struct hifs_cmds cmd;
@@ -846,7 +853,9 @@ int hifs_publish_block(struct super_block *sb, uint64_t block_no,
 
     msg_local->volume_id = cpu_to_le64(info->volume_id);
     msg_local->block_no = cpu_to_le64(block_no);
-    msg_local->flags = cpu_to_le32(request_only ? HIFS_BLOCK_MSGF_REQUEST : 0);
+    msg_local->flags = cpu_to_le32((request_only ? HIFS_BLOCK_MSGF_REQUEST : 0) |
+                                   (flags & (HIFS_BLOCK_MSGF_CONTIG_START |
+                                             HIFS_BLOCK_MSGF_CONTIG_END)));
     msg_local->data_len = cpu_to_le32(request_only ? 0 : data_len);
 
     hifs_debug("publish block %llu len %u flags %#x",

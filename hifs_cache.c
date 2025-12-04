@@ -1156,7 +1156,7 @@ int hifs_fetch_block(struct super_block *sb, uint64_t block)
     }
 
     hifs_debug("cache miss block %llu", (unsigned long long)block);
-    ret = hifs_publish_block(sb, block, NULL, 0, true);
+    ret = hifs_publish_block(sb, block, NULL, 0, true, 0);
     if (ret < 0)
         return ret;
 
@@ -1167,7 +1167,7 @@ int hifs_fetch_block(struct super_block *sb, uint64_t block)
 }
 
 int hifs_push_block(struct super_block *sb, uint64_t block,
-                    const void *data, u32 data_len)
+                    const void *data, u32 data_len, u32 flags)
 {
     if (!sb || !data)
         return -EINVAL;
@@ -1182,7 +1182,7 @@ int hifs_push_block(struct super_block *sb, uint64_t block,
     }
 
     {
-        int ret = hifs_publish_block(sb, block, data, data_len, false);
+        int ret = hifs_publish_block(sb, block, data, data_len, false, flags);
         hifs_dedupe_mark_clean(sb, block, ret >= 0);
         return ret;
     }

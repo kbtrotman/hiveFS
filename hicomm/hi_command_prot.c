@@ -29,6 +29,169 @@ static bool hifs_command_equals(const struct hifs_cmds *cmd, const char *name)
 /* Macro to simplify command comparisons */
 #define VSB_CMD_EQUALS(name) hifs_command_equals(cmd, (name))
 
+struct hifs_block_chain_ctx {
+	uint8_t *data;
+	uint32_t *lengths;
+	size_t data_len;
+	size_t data_cap;
+	size_t lengths_len;
+	size_t lengths_cap;
+	uint64_t volume_id;
+	uint64_t start_block;
+	uint64_t next_block;
+	bool active;
+};
+
+static struct hifs_block_chain_ctx g_block_chain_ctx;
+
+static void hifs_block_chain_reset(struct hifs_block_chain_ctx *ctx)
+{
+	if (!ctx)
+		return;
+
+	ctx->active = false;
+	ctx->volume_id = 0;
+	ctx->start_block = 0;
+	ctx->next_block = 0;
+	ctx->data_len = 0;
+	ctx->lengths_len = 0;
+}
+
+static bool hifs_block_chain_reserve(void **buf, size_t *cap,
+				     size_t needed, size_t elem_size,
+				     size_t min_cap)
+{
+	size_t new_cap;
+	void *tmp;
+
+	if (!buf || !cap || !elem_size)
+		return false;
+	if (*cap >= needed)
+		return true;
+
+	new_cap = *cap ? *cap : min_cap;
+	while (new_cap < needed) {
+		size_t next = new_cap << 1;
+		if (next <= new_cap) {
+			new_cap = needed;
+			break;
+		}
+		new_cap = next;
+	}
+
+	tmp = realloc(*buf, new_cap * elem_size);
+	if (!tmp)
+		return false;
+	*buf = tmp;
+	*cap = new_cap;
+	return true;
+}
+
+static bool hifs_block_chain_flush(struct hifs_block_chain_ctx *ctx)
+{
+	const uint8_t *cursor;
+	uint64_t block_no;
+	size_t i;
+	size_t total = 0;
+	bool sent = false;
+
+	if (!ctx || !ctx->active)
+		return true;
+
+	cursor = ctx->data;
+	block_no = ctx->start_block;
+	for (i = 0; i < ctx->lengths_len; ++i)
+		total += ctx->lengths[i];
+	if (total != ctx->data_len || !cursor) {
+		hifs_block_chain_reset(ctx);
+		return false;
+	}
+
+	if (!ctx->lengths_len) {
+		hifs_block_chain_reset(ctx);
+		return true;
+	}
+
+	if (ctx->lengths_len) {
+		sent = hifs_contig_block_send(ctx->volume_id, ctx->start_block,
+					      ctx->lengths, ctx->lengths_len,
+					      ctx->data, ctx->data_len);
+		if (!sent)
+			hifs_warning("contiguous block send failed for volume %llu start %llu, falling back",
+				     (unsigned long long)ctx->volume_id,
+				     (unsigned long long)ctx->start_block);
+	}
+
+	if (!sent) {
+		cursor = ctx->data;
+		block_no = ctx->start_block;
+		for (i = 0; i < ctx->lengths_len; ++i) {
+			uint32_t len = ctx->lengths[i];
+
+			if (!len || !cursor) {
+				sent = false;
+				break;
+			}
+			if (!hifs_volume_block_store(ctx->volume_id, block_no,
+						     cursor, len)) {
+				hifs_err("Failed to persist contiguous block %llu for volume %llu",
+					 (unsigned long long)block_no,
+					 (unsigned long long)ctx->volume_id);
+				sent = false;
+				break;
+			}
+			cursor += len;
+			++block_no;
+			sent = true;
+		}
+	}
+
+	hifs_block_chain_reset(ctx);
+	return sent;
+}
+
+static bool hifs_block_chain_begin(struct hifs_block_chain_ctx *ctx,
+				   uint64_t volume_id, uint64_t block_no)
+{
+	if (!ctx)
+		return false;
+
+	if (ctx->active && !hifs_block_chain_flush(ctx))
+		hifs_warning("Flushed pending contiguous blocks due to overlap");
+
+	ctx->active = true;
+	ctx->volume_id = volume_id;
+	ctx->start_block = block_no;
+	ctx->next_block = block_no;
+	ctx->data_len = 0;
+	ctx->lengths_len = 0;
+	return true;
+}
+
+static bool hifs_block_chain_append(struct hifs_block_chain_ctx *ctx,
+				    uint64_t block_no,
+				    const uint8_t *data, uint32_t len)
+{
+	if (!ctx || !ctx->active || !data || !len)
+		return false;
+	if (block_no != ctx->next_block)
+		return false;
+
+	if (!hifs_block_chain_reserve((void **)&ctx->data, &ctx->data_cap,
+				      ctx->data_len + len, sizeof(uint8_t),
+				      HIFS_DEFAULT_BLOCK_SIZE))
+		return false;
+	if (!hifs_block_chain_reserve((void **)&ctx->lengths, &ctx->lengths_cap,
+				      ctx->lengths_len + 1, sizeof(uint32_t), 16))
+		return false;
+
+	memcpy(ctx->data + ctx->data_len, data, len);
+	ctx->data_len += len;
+	ctx->lengths[ctx->lengths_len++] = len;
+	ctx->next_block++;
+	return true;
+}
+
 /* Compare two superblocks; return 1 if 'a' is newer, -1 if 'b' is newer, 0 if equal */
 static int hifs_compare_sb_newer(const struct hifs_volume_superblock *a,
 				 const struct hifs_volume_superblock *b)
@@ -469,7 +632,10 @@ int hicomm_handle_command(int fd, const struct hifs_cmds *cmd)
 		int err;
 		uint64_t volume_id;
 		uint64_t block_no;
+		uint32_t msg_flags;
 		bool request_only;
+		bool contig_start;
+		bool contig_end;
 		uint8_t block_buf[HIFS_DEFAULT_BLOCK_SIZE];
 		uint32_t block_len = 0;
 		struct hifs_data_frame data_frame;
@@ -493,7 +659,10 @@ int hicomm_handle_command(int fd, const struct hifs_cmds *cmd)
 		msg_reply = msg_local;
 		volume_id = le64toh(msg_local.volume_id);
 		block_no = le64toh(msg_local.block_no);
-		request_only = (le32toh(msg_local.flags) & HIFS_BLOCK_MSGF_REQUEST) != 0;
+		msg_flags = le32toh(msg_local.flags);
+		request_only = (msg_flags & HIFS_BLOCK_MSGF_REQUEST) != 0;
+		contig_start = (msg_flags & HIFS_BLOCK_MSGF_CONTIG_START) != 0;
+		contig_end = (msg_flags & HIFS_BLOCK_MSGF_CONTIG_END) != 0;
 
 		if (request_only) {
 			have_db = hifs_volume_block_load(volume_id, block_no,
@@ -517,11 +686,37 @@ int hicomm_handle_command(int fd, const struct hifs_cmds *cmd)
 		if (save_local && have_db) {
 			uint32_t store_len = incoming_len ? incoming_len : le32toh(msg_local.data_len);
 			const uint8_t *store_buf = incoming_data ? incoming_data : block_buf;
-			if (!hifs_volume_block_store(volume_id, block_no,
-				 store_buf,
-				 store_len)) {
-				hifs_err("Failed to persist block %" PRIu64 " for volume %" PRIu64,
+			bool buffered = false;
+
+			if (!store_len || !store_buf) {
+				hifs_err("Block %" PRIu64 " volume %" PRIu64 " missing payload",
 					 block_no, volume_id);
+				store_len = 0;
+			} else {
+				if (contig_start)
+					hifs_block_chain_begin(&g_block_chain_ctx, volume_id, block_no);
+
+				if (g_block_chain_ctx.active) {
+					if (!hifs_block_chain_append(&g_block_chain_ctx, block_no,
+								     store_buf, store_len)) {
+						hifs_warning("Failed to append block %" PRIu64
+							     " for volume %" PRIu64 " to contiguous buffer",
+							     block_no, volume_id);
+						hifs_block_chain_reset(&g_block_chain_ctx);
+					} else {
+						buffered = true;
+						if (contig_end && !hifs_block_chain_flush(&g_block_chain_ctx))
+							hifs_warning("Flushing contiguous block run failed");
+					}
+				}
+			}
+
+			if (!buffered && store_len) {
+				if (!hifs_volume_block_store(volume_id, block_no,
+							     store_buf, store_len)) {
+					hifs_err("Failed to persist block %" PRIu64 " for volume %" PRIu64,
+						 block_no, volume_id);
+				}
 			}
 		}
 		if (!request_only)

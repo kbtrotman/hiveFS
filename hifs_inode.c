@@ -12,13 +12,157 @@
 #include <linux/dirent.h>
 #include <linux/byteorder/generic.h>
 #include <linux/uidgid.h>
+#include <linux/limits.h>
+#include <linux/errno.h>
+#include <linux/minmax.h>
 u32 _ix = 0, b = 0, e = 0;
 
-#define FOREAChi_BLK_IN_EXT(dmi, blk)	\
-for (_ix = 0, b = dmi->i_addrb[0], e = dmi->i_addre[0], blk = b-1;	\
-_ix < HIFS_INODE_TSIZE;							\
-++_ix, b = dmi->i_addrb[_ix], e = dmi->i_addre[_ix], blk = b-1)		\
-	while (++blk < e)
+static uint32_t hifs_inode_total_blocks(const struct hifs_inode *inode)
+{
+	uint32_t total = 0;
+	size_t i;
+
+	if (!inode)
+		return 0;
+	for (i = 0; i < HIFS_INODE_TSIZE; ++i)
+		total += inode->extents[i].block_count;
+	return total;
+}
+
+static struct hifs_extent *hifs_inode_last_extent(struct hifs_inode *inode, int *idx_out)
+{
+	int i;
+
+	for (i = HIFS_INODE_TSIZE - 1; i >= 0; --i) {
+		if (inode->extents[i].block_count) {
+			if (idx_out)
+				*idx_out = i;
+			return &inode->extents[i];
+		}
+	}
+	if (idx_out)
+		*idx_out = -1;
+	return NULL;
+}
+
+static int hifs_alloc_block_range(struct super_block *sb, uint32_t blocks,
+				  uint32_t *start_out, uint32_t *prev_last_out)
+{
+	struct hifs_sb_info *hisb = sb ? sb->s_fs_info : NULL;
+	const uint32_t blocksize = hifs_sb_block_size(sb);
+	const uint32_t ring_base = blocksize ? (HIFS_CACHE_SPACE_START / blocksize) : 0;
+	uint64_t total_blocks;
+	uint32_t last;
+
+	if (!hisb || blocks == 0)
+		return -EINVAL;
+
+	total_blocks = (uint64_t)le32_to_cpu(hisb->disk.s_blocks_count) |
+		       ((uint64_t)le32_to_cpu(hisb->disk.s_blocks_count_hi) << 32);
+
+	last = hisb->s_last_blk;
+	if (last < ring_base)
+		last = ring_base;
+
+	if (total_blocks) {
+		uint64_t next = (uint64_t)last + blocks;
+
+		if (next >= total_blocks) {
+			hifs_sort_most_recent_cache_used(sb);
+			last = ring_base;
+			next = (uint64_t)last + blocks;
+			if (next >= total_blocks)
+				return -ENOSPC;
+		}
+	}
+
+	if (prev_last_out)
+		*prev_last_out = hisb->s_last_blk;
+
+	hisb->s_last_blk = last;
+	if (start_out)
+		*start_out = hisb->s_last_blk + 1;
+	hisb->s_last_blk += blocks;
+	hisb->disk.s_first_data_block = cpu_to_le32(hisb->s_last_blk);
+	return 0;
+}
+
+static void hifs_restore_block_allocator(struct super_block *sb, uint32_t prev_last)
+{
+	struct hifs_sb_info *hisb = sb ? sb->s_fs_info : NULL;
+
+	if (!hisb)
+		return;
+	hisb->s_last_blk = prev_last;
+	hisb->disk.s_first_data_block = cpu_to_le32(hisb->s_last_blk);
+}
+
+static int hifs_inode_append_extent(struct super_block *sb,
+				    struct hifs_inode *inode,
+				    uint32_t blocks)
+{
+	uint32_t start = 0, prev_last = 0;
+	struct hifs_extent *last;
+	int last_idx = -1;
+	int slot;
+	int ret;
+
+	if (!blocks)
+		return 0;
+
+	last = hifs_inode_last_extent(inode, &last_idx);
+	slot = last ? last_idx + 1 : 0;
+	if (slot >= HIFS_INODE_TSIZE && !(last && last->block_count))
+		return -ENOSPC;
+
+	ret = hifs_alloc_block_range(sb, blocks, &start, &prev_last);
+	if (ret)
+		return ret;
+
+	last = hifs_inode_last_extent(inode, &last_idx);
+	if (last && (last->block_start + last->block_count == start)) {
+		last->block_count += blocks;
+	} else {
+		slot = last ? last_idx + 1 : 0;
+		if (slot >= HIFS_INODE_TSIZE) {
+			hifs_restore_block_allocator(sb, prev_last);
+			return -ENOSPC;
+		}
+		inode->extents[slot].block_start = start;
+		inode->extents[slot].block_count = blocks;
+	}
+
+	inode->i_blocks = hifs_inode_total_blocks(inode);
+	return 0;
+}
+
+int hifs_inode_reserve_blocks(struct super_block *sb,
+			      struct hifs_inode *inode,
+			      uint32_t last_block_needed)
+{
+	uint32_t have;
+	int ret;
+
+	if (!inode)
+		return -EINVAL;
+
+	have = hifs_inode_total_blocks(inode);
+	while (have <= last_block_needed) {
+		uint32_t need = last_block_needed - have + 1;
+
+		ret = hifs_inode_append_extent(sb, inode, need);
+		if (ret)
+			return ret;
+		have = hifs_inode_total_blocks(inode);
+	}
+
+	inode->i_blocks = have;
+	{
+		uint64_t bytes = (uint64_t)have * hifs_sb_block_size(sb);
+		inode->i_bytes = (bytes > U32_MAX) ? U32_MAX : (uint32_t)bytes;
+	}
+	return 0;
+}
 
 static u32 hifs_timespec_to_disk(const struct timespec64 *ts)
 {
@@ -49,8 +193,8 @@ void dump_hifsinode(struct hifs_inode *dmi)
 	printk(KERN_INFO "hifs_inode->i_mode: %u", dmi->i_mode);
 	printk(KERN_INFO "hifs_inode->i_ino: %llu", dmi->i_ino);
 	printk(KERN_INFO "hifs_inode->i_hrd_lnk: %u", dmi->i_hrd_lnk);
-	printk(KERN_INFO "hifs_inode->i_addrb[0]: %u", dmi->i_addrb[0]);
-	printk(KERN_INFO "hifs_inode->i_addre[0]: %u", dmi->i_addre[0]);
+	printk(KERN_INFO "hifs_inode->extent[0].start: %u", dmi->extents[0].block_start);
+	printk(KERN_INFO "hifs_inode->extent[0].count: %u", dmi->extents[0].block_count);
 	printk(KERN_INFO "----------[end of dump]-------------");
 }
 
@@ -66,7 +210,7 @@ void hifs_store_inode(struct super_block *sb, struct hifs_inode *hii)
 {
 	struct buffer_head *bh;
 	struct hifs_inode *in_core;
-	uint32_t blk = hii->i_addrb[0] - 1;
+	uint32_t blk = 0;
 	uint8_t inode_hash[HIFS_BLOCK_HASH_SIZE];
 	enum hifs_hash_algorithm hash_algo = HIFS_HASH_ALGO_NONE;
 	int dedupe_ret;
@@ -75,6 +219,12 @@ void hifs_store_inode(struct super_block *sb, struct hifs_inode *hii)
 	/* Change me: here we just use fact that current allocator is cont.
 	 * With smarter allocator the position should be found from itab
 	 */
+	if (hii->extents[0].block_start == 0) {
+		hifs_err("inode %llu missing extent[0] start", hii->i_ino);
+		return;
+	}
+	blk = hii->extents[0].block_start - 1;
+
 	bh = sb_bread(sb, blk);
 	BUG_ON(!bh);
 
@@ -123,16 +273,24 @@ int hifs_add_dir_record(struct super_block *sb, struct inode *dir, struct dentry
 	enum hifs_hash_algorithm hash_algo = HIFS_HASH_ALGO_NONE;
 	size_t block_index;
 	int dedupe_ret;
+	u32 logical_block = 0;
+	int i;
 
 	parent = dir->i_private;
 	hii = parent;
 
-	// Find offset, in dir in extends
-	FOREAChi_BLK_IN_EXT(parent, blk) {
-		bh = sb_bread(sb, blk);
-		BUG_ON(!bh);
-		dir_rec = (struct hifs_dir_entry *)(bh->b_data);
-		for (j = 0; j < sb->s_blocksize; ++j) {
+	for (i = 0; i < HIFS_INODE_TSIZE; ++i) {
+		const struct hifs_extent *ext = &parent->extents[i];
+		u32 blk_end = ext->block_start + ext->block_count;
+
+		if (!ext->block_count)
+			continue;
+
+		for (blk = ext->block_start; blk < blk_end; ++blk, ++logical_block) {
+			bh = sb_bread(sb, blk);
+			BUG_ON(!bh);
+			dir_rec = (struct hifs_dir_entry *)(bh->b_data);
+			for (j = 0; j < sb->s_blocksize; ++j) {
 			/* We found free space */
 			if (dir_rec->inode_nr == HIFS_EMPTY_ENTRY) {
 				dir_rec->inode_nr = inode->i_ino;
@@ -143,8 +301,7 @@ int hifs_add_dir_record(struct super_block *sb, struct inode *dir, struct dentry
 				hifs_cache_mark_present(sb, blk);
 				hifs_cache_mark_dirty(sb, blk);
 
-					block_index = (blk >= parent->i_addrb[0]) ?
-						(blk - parent->i_addrb[0]) : 0;
+					block_index = logical_block;
 					hifs_cache_mark_dirent(sb, dir_rec->inode_nr);
 
 					hash_algo = HIFS_HASH_ALGO_NONE;
@@ -176,6 +333,7 @@ int hifs_add_dir_record(struct super_block *sb, struct inode *dir, struct dentry
 					sync_dirty_buffer(bh);
 					brelse(bh);
 					parent->i_size += sizeof(*dir_rec);
+					parent->i_bytes = parent->i_size;
 					hifs_cache_mark_inode(sb, parent->i_ino);
 					hifs_store_inode(sb, parent);
 					hifs_publish_inode(sb, parent, false);
@@ -198,19 +356,18 @@ int hifs_add_dir_record(struct super_block *sb, struct inode *dir, struct dentry
 						else if (S_ISLNK(mode))
 							type = DT_LNK;
 					}
-						hifs_publish_dentry(sb,
-						    dir->i_ino,
-						    dir_rec->inode_nr,
-						    dentry->d_name.name,
-						    dir_rec->name_len,
-						    type,
-						    false);
+					hifs_publish_dentry(sb,
+							    dir->i_ino,
+							    dir_rec->inode_nr,
+							    dentry->d_name.name,
+							    dir_rec->name_len,
+							    type,
+							    false);
 				}
 				return 0;
 			}
 			dir_rec++;
 		}
-		/* Move to another block */
 		bforget(bh);
 	}
 
@@ -236,42 +393,29 @@ struct hifs_sb_info *hisb;
 	memset(hii->i_block_fingerprints, 0, sizeof(hii->i_block_fingerprints));
 
 	{
-		const u64 total_blocks =
-			(u64)le32_to_cpu(hisb->disk.s_blocks_count) |
-			((u64)le32_to_cpu(hisb->disk.s_blocks_count_hi) << 32);
-		const u32 blocksize = hisb->s_blocksize ?
-				      hisb->s_blocksize : HIFS_DEFAULT_BLOCK_SIZE;
-		const u32 ring_base = blocksize ?
-				      (HIFS_CACHE_SPACE_START / blocksize) : 0;
-		const u32 span = HIFS_INODE_TSIZE;
-		u32 last = hisb->s_last_blk;
-
-		if (last < ring_base)
-			last = ring_base;
-
-		if (total_blocks) {
-			const u64 next = (u64)last + span;
-
-			if (next >= total_blocks) {
-				hifs_sort_most_recent_cache_used(sb);
-				last = ring_base;
-			}
-		}
-
-		hisb->s_last_blk = last;
+		uint32_t start = 0;
+		int ret_blocks = hifs_alloc_block_range(sb,
+							HIFS_INODE_TSIZE + 1,
+							&start,
+							NULL);
+		if (ret_blocks)
+			return ret_blocks;
+		/* First block is used for the inode itself, remaining are data */
+		hii->extents[0].block_start = start + 1;
+		hii->extents[0].block_count = HIFS_INODE_TSIZE;
+		isave_intable(sb, hii, start);
 	}
-	/* First block is allocated for in-core inode struct */
-	/* Then 4 block for extends: that mean dmi struct is in i_addrb[0]-1 */
-	hii->i_addrb[0] = hisb->s_last_blk + 1;
-	hii->i_addre[0] = hisb->s_last_blk += 4;
-	hisb->disk.s_first_data_block = cpu_to_le32(hisb->s_last_blk);
 	for (i = 1; i < HIFS_INODE_TSIZE; ++i) {
-		hii->i_addre[i] = 0;
-		hii->i_addrb[i] = 0;
+		hii->extents[i].block_start = 0;
+		hii->extents[i].block_count = 0;
+	}
+	hii->i_blocks = hifs_inode_total_blocks(hii);
+	{
+		uint64_t bytes = (uint64_t)hii->i_blocks * hifs_sb_block_size(sb);
+		hii->i_bytes = (bytes > U32_MAX) ? U32_MAX : (uint32_t)bytes;
 	}
 
 	hifs_store_inode(sb, hii);
-	isave_intable(sb, hii, (hii->i_addrb[0] - 1));
 	/* TODO: update inode block bitmap */
 	hifs_publish_inode(sb, hii, false);
 
@@ -416,7 +560,7 @@ int isave_intable(struct super_block *sb, struct hifs_inode *hii, u32 i_block)
 	bh = sb_bread(sb, HIFS_INODE_TABLE_OFFSET);
 	itab = (struct hifs_inode*)(bh->b_data);
 	/* right now we just allocated one itable extend for files */
-	blk = itab->i_addrb[0];
+	blk = itab->extents[0].block_start;
 	bforget(bh);
 
 	bh = sb_bread(sb, blk);
@@ -459,7 +603,7 @@ struct hifs_inode *hifs_iget(struct super_block *sb, ino_t ino)
 	bh = sb_bread(sb, HIFS_INODE_TABLE_OFFSET);
 	itab = (struct hifs_inode*)(bh->b_data);
 	/* right now we just allocated one itable extend for files */
-	blk = itab->i_addrb[0];
+	blk = itab->extents[0].block_start;
 	bforget(bh);
 
 	bh = sb_bread(sb, blk);
@@ -526,8 +670,15 @@ retry:
 
 	/* Here we should use cache instead but dummyfs is doing stuff in dummy way.. */
 	for (i = 0; i < HIFS_INODE_TSIZE; ++i) {
-		u32 b = dparent->i_addrb[i] , e = dparent->i_addre[i];
+		const struct hifs_extent *ext = &dparent->extents[i];
+		u32 b = ext->block_start;
+		u32 count = ext->block_count;
+		u32 e = b + count;
 		u32 blk = b;
+
+		if (count == 0)
+			continue;
+
 		while (blk < e) {
 			bool cache_hit = hifs_cache_test_present(sb, blk);
 			if (hifs_fetch_block(sb, blk) < 0) {

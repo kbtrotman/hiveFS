@@ -21,6 +21,8 @@
 #include "hive_guard.h"
 #include "hive_guard_sql.h"
 #include "../../hifs_shared_defs.h"
+#include <endian.h>
+#include <limits.h>
 #include <errno.h>
 #include <pthread.h>
 #include <openssl/sha.h>
@@ -1066,6 +1068,83 @@ static bool handle_volume_block_put(Client *c, const JVal *root)
 	return true;
 }
 
+static bool handle_volume_block_put_contig(Client *c, const JVal *root)
+{
+	uint64_t volume_id = 0;
+	uint8_t *blob = NULL;
+	size_t blob_len = 0;
+	struct hifs_contig_block_stream hdr;
+	const uint8_t *cursor;
+	size_t meta_len;
+	uint32_t block_count;
+	uint64_t block_start;
+	size_t data_len;
+	size_t consumed = 0;
+	const uint32_t *lens;
+
+	if (!get_u64(root, "volume_id", &volume_id))
+		return send_error_json(c->fd, "bad_request", "missing args");
+
+	if (!decode_payload(root, &blob, &blob_len))
+		return send_error_json(c->fd, "bad_request", "missing payload");
+	if (blob_len < sizeof(hdr)) {
+		free(blob);
+		return send_error_json(c->fd, "bad_request", "payload too small");
+	}
+
+	memcpy(&hdr, blob, sizeof(hdr));
+	block_start = le64toh(hdr.block_start);
+	block_count = le32toh(hdr.block_count);
+	if (block_count == 0) {
+		free(blob);
+		return send_error_json(c->fd, "bad_request", "empty contiguous batch");
+	}
+
+	if (block_count > (SIZE_MAX - sizeof(hdr)) / sizeof(uint32_t)) {
+		free(blob);
+		return send_error_json(c->fd, "bad_request", "contiguous batch too large");
+	}
+
+	meta_len = sizeof(hdr) + (size_t)block_count * sizeof(uint32_t);
+	if (blob_len < meta_len) {
+		free(blob);
+		return send_error_json(c->fd, "bad_request", "payload truncated");
+	}
+
+	lens = (const uint32_t *)(blob + sizeof(hdr));
+	cursor = blob + meta_len;
+	data_len = blob_len - meta_len;
+
+	for (uint32_t i = 0; i < block_count; ++i) {
+		uint32_t len = le32toh(lens[i]);
+
+		if (len == 0 || len > HIFS_DEFAULT_BLOCK_SIZE) {
+			free(blob);
+			return send_error_json(c->fd, "bad_request", "invalid block length");
+		}
+		if (consumed + len > data_len) {
+			free(blob);
+			return send_error_json(c->fd, "bad_request", "payload truncated");
+		}
+
+		const uint8_t *blk_data = cursor + consumed;
+		int rc = hifs_put_block(volume_id, block_start + i,
+					blk_data, len, HIFS_HASH_ALGO_SHA256);
+		if (rc == -EAGAIN) {
+			free(blob);
+			return send_error_json(c->fd, "not_leader", "forward to leader");
+		}
+		if (rc != 0) {
+			free(blob);
+			return send_error_json(c->fd, "db_error", "unable to store block");
+		}
+		consumed += len;
+	}
+
+	free(blob);
+	return send_simple_ok(c->fd, "volume_block_put_contig");
+}
+
 /* -------------------------------------------------------------------------- */
 /* Command dispatcher                                                         */
 /* -------------------------------------------------------------------------- */
@@ -1168,6 +1247,8 @@ static bool dispatch_request(Client *c, ServerState *S, const JVal *root)
 		return handle_volume_block_get(c, root);
 	if (strcmp(type, "volume_block_put") == 0)
 		return handle_volume_block_put(c, root);
+	if (strcmp(type, "volume_block_put_contig") == 0)
+		return handle_volume_block_put_contig(c, root);
 
 	return send_error_json(c->fd, "unknown_type", "unsupported request");
 }

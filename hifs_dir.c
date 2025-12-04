@@ -26,8 +26,15 @@ int hifs_readdir(struct file *filp, struct dir_context *ctx)
 
 	/* For each extends from file */
 	for (i = 0; i < HIFS_INODE_TSIZE; ++i) {
-		u32 b = dinode->i_addrb[i] , e = dinode->i_addre[i];
+		const struct hifs_extent *ext = &dinode->extents[i];
+		u32 b = ext->block_start;
+		u32 count = ext->block_count;
+		u32 e = b + count;
 		u32 blk = b;
+
+		if (count == 0)
+			continue;
+
 		while (blk < e) {
 			bool cache_hit = hifs_cache_test_present(sb, blk);
 

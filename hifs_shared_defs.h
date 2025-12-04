@@ -717,6 +717,19 @@ struct hifs_block_msg {
 #endif
 };
 
+struct hifs_contig_block_stream {
+#ifdef __KERNEL__
+	__le64 block_start;
+	__le32 block_count;
+	__le32 reserved;
+#else
+	uint64_t block_start;
+	uint32_t block_count;
+	uint32_t reserved;
+#endif
+	/* Followed by block_count little-endian uint32 lengths then raw bytes */
+};
+
 /* Wire format for hifs_inode exchanged with cluster. */
 struct hifs_inode_wire {
 #ifdef __KERNEL__
@@ -796,5 +809,7 @@ struct hifs_volume_entry {
 /***********************
  * END Hive FS Structures
  ***********************/
-#define HIFS_INODE_MSGF_REQUEST  0x00000001
+#define HIFS_INODE_MSGF_REQUEST   0x00000001
 #define HIFS_BLOCK_MSGF_REQUEST   0x00000001
+#define HIFS_BLOCK_MSGF_CONTIG_START 0x00000002
+#define HIFS_BLOCK_MSGF_CONTIG_END   0x00000004
