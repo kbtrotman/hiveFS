@@ -39,6 +39,7 @@
 #define ENV_LISTEN_ADDR  "WRAP_LISTEN_ADDR"
 #define ENV_LISTEN_PORT  "WRAP_LISTEN_PORT"
 #define ENV_IDLE_MS      "WRAP_IDLE_TIMEOUT_MS"
+#define CLIENT_TCP_IDLE_TIMEOUT_PATH "/sys/class/hivefs/CLIENT_TCP_IDLE_TIMEOUT"
 #define ENV_MDB_HOST     "WRAP_MARIADB_HOST"
 #define ENV_MDB_PORT     "WRAP_MARIADB_PORT"
 #define ENV_MDB_USER     "WRAP_MARIADB_USER"
@@ -47,13 +48,29 @@
 
 #define MAXC 1024
 
-extern int storage_node_id;
+extern unsigned int storage_node_id;
 extern char storage_node_name[50];
 extern char storage_node_address[64];
 extern char storage_node_uid[128];
 extern char storage_node_serial[100];
 extern uint16_t storage_node_guard_port;
 extern uint16_t storage_node_stripe_port;
+extern	uint64_t storage_node_last_heartbeat;
+extern	uint8_t  storage_node_fenced;
+extern	uint32_t storage_node_hive_version;
+extern	uint32_t storage_node_hive_patch_level;
+extern	uint64_t storage_node_last_maintenance;
+extern	char     storage_node_maintenance_reason[256];
+extern	uint64_t storage_node_maintenance_started_at;
+extern	uint64_t storage_node_maintenance_ended_at;
+extern	uint64_t storage_node_date_added_to_cluster;
+extern	uint64_t storage_node_storage_capacity_bytes;
+extern	uint64_t storage_node_storage_used_bytes;
+extern	uint64_t storage_node_storage_reserved_bytes;
+extern	uint64_t storage_node_storage_overhead_bytes;
+extern	uint32_t storage_node_client_connect_timeout_ms;
+extern	uint32_t storage_node_storage_node_connect_timeout_ms;
+
 struct hive_storage_node {
 	uint32_t id;
 	char	 name[100];
@@ -65,6 +82,19 @@ struct hive_storage_node {
 	uint64_t last_heartbeat;
 	uint8_t  online;
 	uint8_t  fenced;
+	uint32_t hive_version;
+	uint32_t hive_patch_level;
+	uint64_t last_maintenance;
+	char     maintenance_reason[256];
+	uint64_t maintenance_started_at;
+	uint64_t maintenance_ended_at;
+	uint64_t date_added_to_cluster;
+	uint64_t storage_capacity_bytes;
+	uint64_t storage_used_bytes;
+	uint64_t storage_reserved_bytes;
+	uint64_t storage_overhead_bytes;
+	uint32_t client_connect_timeout_ms;
+	uint32_t storage_node_connect_timeout_ms;
 };
 
 // Prototypes

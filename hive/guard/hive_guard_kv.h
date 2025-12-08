@@ -89,6 +89,10 @@ bool hifs_volume_inode_fp_replace(uint64_t volume_id,
                                   uint64_t inode_id,
                                   uint16_t fp_index,
                                   const struct hifs_block_fingerprint_wire *fp);
+bool hifs_volume_inode_fp_sync(uint64_t volume_id,
+                               uint64_t inode_id,
+                               const struct hifs_block_fingerprint_wire *fps,
+                               uint16_t fp_count);
 
 #ifdef __cplusplus
 }

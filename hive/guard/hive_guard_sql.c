@@ -24,6 +24,7 @@
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 #define HIFS_STORAGE_NODE_HEARTBEAT_MAX_AGE 30
 #define HIFS_STORAGE_NODE_PERSIST_MIN_SECS 5
+#define HIFS_STORAGE_NODE_DATA_SYNC_MIN_SECS (3 * 60)
 
 static char *hifs_get_machine_id(void);
 static long hifs_get_host_id(void);
@@ -34,15 +35,31 @@ static bool hifs_persist_storage_node(uint64_t node_id,
 				      const char *node_address,
 				      uint16_t node_port);
 static void hifs_safe_strcpy(char *dst, size_t dst_len, const char *src);
+static bool hifs_sql_node_data_up_to_date(struct hive_storage_node *local);
 
 struct SQLDB sqldb;
-int storage_node_id;
+unsigned int storage_node_id;
 char storage_node_name[50];
 char storage_node_address[64];
 char storage_node_uid[128];
 char storage_node_serial[100];
 uint16_t storage_node_guard_port;
 uint16_t storage_node_stripe_port;
+uint64_t storage_node_last_heartbeat;
+uint8_t storage_node_fenced;
+uint32_t storage_node_hive_version;
+uint32_t storage_node_hive_patch_level;
+uint64_t storage_node_last_maintenance;
+char storage_node_maintenance_reason[256];
+uint64_t storage_node_maintenance_started_at;
+uint64_t storage_node_maintenance_ended_at;
+uint64_t storage_node_date_added_to_cluster;
+uint64_t storage_node_storage_capacity_bytes;
+uint64_t storage_node_storage_used_bytes;
+uint64_t storage_node_storage_reserved_bytes;
+uint64_t storage_node_storage_overhead_bytes;
+uint32_t storage_node_client_connect_timeout_ms;
+uint32_t storage_node_storage_node_connect_timeout_ms;
 static struct hive_storage_node *loaded_storage_nodes;
 static size_t loaded_storage_node_count;
 static struct hive_storage_node cached_local_node;
@@ -140,7 +157,136 @@ static void hifs_safe_strcpy(char *dst, size_t dst_len, const char *src)
 		return;
 	if (!src)
 		src = "";
-	snprintf(dst, dst_len, "%s", src);
+	size_t max_copy = dst_len - 1;
+	size_t to_copy = strnlen(src, max_copy);
+	memcpy(dst, src, to_copy);
+	dst[to_copy] = '\0';
+}
+
+static bool hifs_sql_node_data_up_to_date(struct hive_storage_node *local)
+{
+	static uint64_t local_state_generation;
+	static uint64_t persisted_state_generation;
+	static time_t last_persist_attempt;
+
+	if (!local)
+		return false;
+
+	bool changed = false;
+	struct hive_storage_node desired;
+	bool have_desired = hifs_get_local_node_identity(&desired);
+
+	if (have_desired) {
+		if (desired.address[0] &&
+		    strcmp(local->address, desired.address) != 0) {
+			hifs_safe_strcpy(local->address, sizeof(local->address),
+					 desired.address);
+			changed = true;
+		}
+		if (desired.guard_port &&
+		    local->guard_port != desired.guard_port) {
+			local->guard_port = desired.guard_port;
+			changed = true;
+		}
+		if (desired.stripe_port &&
+		    local->stripe_port != desired.stripe_port) {
+			local->stripe_port = desired.stripe_port;
+			changed = true;
+		}
+		if (desired.name[0] &&
+		    strcmp(local->name, desired.name) != 0) {
+			hifs_safe_strcpy(local->name, sizeof(local->name),
+					 desired.name);
+			changed = true;
+		}
+		if (desired.uid[0] &&
+		    strcmp(local->uid, desired.uid) != 0) {
+			hifs_safe_strcpy(local->uid, sizeof(local->uid),
+					 desired.uid);
+			changed = true;
+		}
+		if (desired.serial[0] &&
+		    strcmp(local->serial, desired.serial) != 0) {
+			hifs_safe_strcpy(local->serial, sizeof(local->serial),
+					 desired.serial);
+			changed = true;
+		}
+	}
+
+	if (!local->stripe_port && local->guard_port) {
+		local->stripe_port = local->guard_port;
+		changed = true;
+	}
+
+	time_t now = time(NULL);
+	time_t hb = (time_t)local->last_heartbeat;
+	if (hb == 0 || now < hb ||
+	    (now - hb) >= HIFS_STORAGE_NODE_HEARTBEAT_MAX_AGE) {
+		local->last_heartbeat = (uint64_t)now;
+		changed = true;
+	}
+
+	storage_node_id = local->id;
+	hifs_safe_strcpy(storage_node_name, sizeof(storage_node_name),
+			 local->name);
+	hifs_safe_strcpy(storage_node_address, sizeof(storage_node_address),
+			 local->address);
+	hifs_safe_strcpy(storage_node_uid, sizeof(storage_node_uid),
+			 local->uid);
+	hifs_safe_strcpy(storage_node_serial, sizeof(storage_node_serial),
+			 local->serial);
+	storage_node_guard_port = local->guard_port;
+	storage_node_stripe_port = local->stripe_port;
+	storage_node_last_heartbeat = local->last_heartbeat;
+	storage_node_fenced = local->fenced;
+	storage_node_hive_version = local->hive_version;
+	storage_node_hive_patch_level = local->hive_patch_level;
+	storage_node_last_maintenance = local->last_maintenance;
+	hifs_safe_strcpy(storage_node_maintenance_reason,
+			 sizeof(storage_node_maintenance_reason),
+			 local->maintenance_reason);
+	storage_node_maintenance_started_at = local->maintenance_started_at;
+	storage_node_maintenance_ended_at = local->maintenance_ended_at;
+	storage_node_date_added_to_cluster = local->date_added_to_cluster;
+	storage_node_storage_capacity_bytes = local->storage_capacity_bytes;
+	storage_node_storage_used_bytes = local->storage_used_bytes;
+	storage_node_storage_reserved_bytes =
+		local->storage_reserved_bytes;
+	storage_node_storage_overhead_bytes =
+		local->storage_overhead_bytes;
+	storage_node_client_connect_timeout_ms =
+		local->client_connect_timeout_ms;
+	storage_node_storage_node_connect_timeout_ms =
+		local->storage_node_connect_timeout_ms;
+
+	if (changed)
+		++local_state_generation;
+
+	bool pending = (local_state_generation > persisted_state_generation);
+	if (pending && local->id != 0) {
+		if (last_persist_attempt == 0 ||
+		    (now - last_persist_attempt) >=
+			    HIFS_STORAGE_NODE_DATA_SYNC_MIN_SECS) {
+			const char *addr = local->address[0] ?
+					   local->address :
+					   (have_desired &&
+					    desired.address[0] ?
+						    desired.address :
+						    NULL);
+			uint16_t port = local->guard_port ?
+					local->guard_port :
+					(have_desired ? desired.guard_port :
+							0);
+			last_persist_attempt = now;
+			if (hifs_persist_storage_node(local->id, addr, port)) {
+				persisted_state_generation =
+					local_state_generation;
+				pending = false;
+			}
+		}
+	}
+
+	return !pending;
 }
 
 static void bytes_to_hex(const uint8_t *src, size_t len, char *dst)
@@ -1181,29 +1327,11 @@ bool hifs_volume_inode_store(uint64_t volume_id,
 	}
 	free(sql_query);
 
-	/* Refresh fingerprints */
-	char sql_tmp[MAX_QUERY_SIZE];
-	snprintf(sql_tmp, sizeof(sql_tmp), SQL_VOLUME_INODE_FP_DELETE,
-		 (unsigned long long)volume_id,
-		 (unsigned long long)ino_host);
-	if (!hifs_insert_sql(sql_tmp))
+	if (!hifs_volume_inode_fp_sync(volume_id,
+				       ino_host,
+				       inode->i_block_fingerprints,
+				       hash_count))
 		return false;
-
-	for (uint16_t i = 0; i < hash_count && i < HIFS_MAX_BLOCK_HASHES; ++i) {
-		const struct hifs_block_fingerprint_wire *fp =
-			&inode->i_block_fingerprints[i];
-		uint32_t block_no = le32toh(fp->block_no);
-		if (block_no == 0 && fp->hash_algo == 0)
-			continue;
-		char hash_hex[HIFS_BLOCK_HASH_SIZE * 2 + 1];
-		bytes_to_hex(fp->hash, HIFS_BLOCK_HASH_SIZE, hash_hex);
-		snprintf(sql_tmp, sizeof(sql_tmp), SQL_VOLUME_INODE_FP_REPLACE,
-			 (unsigned long long)volume_id,
-			 (unsigned long long)ino_host,
-			 i, block_no, fp->hash_algo, hash_hex);
-		if (!hifs_insert_sql(sql_tmp))
-			return false;
-	}
 
 	return true;
 }
@@ -1570,7 +1698,14 @@ bool hifs_load_storage_nodes(void)
 		COL_PATCH_LEVEL,
 		COL_FENCED,
 		COL_LAST_MAINT,
-		COL_MAINT_REASON
+		COL_MAINT_REASON,
+		COL_DATE_ADDED,
+		COL_SN_CAPCITY,
+		COL_SN_USED_CAPACITY,
+		COL_SN_RESERVED_CAPACITY,
+		COL_OVERHEAD_CAPCACITY,
+		COL_CLIENT_CONNECT_TMOUT,
+		COL_SN_CONNECT_TMOUT
 	};
 	MYSQL_RES *res = NULL;
 	size_t row_count = 0;
@@ -1611,12 +1746,30 @@ bool hifs_load_storage_nodes(void)
 		nodes[i].stripe_port = (uint16_t)sql_to_u32(row[COL_DATA_PORT]);
 		nodes[i].fenced = (uint8_t)sql_to_u32(row[COL_FENCED]);
 		nodes[i].last_heartbeat = sql_to_u64(row[COL_LAST_HEARTBEAT]);
-
+		nodes[i].hive_version = sql_to_u32(row[COL_VERSION]);
+		nodes[i].hive_patch_level = sql_to_u32(row[COL_PATCH_LEVEL]);
+		nodes[i].last_maintenance = sql_to_u64(row[COL_LAST_MAINT]);
+		if (row[COL_MAINT_REASON])
+			strncpy(nodes[i].maintenance_reason,
+				row[COL_MAINT_REASON],
+				sizeof(nodes[i].maintenance_reason) - 1);
+		nodes[i].date_added_to_cluster = sql_to_u64(row[COL_DATE_ADDED]);
+		nodes[i].storage_capacity_bytes = sql_to_u64(row[COL_SN_CAPCITY]);
+		nodes[i].storage_used_bytes = sql_to_u64(row[COL_SN_USED_CAPACITY]);
+		nodes[i].storage_reserved_bytes =
+			sql_to_u64(row[COL_SN_RESERVED_CAPACITY]);
+		nodes[i].storage_overhead_bytes =
+			sql_to_u64(row[COL_OVERHEAD_CAPCACITY]);
+		nodes[i].client_connect_timeout_ms =
+			sql_to_u32(row[COL_CLIENT_CONNECT_TMOUT]);
+		nodes[i].storage_node_connect_timeout_ms =
+			sql_to_u32(row[COL_SN_CONNECT_TMOUT]);
 		hifs_debug("node_id=%u address=%s guard_port=%u",
 			  nodes[i].id,
 			  nodes[i].address,
 			  nodes[i].guard_port);
 	}
+
 
 	mysql_free_result(res);
 	sqldb.last_query = NULL;
@@ -1629,49 +1782,8 @@ bool hifs_load_storage_nodes(void)
 
 	local = hifs_match_local_storage_node(loaded_storage_nodes,
 					      loaded_storage_node_count);
-	if (local) {
-		bool need_persist = false;
-		struct hive_storage_node desired;
-		bool have_desired = hifs_get_local_node_identity(&desired);
-
-		if (have_desired) {
-				if (desired.address[0] &&
-				    strcmp(local->address, desired.address) != 0) {
-					hifs_safe_strcpy(local->address, sizeof(local->address), desired.address);
-					need_persist = true;
-				}
-			if (desired.guard_port &&
-			    local->guard_port != desired.guard_port) {
-				local->guard_port = desired.guard_port;
-				need_persist = true;
-			}
-			if (desired.stripe_port &&
-			    local->stripe_port != desired.stripe_port) {
-				local->stripe_port = desired.stripe_port;
-				need_persist = true;
-			}
-				if (desired.name[0] &&
-				    strcmp(local->name, desired.name) != 0) {
-					hifs_safe_strcpy(local->name, sizeof(local->name), desired.name);
-					need_persist = true;
-				}
-		}
-
-		time_t now = time(NULL);
-		time_t hb = (time_t)local->last_heartbeat;
-		if (hb == 0 ||
-		    now < hb ||
-		    (now - hb) >= HIFS_STORAGE_NODE_HEARTBEAT_MAX_AGE)
-			need_persist = true;
-
-		if (need_persist) {
-			const char *addr = (have_desired && desired.address[0]) ?
-					   desired.address : local->address;
-			uint16_t port = (have_desired && desired.guard_port) ?
-					desired.guard_port : local->guard_port;
-			hifs_persist_storage_node(local->id, addr, port);
-		}
-	}
+	if (local)
+		hifs_sql_node_data_up_to_date(local);
 	if (!local) {
 		if (cached_local_node_valid)
 			hifs_update_local_storage_node(NULL);

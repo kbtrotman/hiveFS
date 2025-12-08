@@ -536,18 +536,23 @@ static char *base64_encode(const uint8_t *in, size_t len)
 		return NULL;
 	size_t i = 0, j = 0;
 	while (i < len) {
-		uint32_t octet_a = i < len ? in[i++] : 0;
-		uint32_t octet_b = i < len ? in[i++] : 0;
-		uint32_t octet_c = i < len ? in[i++] : 0;
+		uint32_t octet_a = in[i++];
+		uint32_t octet_b = 0;
+		uint32_t octet_c = 0;
+		size_t bytes = 1;
+		if (i < len) {
+			octet_b = in[i++];
+			++bytes;
+		}
+		if (i < len) {
+			octet_c = in[i++];
+			++bytes;
+		}
 		uint32_t triple = (octet_a << 16) | (octet_b << 8) | octet_c;
 		out[j++] = b64_table[(triple >> 18) & 0x3F];
 		out[j++] = b64_table[(triple >> 12) & 0x3F];
-		out[j++] = (i - 1 > len) ? '=' : b64_table[(triple >> 6) & 0x3F];
-		out[j++] = (i > len) ? '=' : b64_table[triple & 0x3F];
-		if (i - 1 > len)
-			out[j - 2] = '=';
-		if (i > len)
-			out[j - 1] = '=';
+		out[j++] = (bytes > 1) ? b64_table[(triple >> 6) & 0x3F] : '=';
+		out[j++] = (bytes > 2) ? b64_table[triple & 0x3F] : '=';
 	}
 	out[j] = '\0';
 	return out;
@@ -929,45 +934,55 @@ static bool guard_rpc(const char *type,
 		      const void *payload, size_t payload_len,
 		      struct guard_response *resp)
 {
-	if (!guard_ensure_connected()) {
-		hifs_warning("guard rpc %s: unable to connect", type);
-		return false;
-	}
-
 	char *json = guard_build_request(type, fields, field_count,
 					 payload, payload_len);
 	if (!json)
 		return false;
 
 	size_t json_len = strlen(json);
-	bool ok = guard_send_frame(g_guard.fd, json, json_len);
+	for (int attempt = 0; attempt < 2; ++attempt) {
+		if (!guard_ensure_connected()) {
+			hifs_warning("guard rpc %s: unable to connect", type);
+			break;
+		}
+
+		hifs_info("guard rpc %s: sending %zu-byte frame (payload=%zu)",
+			  type, json_len, payload_len);
+		if (!guard_send_frame(g_guard.fd, json, json_len)) {
+			hifs_warning("guard rpc %s: send failed (attempt %d), reconnecting",
+				     type, attempt + 1);
+			guard_disconnect();
+			continue;
+		}
+
+		char *reply = NULL;
+		size_t reply_len = 0;
+		if (!guard_recv_frame(g_guard.fd, &reply, &reply_len)) {
+			hifs_warning("guard rpc %s: recv failed (attempt %d), reconnecting",
+				     type, attempt + 1);
+			free(reply);
+			guard_disconnect();
+			continue;
+		}
+		hifs_info("guard rpc %s: received %zu-byte reply", type, reply_len);
+
+		JVal *root = jparse(reply, reply_len);
+		if (!root) {
+			hifs_err("guard rpc: failed to parse reply: %s", reply);
+			free(reply);
+			guard_disconnect();
+			continue;
+		}
+
+		resp->raw = reply;
+		resp->raw_len = reply_len;
+		resp->root = root;
+		free(json);
+		return true;
+	}
+
 	free(json);
-	if (!ok) {
-		hifs_warning("guard rpc %s: send failed, reconnecting", type);
-		guard_disconnect();
-		return false;
-	}
-
-	char *reply = NULL;
-	size_t reply_len = 0;
-	if (!guard_recv_frame(g_guard.fd, &reply, &reply_len)) {
-		hifs_warning("guard rpc %s: recv failed, reconnecting", type);
-		free(reply);
-		guard_disconnect();
-		return false;
-	}
-
-	JVal *root = jparse(reply, reply_len);
-	if (!root) {
-		hifs_err("guard rpc: failed to parse reply: %s", reply);
-		free(reply);
-		return false;
-	}
-
-	resp->raw = reply;
-	resp->raw_len = reply_len;
-	resp->root = root;
-	return true;
+	return false;
 }
 
 static bool guard_response_ok(const struct guard_response *resp)

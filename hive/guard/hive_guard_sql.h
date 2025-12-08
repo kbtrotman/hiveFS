@@ -53,10 +53,11 @@
 	"FROM host WHERE serial='%s'"
 
 #define SQL_HOST_UPSERT \
-	"INSERT INTO host (serial, name, host_id, os_name, os_version, create_time) " \
-	"VALUES ('%s', '%s', %ld, '%s', '%s', NOW()) " \
+	"INSERT INTO host (serial, name, host_id, host_address, os_name, os_version, create_time, hicom_port, epoch, fenced) " \
+	"VALUES ('%s', '%s', %ld, '%s', '%s', '%s', NOW(), %u, %llu, %u) " \
 	"ON DUPLICATE KEY UPDATE name=VALUES(name), host_id=VALUES(host_id), " \
-	"os_name=VALUES(os_name), os_version=VALUES(os_version)"
+	"host_address=VALUES(host_address), os_name=VALUES(os_name), os_version=VALUES(os_version), " \
+	"hicom_port=VALUES(hicom_port), epoch=VALUES(epoch), fenced=VALUES(fenced)"
 
 #define SQL_VOLUME_SUPER_LIST \
 	"SELECT volume_id, s_magic, s_blocksize, s_blocksize_bits, " \
@@ -127,17 +128,17 @@
 #define SQL_VOLUME_INODE_SELECT \
 	"SELECT i_msg_flags, i_version, i_flags, i_mode, i_ino, i_uid, i_gid, " \
 	"i_hrd_lnk, i_atime, i_mtime, i_ctime, i_size, HEX(i_name), " \
-	"i_addrb0, i_addrb1, i_addrb2, i_addrb3, " \
-	"i_addre0, i_addre1, i_addre2, i_addre3, " \
-	"i_blocks, i_bytes, i_links, i_hash_count, i_hash_reserved " \
+	"extent0_start, extent1_start, extent2_start, extent3_start, " \
+	"extent0_count, extent1_count, extent2_count, extent3_count, " \
+	"i_blocks, i_bytes, i_links, i_hash_count, i_hash_reserved, epoch " \
 	"FROM volume_inodes WHERE volume_id=%llu AND inode=%llu"
 
 #define SQL_VOLUME_INODE_UPSERT \
 	"INSERT INTO volume_inodes " \
 	"(volume_id, inode, i_msg_flags, i_version, i_flags, i_mode, i_ino, i_uid, i_gid, " \
 	"i_hrd_lnk, i_atime, i_mtime, i_ctime, i_size, i_name, " \
-	"i_addrb0, i_addrb1, i_addrb2, i_addrb3, " \
-	"i_addre0, i_addre1, i_addre2, i_addre3, " \
+	"extent0_start, extent1_start, extent2_start, extent3_start, " \
+	"extent0_count, extent1_count, extent2_count, extent3_count, " \
 	"i_blocks, i_bytes, i_links, i_hash_count, i_hash_reserved, epoch) " \
 	"VALUES (%llu, %llu, %u, %u, %u, %u, %llu, %u, %u, %u, %u, %u, %u, %u, UNHEX('%s'), " \
 	"%u, %u, %u, %u, %u, %u, %u, %u, %u, %u, %u, %u, %u, %u) " \
@@ -147,23 +148,13 @@
 	"i_uid=VALUES(i_uid), i_gid=VALUES(i_gid), i_hrd_lnk=VALUES(i_hrd_lnk), " \
 	"i_atime=VALUES(i_atime), i_mtime=VALUES(i_mtime), i_ctime=VALUES(i_ctime), " \
 	"i_size=VALUES(i_size), i_name=VALUES(i_name), " \
-	"i_addrb0=VALUES(i_addrb0), i_addrb1=VALUES(i_addrb1), " \
-	"i_addrb2=VALUES(i_addrb2), i_addrb3=VALUES(i_addrb3), " \
-	"i_addre0=VALUES(i_addre0), i_addre1=VALUES(i_addre1), " \
-	"i_addre2=VALUES(i_addre2), i_addre3=VALUES(i_addre3), " \
+	"extent0_start=VALUES(extent0_start), extent1_start=VALUES(extent1_start), " \
+	"extent2_start=VALUES(extent2_start), extent3_start=VALUES(extent3_start), " \
+	"extent0_count=VALUES(extent0_count), extent1_count=VALUES(extent1_count), " \
+	"extent2_count=VALUES(extent2_count), extent3_count=VALUES(extent3_count), " \
 	"i_blocks=VALUES(i_blocks), i_bytes=VALUES(i_bytes), " \
 	"i_links=VALUES(i_links), i_hash_count=VALUES(i_hash_count), " \
 	"i_hash_reserved=VALUES(i_hash_reserved), epoch=VALUES(epoch)"
-
-#define SQL_VOLUME_INODE_FP_DELETE \
-	"DELETE FROM volume_inode_fingerprints WHERE volume_id=%llu AND inode=%llu"
-
-#define SQL_VOLUME_INODE_FP_REPLACE \
-	"INSERT INTO volume_inode_fingerprints " \
-	"(volume_id, inode, fp_index, block_no, hash_algo, block_hash) " \
-	"VALUES (%llu, %llu, %u, %u, %u, UNHEX('%s')) " \
-	"ON DUPLICATE KEY UPDATE " \
-	"block_no=VALUES(block_no), hash_algo=VALUES(hash_algo), block_hash=VALUES(block_hash)"
 
 struct stripe_location {
 	uint8_t stripe_index;
@@ -178,7 +169,10 @@ struct stripe_location {
 "SELECT node_id, node_name, node_address, node_uid, node_serial, " \
 "node_guard_port, node_data_port, UNIX_TIMESTAMP(last_heartbeat) AS last_heartbeat, " \
 "hive_version, hive_patch_level, fenced, " \
-"UNIX_TIMESTAMP(last_maintenance) AS last_maintenance, maintenance_reason " \
+"UNIX_TIMESTAMP(last_maintenance) AS last_maintenance, maintenance_reason, " \
+"date_added_to_cluster, storage_capacity_bytes, storage_used_bytes, " \
+"storage_reserved_bytes, storage_overhead_bytes, client_connect_timout, " \
+"sn_connect_timeout " \
 "FROM storage_nodes ORDER BY node_id"
 
 /* UPSERT storage node info */
