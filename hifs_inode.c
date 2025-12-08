@@ -370,6 +370,7 @@ int hifs_add_dir_record(struct super_block *sb, struct inode *dir, struct dentry
 		}
 		bforget(bh);
 	}
+	}
 
 	printk(KERN_ERR "Unable to put entry to directory");
 	return -ENOSPC;
@@ -478,6 +479,12 @@ struct inode *hifs_new_inode(struct inode *dir, struct dentry *dentry, umode_t m
 
 	hifs_fill_inode(sb, inode, hii);
 
+	if (insert_inode_locked(inode) < 0) {
+		iput(inode);
+		return NULL;
+	}
+	mark_inode_dirty(inode);
+
 	ret = hifs_add_dir_record(sb, dir, dentry, inode);
 	if (ret) {
 		iput(inode);
@@ -489,8 +496,19 @@ struct inode *hifs_new_inode(struct inode *dir, struct dentry *dentry, umode_t m
 
 int hifs_add_ondir(struct inode *inode, struct inode *dir, struct dentry *dentry, umode_t mode)
 {
-	//inode_init_owner(inode, dir, mode);
-	//d_add(dentry, inode);
+	struct timespec64 now;
+
+	if (!inode || !dir || !dentry)
+		return -EINVAL;
+
+	d_instantiate(dentry, inode);
+	dget(dentry);
+	unlock_new_inode(inode);
+
+	now = current_time(dir);
+	inode_set_mtime_to_ts(dir, now);
+	inode_set_ctime_to_ts(dir, now);
+	mark_inode_dirty(dir);
 
 	return 0;
 }
@@ -668,7 +686,7 @@ struct dentry *hifs_lookup(struct inode *dir, struct dentry *child_dentry, unsig
 
 retry:
 
-	/* Here we should use cache instead but dummyfs is doing stuff in dummy way.. */
+	/* Here we should use cache instead but dumbfs is doing stuff in dummy way.. */
 	for (i = 0; i < HIFS_INODE_TSIZE; ++i) {
 		const struct hifs_extent *ext = &dparent->extents[i];
 		u32 b = ext->block_start;
@@ -727,5 +745,6 @@ retry:
 				 true);
 		goto retry;
 	}
-	return NULL;
+	d_add(child_dentry, NULL);
+	return child_dentry;
 }

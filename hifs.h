@@ -196,6 +196,7 @@ int hifs_readdir(struct file *filp, struct dir_context *ctx);
 ssize_t hifs_get_loffset(struct hifs_inode *hii, loff_t off);
 ssize_t hifs_read(struct kiocb *iocb, struct iov_iter *to);
 ssize_t hifs_write(struct kiocb *iocb, struct iov_iter *from);
+loff_t hifs_llseek(struct file *filp, loff_t offset, int whence);
 int hifs_inode_reserve_blocks(struct super_block *sb,
 			      struct hifs_inode *inode,
 			      uint32_t last_block_needed);

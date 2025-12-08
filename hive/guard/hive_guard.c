@@ -16,9 +16,31 @@
 
 #include "hive_guard_raft.h"
 #include "hive_guard.h"
+#include <errno.h>
+#include <string.h>
+#include <sys/stat.h>
+
 #include "hive_guard_sn_tcp.h"
 #include "hive_guard_erasure_code.h"
 #include "hive_guard_sql.h"
+#include "hive_guard_kv.h"
+
+#define HIVE_GUARD_STATE_ROOT "/var/lib/hivefs"
+#define HIVE_GUARD_RAFT_DIR   HIVE_GUARD_STATE_ROOT "/hive_guard_raft"
+#define HIVE_GUARD_KV_DIR     HIVE_GUARD_STATE_ROOT "/hive_guard_kv"
+
+static bool ensure_directory(const char *path)
+{
+	if (!path || !*path)
+		return false;
+	if (mkdir(path, 0755) == 0)
+		return true;
+	if (errno == EEXIST)
+		return true;
+	fprintf(stderr, "hive_guard: failed mkdir(%s): %s\n",
+		path, strerror(errno));
+	return false;
+}
 
 static void free_peer_buffers(struct hg_raft_peer *peers,
 				      char **addr_bufs,
@@ -111,6 +133,20 @@ int main(void)
 	size_t peer_count = sizeof(fallback_peers) / sizeof(fallback_peers[0]);
 	uint64_t self_id = fallback_peers[0].id;
 	const char *self_address = fallback_peers[0].address;
+	int ret;
+
+	if (!ensure_directory(HIVE_GUARD_STATE_ROOT) ||
+	    !ensure_directory(HIVE_GUARD_RAFT_DIR) ||
+	    !ensure_directory(HIVE_GUARD_KV_DIR)) {
+		fprintf(stderr, "main: failed to prepare state directories\n");
+		return 1;
+	}
+
+	if (hg_kv_init(HIVE_GUARD_KV_DIR) != 0) {
+		fprintf(stderr, "main: failed to initialize RocksDB at %s\n",
+			HIVE_GUARD_KV_DIR);
+		return 1;
+	}
 
 	if (load_peers_from_db(&dynamic_peers,
 			      &peer_addr_bufs,
@@ -123,7 +159,7 @@ int main(void)
 	struct hg_raft_config rcfg = {
 		.self_id      = self_id,
 		.self_address = self_address,
-		.data_dir     = "/var/lib/hivefs/hive_guard_raft",
+		.data_dir     = HIVE_GUARD_RAFT_DIR,
 		.peers        = peers,
 		.num_peers    = (unsigned)peer_count,
 	};
@@ -133,6 +169,7 @@ int main(void)
 
 	if (hg_raft_init(&rcfg) != 0) {
 		fprintf(stderr, "main: hg_raft_init failed, exiting without Raft\n");
+		hg_kv_shutdown();
 		return 1;
 	}
 	if (dynamic_peers)
@@ -144,5 +181,7 @@ int main(void)
     /* Now start the existing epoll-based TCP server.
      * Raft is running in its own thread; both will make progress.
      */
-    return hive_guard_server_main();
+	ret = hive_guard_server_main();
+	hg_kv_shutdown();
+	return ret;
 }

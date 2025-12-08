@@ -295,9 +295,11 @@ static void hifs_apply_remote_dentry(struct super_block *sb,
 
     struct inode *parent_inode = NULL;
     struct hifs_inode *parent_hifs = NULL;
+    bool parent_hifs_owned = false;
     struct buffer_head *bh = NULL;
     struct hifs_dir_entry *dir_rec;
     u32 i;
+    u64 parent_ino;
 
     if (!sb || !info || !remote)
         return;
@@ -310,24 +312,35 @@ static void hifs_apply_remote_dentry(struct super_block *sb,
     if (flags & HIFS_DENTRY_MSGF_REQUEST)
         return;
 
+    parent_ino = le64_to_cpu(remote->de_parent);
+
     hifs_notice("Remote dentry update volume %llu parent %llu inode %llu name '%s'",
                 (unsigned long long)info->volume_id,
-                (unsigned long long)le64_to_cpu(remote->de_parent),
+                (unsigned long long)parent_ino,
                 (unsigned long long)le64_to_cpu(remote->de_inode),
                 name_buf);
 
-    parent_inode = ilookup(sb, le64_to_cpu(remote->de_parent));
-    if (!parent_inode) {
-        hifs_warning("Unable to locate parent inode %llu for remote dentry",
-                     (unsigned long long)le64_to_cpu(remote->de_parent));
-        return;
+    parent_inode = ilookup(sb, parent_ino);
+    if (parent_inode)
+        parent_hifs = (struct hifs_inode *)parent_inode->i_private;
+
+    if (!parent_hifs) {
+        parent_hifs = hifs_iget(sb, parent_ino);
+        if (!parent_hifs) {
+            hifs_warning("Unable to locate parent inode %llu for remote dentry",
+                         (unsigned long long)parent_ino);
+            return;
+        }
+        parent_hifs_owned = true;
     }
 
-    parent_hifs = (struct hifs_inode *)parent_inode->i_private;
     if (!parent_hifs) {
         hifs_warning("Parent inode %lu missing private data; cannot sync remote dentry",
-                     parent_inode->i_ino);
-        iput(parent_inode);
+                     parent_inode ? parent_inode->i_ino : (unsigned long)parent_ino);
+        if (parent_inode)
+            iput(parent_inode);
+        if (parent_hifs_owned)
+            cache_put_inode(&parent_hifs);
         return;
     }
 
@@ -382,12 +395,14 @@ next_block:
         }
     }
 
-    hifs_warning("Failed to update remote dentry '%s' for parent %lu (no slot found)",
-                 name_buf, parent_inode->i_ino);
+    hifs_warning("Failed to update remote dentry '%s' for parent %llu (no slot found)",
+                 name_buf, (unsigned long long)parent_ino);
 
 out:
     if (parent_inode)
         iput(parent_inode);
+    if (parent_hifs_owned)
+        cache_put_inode(&parent_hifs);
     if (bh)
         brelse(bh);
 }

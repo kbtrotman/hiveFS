@@ -30,6 +30,7 @@ struct file_system_type hifs_type =
 
 const struct file_operations hifs_file_operations = 
 {
+    .llseek = hifs_llseek,
     .read_iter = hifs_read,
     .write_iter = hifs_write,
     .open = hifs_open_file,

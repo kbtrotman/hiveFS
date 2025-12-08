@@ -10,6 +10,7 @@
 #include "hifs.h"
 #include <linux/uaccess.h>
 #include <linux/math64.h>
+#include <linux/uio.h>
 
 struct hifs_write_desc {
 	uint64_t block_no;
@@ -75,6 +76,87 @@ ssize_t hifs_get_loffset(struct hifs_inode *hii, loff_t block_index)
 	}
 
 	return HIFS_EMPTY_ENTRY;
+}
+
+static loff_t hifs_seek_extent_offset(struct inode *inode,
+				      const struct hifs_inode *hii,
+				      loff_t offset,
+				      int whence)
+{
+	uint32_t block_size;
+	loff_t logical = 0;
+	loff_t size;
+	size_t i;
+
+	if (!inode || !hii)
+		return -EINVAL;
+
+	block_size = hifs_sb_block_size(inode->i_sb);
+	if (!block_size)
+		return -EINVAL;
+
+	size = (loff_t)hii->i_size;
+	if (offset < 0)
+		return -EINVAL;
+	if (offset > size)
+		return -ENXIO;
+	if (offset == size)
+		return (whence == SEEK_HOLE) ? size : -ENXIO;
+	if (!size)
+		return (whence == SEEK_HOLE) ? 0 : -ENXIO;
+
+	for (i = 0; i < HIFS_INODE_TSIZE && logical < size; ++i) {
+		const struct hifs_extent *ext = &hii->extents[i];
+		loff_t extent_bytes;
+		loff_t logical_end;
+
+		if (!ext->block_count)
+			continue;
+
+		extent_bytes = (loff_t)ext->block_count * block_size;
+		if (!extent_bytes)
+			continue;
+
+		logical_end = logical + extent_bytes;
+		if (logical_end > size)
+			logical_end = size;
+
+		if (whence == SEEK_DATA) {
+			if (offset <= logical)
+				return logical;
+			if (offset < logical_end)
+				return offset;
+		} else {
+			if (offset < logical)
+				return offset;
+			if (offset < logical_end)
+				return logical_end;
+		}
+
+		logical = logical_end;
+	}
+
+	return (whence == SEEK_DATA) ? -ENXIO : size;
+}
+
+loff_t hifs_llseek(struct file *file, loff_t offset, int whence)
+{
+	struct inode *inode = file ? file_inode(file) : NULL;
+	struct hifs_inode *hii = inode ? inode->i_private : NULL;
+
+	if (!inode || !hii)
+		return -EINVAL;
+
+	if (whence == SEEK_DATA || whence == SEEK_HOLE) {
+		loff_t new_pos = hifs_seek_extent_offset(inode, hii, offset, whence);
+
+		if (new_pos < 0)
+			return new_pos;
+		file->f_pos = new_pos;
+		return new_pos;
+	}
+
+	return generic_file_llseek(file, offset, whence);
 }
 
 ssize_t hifs_read(struct kiocb *iocb, struct iov_iter *to)
@@ -151,7 +233,6 @@ ssize_t hifs_write(struct kiocb *iocb, struct iov_iter *from)
 	struct inode *inode;
 	struct hifs_inode *dinode;
 	struct buffer_head *bh;
-	void *buf = from->__iov->iov_base; 
 	loff_t off = iocb->ki_pos;
 	size_t count = iov_iter_count(from);
 	size_t boff = 0;
@@ -216,7 +297,7 @@ ssize_t hifs_write(struct kiocb *iocb, struct iov_iter *from)
 		chunk = min_t(size_t, block_size - (off % block_size), count);
 
 		buffer = bh->b_data + (off % block_size);
-		if (copy_from_user(buffer, (char *)buf + done, chunk)) {
+		if (!copy_from_iter_full(buffer, chunk, from)) {
 			brelse(bh);
 			return -EFAULT;
 		}

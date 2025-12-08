@@ -8,16 +8,52 @@ CREATE DATABASE IF NOT EXISTS hive_meta;
 -- =========================
 -- META SCHEMA (hive_meta)
 -- =========================
+
+USE hive_api;
+
+-- Virtual Entities only in the API DB.
+CREATE TABLE IF NOT EXISTS cluster (
+  cluster_id          INT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  cluster_name        VARCHAR(100) NOT NULL UNIQUE,
+  cluster_description TEXT NULL,
+  cluster_created     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  cluster_updated     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                                   ON UPDATE CURRENT_TIMESTAMP,
+  mgmt_api_port       INT NULL,
+  mgmt_api_version    VARCHAR(32) NULL,
+  cluster_state       ENUM('active', 'degraded', 'maintenance', 'offline')
+                      NOT NULL DEFAULT 'active',
+  cluster_health      ENUM('ok', 'warning', 'critical') 
+                      NOT NULL DEFAULT 'ok',
+  last_health_check   TIMESTAMP NULL,
+  last_health_reason  VARCHAR(255) NULL,
+  cluster_capacity_bytes      BIGINT UNSIGNED NULL,
+  cluster_used_bytes          BIGINT UNSIGNED NULL,
+  cluster_reserved_bytes      BIGINT UNSIGNED NULL,
+  cluster_overhead_bytes      BIGINT UNSIGNED NULL,
+  cluster_node_count          INT UNSIGNED NULL,
+  maintenance_window          VARCHAR(64) NULL,
+  replication_factor          TINYINT UNSIGNED NULL,
+  owner_team                  VARCHAR(100) NULL,
+  environment                 ENUM('prod', 'staging', 'dev', 'test') NULL,
+  tags                        JSON NULL
+) ENGINE=InnoDB;
+
+
 USE hive_meta;
 
+-- Physical representations only in the meta layer. This is a security layer.
+-- These entities should be read-only from the web API side of things. We only
+-- want limited views there.
 CREATE TABLE IF NOT EXISTS storage_nodes (
-  node_id INT PRIMARY KEY,
+  node_id INT UNSIGNED PRIMARY KEY,
+  cluster_id INT UNSIGNED DEFAULT NULL,
   node_name VARCHAR(100) NOT NULL,
   node_address VARCHAR(64) NOT NULL,
   node_uid VARCHAR(128) NOT NULL,
   node_serial VARCHAR(100) NOT NULL,
-  node_guard_port INT NOT NULL,
-  node_data_port INT NOT NULL,
+  node_guard_port INT UNSIGNED NOT NULL,
+  node_data_port INT UNSIGNED NOT NULL,
   last_heartbeat TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   hive_version INT NOT NULL,
   hive_patch_level INT NOT NULL,
@@ -31,18 +67,30 @@ CREATE TABLE IF NOT EXISTS storage_nodes (
   storage_used_bytes BIGINT UNSIGNED NOT NULL,
   storage_reserved_bytes BIGINT UNSIGNED NOT NULL,
   storage_overhead_bytes BIGINT UNSIGNED NOT NULL,
+  client_connect_timout INT DEFAULT '60000',
+  sn_connect_timeout INT DEFAULT '30000',
   UNIQUE KEY u_node_name (node_name),
-  UNIQUE KEY u_node_address (node_address)
+  UNIQUE KEY u_node_address (node_address),
+
+  -- index on cluster_id (InnoDB will create one automatically for the FK,
+  -- but it's good to be explicit)
+  KEY idx_storage_nodes_cluster_id (cluster_id),
+
+  CONSTRAINT fk_storage_nodes_cluster
+    FOREIGN KEY (cluster_id)
+    REFERENCES hive_api.cluster (cluster_id)
+    ON UPDATE CASCADE
+    ON DELETE RESTRICT
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS shard_map (
-  shard_id INT PRIMARY KEY,
-  node_id INT NOT NULL,
+  shard_id INT UNSIGNED PRIMARY KEY,
+  node_id INT UNSIGNED NOT NULL,
   shard_name VARCHAR(100) NOT NULL,
-  storage_node_id INT NOT NULL,
+  storage_node_id INT UNSIGNED NOT NULL,
   date_added TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   stripes BIGINT UNSIGNED NOT NULL,
-  ec_group INT NOT NULL,
+  ec_group INT UNSIGNED NOT NULL,
   stripe_id_low BIGINT UNSIGNED NOT NULL,
   stripe_id_high BIGINT UNSIGNED NOT NULL,
   UNIQUE KEY u_shard_name (shard_name),
@@ -136,6 +184,8 @@ CREATE TABLE IF NOT EXISTS volume_dentries (
   volume_id   BIGINT UNSIGNED NOT NULL,
   de_parent   BIGINT UNSIGNED NOT NULL,  -- parent inode (directory)
   de_inode    BIGINT UNSIGNED NOT NULL,  -- target inode
+  de_epoch    INT UNSIGNED NOT NULL,
+  de_type     INT UNSIGNED NOT NULL,
   de_name_len SMALLINT UNSIGNED NOT NULL,
   de_name     VARBINARY(255) NOT NULL,
   updated_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -187,12 +237,21 @@ CREATE TABLE IF NOT EXISTS volume_inodes (
   i_mtime       INT UNSIGNED NOT NULL,
   i_ctime       INT UNSIGNED NOT NULL,
   i_size        BIGINT UNSIGNED NOT NULL,
+  extent0_start INT UNSIGNED NOT NULL,
+  extent1_start INT UNSIGNED NOT NULL,
+  extent2_start INT UNSIGNED NOT NULL,
+  extent3_start INT UNSIGNED NOT NULL,
+  extent0_count INT UNSIGNED NOT NULL,
+  extent1_count INT UNSIGNED NOT NULL,
+  extent2_count INT UNSIGNED NOT NULL,
+  extent3_count INT UNSIGNED NOT NULL,
   i_blocks      INT UNSIGNED NOT NULL,
   i_bytes       INT UNSIGNED NOT NULL,
   i_links       TINYINT UNSIGNED NOT NULL,
   i_hash_count  SMALLINT UNSIGNED NOT NULL,
   i_hash_reserved SMALLINT UNSIGNED NOT NULL,
   epoch         BIGINT UNSIGNED NOT NULL,
+  tags          JSON NULL,  -- MariaDB supports JSON to store arbitrary labels
   updated_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
                          ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (volume_id, inode),
@@ -201,7 +260,7 @@ CREATE TABLE IF NOT EXISTS volume_inodes (
     REFERENCES volume_superblocks(volume_id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
-CREATE TABLE block_stripe_locations (
+CREATE TABLE IF NOT EXISTS block_stripe_locations (
     volume_id  BIGINT NOT NULL,
     block_no   BIGINT NOT NULL,
     hash_algo  TINYINT NOT NULL,
@@ -355,6 +414,74 @@ LEFT JOIN hive_meta.volume_dentries p
 LEFT JOIN hive_api.v_mounts mm
   ON mm.root_dentry = p.dentry_id
 WHERE d.de_parent IS NOT NULL;
+
+CREATE OR REPLACE
+VIEW v_cluster_overview AS
+SELECT
+  c.cluster_id,
+  c.cluster_name,
+  c.cluster_description,
+  c.cluster_state,
+  c.cluster_health,
+  c.cluster_created,
+  c.cluster_updated,
+
+  COUNT(sn.node_id)                             AS node_count,
+  COALESCE(SUM(sn.storage_capacity_bytes), 0)   AS total_capacity_bytes,
+  COALESCE(SUM(sn.storage_used_bytes), 0)       AS total_used_bytes,
+  COALESCE(SUM(sn.storage_reserved_bytes), 0)   AS total_reserved_bytes,
+  COALESCE(SUM(sn.storage_overhead_bytes), 0)   AS total_overhead_bytes
+
+FROM hive_api.cluster c
+LEFT JOIN hive_meta.storage_nodes sn
+       ON sn.cluster_id = c.cluster_id
+GROUP BY c.cluster_id;
+
+CREATE OR REPLACE
+VIEW v_cluster_nodes AS
+SELECT
+  sn.node_id,
+  sn.cluster_id,
+  c.cluster_name,
+  sn.node_name,
+  sn.node_address,
+  sn.hive_version,
+  sn.hive_patch_level,
+  sn.fenced,
+  sn.last_heartbeat,
+  sn.storage_capacity_bytes,
+  sn.storage_used_bytes,
+  sn.storage_reserved_bytes,
+  sn.storage_overhead_bytes
+FROM hive_meta.storage_nodes sn
+JOIN hive_api.cluster c
+  ON c.cluster_id = sn.cluster_id;
+
+CREATE OR REPLACE
+VIEW v_volumes AS
+SELECT
+  vsb.volume_id,
+  CONVERT(vsb.s_volume_name USING utf8mb4) AS volume_name,
+  vsb.s_blocksize            AS block_size,
+  vsb.s_blocks_count         AS total_blocks,
+  vsb.s_free_blocks          AS free_blocks,
+  vs.total_bytes           AS total_bytes,   -- if you want, or derive this
+  vs.file_count,
+  vs.dir_count,
+  vs.updated_at              AS stats_updated_at
+FROM hive_meta.volume_superblocks vsb
+LEFT JOIN hive_meta.volume_stats vs
+  ON vs.volume_id = vsb.volume_id;
+
+CREATE OR REPLACE
+VIEW v_global_fs_stats AS
+SELECT
+  COUNT(DISTINCT volume_id)           AS volume_count,
+  COALESCE(SUM(file_count), 0)        AS total_files,
+  COALESCE(SUM(dir_count), 0)         AS total_dirs,
+  COALESCE(SUM(total_bytes), 0)       AS total_bytes
+FROM hive_meta.volume_stats;
+
 
 -- =========================
 -- PROCEDURES (hive_meta)

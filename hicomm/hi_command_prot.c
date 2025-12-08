@@ -12,7 +12,7 @@
 
 #include <inttypes.h>
 #include <endian.h>
-#include <endian.h>
+#include <linux/byteorder/little_endian.h>
 
 /* Helper to compare command strings */
 static bool hifs_command_equals(const struct hifs_cmds *cmd, const char *name)
@@ -491,12 +491,16 @@ int hicomm_handle_command(int fd, const struct hifs_cmds *cmd)
 		inode_no = le64toh(msg_local.dentry.de_inode);
 
 		parent_no = le64toh(msg_local.dentry.de_parent);
+		hifs_info("hifs_dentry: volume=%" PRIu64 " parent=%" PRIu64 " inode=%" PRIu64
+			  " flags=%#x", volume_id, parent_no, inode_no,
+			  le32toh(msg_local.dentry.de_flags));
 		request_only = (le32toh(msg_local.dentry.de_flags) & HIFS_DENTRY_MSGF_REQUEST) != 0;
 		if (request_only) {
 			uint32_t name_len = le32toh(msg_local.dentry.de_name_len);
 			if (name_len > HIFS_MAX_NAME_SIZE)
 				name_len = HIFS_MAX_NAME_SIZE;
 			bin_to_hex(msg_local.dentry.de_name, name_len, name_hex);
+			hifs_info("hifs_dentry request name=%s len=%u", name_hex, name_len);
 			have_db = hifs_volume_dentry_load_by_name(volume_id, parent_no,
 				name_hex, name_len * 2, &db_dent);
 		} else {
@@ -511,12 +515,15 @@ int hicomm_handle_command(int fd, const struct hifs_cmds *cmd)
 				save_local = true;
 			}
 		} else {
+			if (request_only) {
+				hifs_info("hifs_dentry lookup miss volume=%" PRIu64
+					  " parent=%" PRIu64 " name=%s",
+					  volume_id, parent_no, name_hex);
+			}
 			save_local = true;
 		}
 
-	hifs_info("rx dentry vol=%" PRIu64 " parent=%" PRIu64 " inode=%" PRIu64 " flags=%#x",
-		volume_id, parent_no, inode_no, le32toh(msg_local.dentry.de_flags));
-	if (request_only && have_db) {
+		if (request_only && have_db) {
 		msg_reply.dentry = db_dent;
 	}
 
@@ -528,6 +535,7 @@ int hicomm_handle_command(int fd, const struct hifs_cmds *cmd)
 					 volume_id);
 			}
 		}
+		/* request_only replies only come from DB lookups */
 
 		struct hifs_data_frame out_frame = {0};
 		out_frame.len = sizeof(msg_reply);

@@ -449,6 +449,33 @@ bool hifs_volume_inode_fp_replace(uint64_t volume_id,
 	return true;
 }
 
+bool hifs_volume_inode_fp_sync(uint64_t volume_id,
+			       uint64_t inode_id,
+			       const struct hifs_block_fingerprint_wire *fps,
+			       uint16_t fp_count)
+{
+	if (!g_db) {
+		fprintf(stderr,
+			"hifs_volume_inode_fp_sync: RocksDB unavailable (volume %llu inode %llu)\n",
+			(unsigned long long)volume_id,
+			(unsigned long long)inode_id);
+		return false;
+	}
+
+	for (uint16_t i = 0; i < HIFS_MAX_BLOCK_HASHES; ++i) {
+		const struct hifs_block_fingerprint_wire *fp = NULL;
+
+		if (fps && i < fp_count)
+			fp = &fps[i];
+
+            
+		if (!hifs_volume_inode_fp_replace(volume_id, inode_id, i, fp))
+			return false;
+	}
+
+	return true;
+}
+
  long long get_next_auto_increment_id(rocksdb_t* db, rocksdb_readoptions_t* ropts, rocksdb_writeoptions_t* wopts) {
     char* err = NULL;
     size_t len;

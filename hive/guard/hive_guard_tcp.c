@@ -16,6 +16,8 @@
  * "type", optional scalar arguments, and (for binary payloads) a
  * "payload_b64" field.  Successful replies include {"ok":true,...}
  * and may return "payload_b64" blobs.
+ * 
+ * This first part is all helper functions for JSON and then TCP starts later.
  */
 
 #include "hive_guard.h"
@@ -71,6 +73,15 @@ static int get_env_int(const char *k, int def)
 {
 	const char *v = getenv(k);
 	return (v && *v) ? atoi(v) : def;
+}
+
+static int load_idle_timeout_ms(void)
+{
+	uint32_t timeout = storage_node_client_connect_timeout_ms;
+
+	if (timeout > 0)
+		return (int)timeout;
+	return get_env_int(ENV_IDLE_MS, 30000);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -353,18 +364,23 @@ static char *base64_encode(const uint8_t *in, size_t len)
 		return NULL;
 	size_t i = 0, j = 0;
 	while (i < len) {
-		uint32_t octet_a = i < len ? in[i++] : 0;
-		uint32_t octet_b = i < len ? in[i++] : 0;
-		uint32_t octet_c = i < len ? in[i++] : 0;
+		uint32_t octet_a = in[i++];
+		uint32_t octet_b = 0;
+		uint32_t octet_c = 0;
+		size_t bytes = 1;
+		if (i < len) {
+			octet_b = in[i++];
+			++bytes;
+		}
+		if (i < len) {
+			octet_c = in[i++];
+			++bytes;
+		}
 		uint32_t triple = (octet_a << 16) | (octet_b << 8) | octet_c;
 		out[j++] = b64_table[(triple >> 18) & 0x3F];
 		out[j++] = b64_table[(triple >> 12) & 0x3F];
-		out[j++] = (i - 1 > len) ? '=' : b64_table[(triple >> 6) & 0x3F];
-		out[j++] = (i > len) ? '=' : b64_table[triple & 0x3F];
-		if (i - 1 > len)
-			out[j - 2] = '=';
-		if (i > len)
-			out[j - 1] = '=';
+		out[j++] = (bytes > 1) ? b64_table[(triple >> 6) & 0x3F] : '=';
+		out[j++] = (bytes > 2) ? b64_table[triple & 0x3F] : '=';
 	}
 	out[j] = '\0';
 	return out;
@@ -411,7 +427,7 @@ static int base64_decode(const char *in, uint8_t **out, size_t *out_len)
 }
 
 /* -------------------------------------------------------------------------- */
-/* Networking structures                                                       */
+/* TCP Networking structures                                                       */
 /* -------------------------------------------------------------------------- */
 typedef struct Client {
 	int fd;
@@ -850,32 +866,41 @@ static bool handle_register_host(const JVal *root)
 {
 	const char *machine_id = jstr(jobj_get(root, "machine_id"));
 	const char *hostname = jstr(jobj_get(root, "hostname"));
+	const char *ip_address = jstr(jobj_get(root, "ip_address"));
 	long host_id = jnum_i(jobj_get(root, "host_id"), -1);
 	const char *os_name = jstr(jobj_get(root, "os_name"));
 	const char *os_version = jstr(jobj_get(root, "os_version"));
 
-	if (!machine_id || !hostname || host_id < 0)
+	if (!machine_id || !hostname || !ip_address || host_id < 0)
 		return false;
 
 	char *serial_q = hifs_get_quoted_value(machine_id);
 	char *name_q = hifs_get_quoted_value(hostname);
+	char *addr_q = hifs_get_quoted_value(ip_address);
 	char *os_name_q = hifs_get_quoted_value(os_name ? os_name : "");
 	char *os_version_q = hifs_get_quoted_value(os_version ? os_version : "");
-	if (!serial_q || !name_q || !os_name_q || !os_version_q) {
+	if (!serial_q || !name_q || !addr_q || !os_name_q || !os_version_q) {
 		free(serial_q);
 		free(name_q);
+		free(addr_q);
 		free(os_name_q);
 		free(os_version_q);
 		return false;
 	}
 
+	unsigned int hicom_port = 0;
+	uint64_t epoch = (uint64_t)time(NULL);
+	unsigned int fenced = 0;
+
 	char sql[MAX_QUERY_SIZE];
 	snprintf(sql, sizeof(sql), SQL_HOST_UPSERT,
 		 safe_str(serial_q), safe_str(name_q), host_id,
-		 safe_str(os_name_q), safe_str(os_version_q));
+		 safe_str(addr_q), safe_str(os_name_q), safe_str(os_version_q),
+		 hicom_port, (unsigned long long)epoch, fenced);
 
 	free(serial_q);
 	free(name_q);
+	free(addr_q);
 	free(os_name_q);
 	free(os_version_q);
 
@@ -939,8 +964,16 @@ static bool handle_volume_dentry_get_inode(Client *c, const JVal *root)
 		return send_error_json(c->fd, "bad_request", "missing volume_id/inode");
 
 	struct hifs_volume_dentry dent = {0};
-	if (!hifs_volume_dentry_load_by_inode(volume_id, inode, &dent))
+	if (!hifs_volume_dentry_load_by_inode(volume_id, inode, &dent)) {
+		hifs_warning("volume_dentry_get_inode miss volume=%llu inode=%llu",
+			     (unsigned long long)volume_id,
+			     (unsigned long long)inode);
 		return send_error_json(c->fd, "not_found", "dentry missing");
+	}
+	hifs_info("volume_dentry_get_inode hit volume=%llu parent=%llu inode=%llu",
+		  (unsigned long long)volume_id,
+		  (unsigned long long)dent.de_parent,
+		  (unsigned long long)inode);
 	return send_payload_ok(c->fd, "volume_dentry_get_inode", &dent, sizeof(dent));
 }
 
@@ -956,8 +989,18 @@ static bool handle_volume_dentry_get_name(Client *c, const JVal *root)
 	struct hifs_volume_dentry dent = {0};
 	if (!hifs_volume_dentry_load_by_name(volume_id, parent,
 					     name_hex, (uint32_t)strlen(name_hex),
-					     &dent))
+					     &dent)) {
+		hifs_warning("volume_dentry_get_name miss volume=%llu parent=%llu name=%s",
+			     (unsigned long long)volume_id,
+			     (unsigned long long)parent,
+			     name_hex ? name_hex : "<null>");
 		return send_error_json(c->fd, "not_found", "dentry missing");
+	}
+	hifs_info("volume_dentry_get_name hit volume=%llu parent=%llu inode=%llu name=%s",
+		  (unsigned long long)volume_id,
+		  (unsigned long long)parent,
+		  (unsigned long long)dent.de_inode,
+		  name_hex);
 	return send_payload_ok(c->fd, "volume_dentry_get_name", &dent, sizeof(dent));
 }
 
@@ -989,8 +1032,12 @@ static bool handle_volume_inode_load(Client *c, const JVal *root)
 	    !get_u64(root, "inode", &inode))
 		return send_error_json(c->fd, "bad_request", "missing args");
 	struct hifs_inode_wire wire = {0};
-	if (!hifs_volume_inode_load(volume_id, inode, &wire))
+	if (!hifs_volume_inode_load(volume_id, inode, &wire)) {
+		hifs_warning("volume_inode_get miss volume=%llu inode=%llu",
+			     (unsigned long long)volume_id,
+			     (unsigned long long)inode);
 		return send_error_json(c->fd, "not_found", "inode missing");
+	}
 	return send_payload_ok(c->fd, "volume_inode_get", &wire, sizeof(wire));
 }
 
@@ -1100,10 +1147,12 @@ static bool handle_volume_block_put_contig(Client *c, const JVal *root)
 		return send_error_json(c->fd, "bad_request", "empty contiguous batch");
 	}
 
-	if (block_count > (SIZE_MAX - sizeof(hdr)) / sizeof(uint32_t)) {
+#if SIZE_MAX <= UINT32_MAX
+	if ((size_t)block_count > (SIZE_MAX - sizeof(hdr)) / sizeof(uint32_t)) {
 		free(blob);
 		return send_error_json(c->fd, "bad_request", "contiguous batch too large");
 	}
+#endif
 
 	meta_len = sizeof(hdr) + (size_t)block_count * sizeof(uint32_t);
 	if (blob_len < meta_len) {
@@ -1115,6 +1164,15 @@ static bool handle_volume_block_put_contig(Client *c, const JVal *root)
 	cursor = blob + meta_len;
 	data_len = blob_len - meta_len;
 
+	/* TODO: Once the writer is working well, this needs to be changed. here
+	 * it currently iterates through blocks and writes each individually.
+	 * That doesn;t take advantage of RocksDB fast batch writing efficiency.
+	 * It needs to be changed so that all contiguous blocks are written as
+	 * a RocksDB batch, broken into stripe arrays, and then the stripe
+	 * arrays should be batch written. Given the cascading placement algorithm,
+	 * that means it would spread across nodes, but any multi-writes in the same
+	 * node would get much better performance.
+	 * */
 	for (uint32_t i = 0; i < block_count; ++i) {
 		uint32_t len = le32toh(lens[i]);
 
@@ -1300,7 +1358,7 @@ int hive_guard_server_main(void)
 
 	const char *listen_addr = get_env(ENV_LISTEN_ADDR, "0.0.0.0");
 	int listen_port = get_env_int(ENV_LISTEN_PORT, atoi(HIFS_GUARD_PORT_STR));
-	int idle_ms = get_env_int(ENV_IDLE_MS, 30000);
+	int idle_ms = load_idle_timeout_ms();
 
 	openlog("hive_guard", LOG_PID | LOG_NDELAY, LOG_USER);
 
@@ -1357,7 +1415,6 @@ int hive_guard_server_main(void)
 	struct epoll_event events[128];
 	while (!g_stop) {
 		int n = epoll_wait(ep, events, 128, 250);
-		uint64_t now = now_ms();
 		for (int i = 0; i < n; ++i) {
 			if (events[i].data.fd == sfd) {
 				while (1) {
@@ -1385,7 +1442,7 @@ int hive_guard_server_main(void)
 					}
 					Client *cl = calloc(1, sizeof(Client));
 					cl->fd = cfd;
-					cl->last_active_ms = now;
+					cl->last_active_ms = now_ms();
 					g_clients[slot] = cl;
 					struct epoll_event cev = {
 						.events = EPOLLIN | EPOLLET,
@@ -1408,6 +1465,7 @@ int hive_guard_server_main(void)
 		}
 		flush_pending_write_acks();
 
+		uint64_t now = now_ms();
 		for (int i = 0; i < MAXC; ++i) {
 			Client *cl = g_clients[i];
 			if (!cl)
