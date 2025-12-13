@@ -15,7 +15,6 @@
 
 #include <liberasurecode/erasurecode.h>
 
-#define HIFS_EC_STRIPES 6  /* k + m */
 #define HIFS_SHARDS_PER_NODE 1  /* one shard per node until we have more ability in setup gui */
 
 extern int last_node_in_cascade;
@@ -32,9 +31,9 @@ struct RaftPutBlock;
 
 /* ======================= Internal helpers ======================= */
 
-/* Advance 6 positions from last_node_in_cascade, wrapping within [1, cascade_length] */
+/* Advance by the stripe count across the cascade, wrapping within [1, cascade_length] */
 #define NEXT_STRIPE_NODE(last_node_in_cascade, cascade_length) \
-    last_node_in_cascade = ((((last_node_in_cascade - 1) + 6) % (cascade_length)) + 1)
+    last_node_in_cascade = ((((last_node_in_cascade - 1) + HIFS_EC_STRIPES) % (cascade_length)) + 1)
 
 
 /* Decide which storage node & shard each stripe goes to */
@@ -62,5 +61,3 @@ int hifs_recv_stripe_from_node(uint32_t storage_node_id,
 
 /* Submit the Raft command (this calls cowsql/raft) */
 int hifs_raft_submit_put_block(const struct RaftPutBlock *cmd);
-
-

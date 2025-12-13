@@ -36,11 +36,7 @@
 #define HIFS_GUARD_HOST "127.0.0.1"
 #define HIFS_GUARD_PORT_STR "7070"
 
-/* Erasure coding profile shared with hive_guard */
-#define HIFS_EC_K         6
-#define HIFS_EC_M         3
-#define HIFS_EC_W         8
-#define HIFS_EC_CHECKSUM  CHKSUM_CRC32
+
 
 typedef struct {
     int     desc;        /* liberasurecode instance handle */

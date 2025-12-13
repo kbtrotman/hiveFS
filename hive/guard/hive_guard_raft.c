@@ -13,6 +13,7 @@
 
 #include <errno.h>
 
+#include "../../hifs_shared_defs.h"
 #include "hive_guard_erasure_code.h"
 #include "hive_guard_raft.h"
 #include "hive_guard_sql.h"
@@ -42,6 +43,8 @@ static pthread_mutex_t      g_state_mu = PTHREAD_MUTEX_INITIALIZER;
 static int                  g_is_leader = 0;
 static int                  g_should_stop = 0;
 static pthread_mutex_t      g_log_mu = PTHREAD_MUTEX_INITIALIZER;
+static bool                 g_block_stripes_disabled = HIFS_DEBUG_DISABLE_STRIPES ? true : false;
+static bool                 g_block_stripes_checked  = HIFS_DEBUG_DISABLE_STRIPES ? true : false;
 
 struct raft_log_state {
     struct RaftCmd *entries;
@@ -294,14 +297,32 @@ commitCb(struct uv_raft *raft,
         /////// FOR TESTING PURPOSES ONLY //////////////////////////
         hg_kv_apply_put_block(&cmd.u.block); /////TESTING ONLY/////
         ////////////////////////////////////////////////////////////
-        struct stripe_location locs[HIFS_EC_STRIPES];
-        for (size_t i = 0; i < HIFS_EC_STRIPES; ++i) {
-            locs[i].stripe_index = i;
-            locs[i].storage_node_id = cmd.u.block.ec_stripes[i].storage_node_id;
-            locs[i].shard_id = cmd.u.block.ec_stripes[i].shard_id;
-            locs[i].estripe_id = cmd.u.block.ec_stripes[i].estripe_id;
-            locs[i].block_offset = cmd.u.block.ec_stripes[i].block_offset;
+
+        if (!g_block_stripes_checked) {
+#if HIFS_DEBUG_DISABLE_STRIPES
+            g_block_stripes_disabled = true;
+#else
+            const char *env = getenv("HIVE_GUARD_DISABLE_STRIPES");
+            if (env && (*env == '1' || *env == 'y' || *env == 'Y' ||
+                        *env == 't' || *env == 'T')) {
+                g_block_stripes_disabled = true;
+                fprintf(stderr,
+                        "hive_guard: block stripe persistence disabled via HIVE_GUARD_DISABLE_STRIPES\n");
+            }
+#endif
+            g_block_stripes_checked = true;
         }
+
+#if !HIFS_DEBUG_DISABLE_STRIPES
+        if (!g_block_stripes_disabled) {
+            struct stripe_location locs[HIFS_EC_STRIPES];
+            for (size_t i = 0; i < HIFS_EC_STRIPES; ++i) {
+                locs[i].stripe_index = i;
+                locs[i].storage_node_id = cmd.u.block.ec_stripes[i].storage_node_id;
+                locs[i].shard_id = cmd.u.block.ec_stripes[i].shard_id;
+                locs[i].estripe_id = cmd.u.block.ec_stripes[i].estripe_id;
+                locs[i].block_offset = cmd.u.block.ec_stripes[i].block_offset;
+            }
 
         // TODO:
         //NO! This test is not actually right! It will just loop 6 times on every node
@@ -313,13 +334,15 @@ commitCb(struct uv_raft *raft,
             // Commented out for testing purposes only.
             //hg_kv_apply_put_block(storage_node_id, &cmd.u.block); 
 
-            hifs_store_block_to_stripe_locations(cmd.u.block.volume_id,
-                                            cmd.u.block.block_no,
-                                            cmd.u.block.hash_algo,
-                                            cmd.u.block.hash,
-                                            locs,
-                                            HIFS_EC_STRIPES);
+                hifs_store_block_to_stripe_locations(cmd.u.block.volume_id,
+                                                cmd.u.block.block_no,
+                                                cmd.u.block.hash_algo,
+                                                cmd.u.block.hash,
+                                                locs,
+                                                HIFS_EC_STRIPES);
+            }
         }
+#endif
         
         hifs_guard_notify_write_ack(cmd.u.block.volume_id,
                                     cmd.u.block.block_no,
@@ -329,8 +352,20 @@ commitCb(struct uv_raft *raft,
     }
     case HG_OP_PUT_DIRENT: {
         const struct RaftPutDirent *pd = &cmd.u.dirent;
-        if (!hifs_volume_dentry_store(pd->volume_id,
-                                      (const struct hifs_volume_dentry *)&pd->dirent))
+        struct hifs_volume_dentry dent = {0};
+        uint32_t name_len = pd->dirent.name_len;
+
+        if (name_len > HIFS_MAX_NAME_SIZE)
+            name_len = HIFS_MAX_NAME_SIZE;
+
+        dent.de_parent = pd->dir_id;
+        dent.de_inode = pd->dirent.inode_nr;
+        dent.de_epoch = (uint32_t)(pd->version & 0xffffffffu);
+        dent.de_type = 0;
+        dent.de_name_len = name_len;
+        memcpy(dent.de_name, pd->dirent.name, name_len);
+
+        if (!hifs_volume_dentry_store(pd->volume_id, &dent))
             return -EIO;
         return 0;
     }

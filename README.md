@@ -1,26 +1,35 @@
 # hiveFS
-A Hive Mind Filesystem
 
-HiveFS is hive mind filesystem for physical Linux, (Windows?) and VMWare/Nutanix/Cloud datastore.
 
-(This project is still in development.)
+### HiveFS is a hive mind filesystem for [physical Linux, (Windows?), and VMWare/Nutanix/Cloud datastore].
+(In this case, hive mind means software defined storage with a thin clustering layer that still uses
+ a global state machine to keep metadata in sync across the entire cluster without replication. It
+ focuses on virtualization support and not on clustering setup/technology.)
 
-What is a hive mind filesystem? There is no better or more descriptive way to describe HiveFS than
-in saying it is a full hypervisor that lives in the O/S layer for backend storage. Everything is
-virtualized now. Why not the filesystem too? HiveFS is virtual in the sense that the local kernel 
-believes it is mounting physical storage, while in reality, it is actually managing any number of 
-remotely managed filesystems, all completely virtual. But we're getting ahead of ourselves. See,
+
+**(This project is still in development. See [Status.md](./status.md))**
+
+
+## What is HiveFS, A Hive Mind Filesystem
+
+There is no better or more descriptive way to describe HiveFS than to say it is a full storage 
+component layer that spans from backend storage cluster all the way to a client hypervisor that 
+lives in the O/S layer to address backend storage. Why not virtualize the filesystem? The HiveFS 
+kernel module is virtual in the sense that the local kernel believes it is mounting physical storage, 
+while in reality, it is actually managing any number of remotely managed filesystems: all remote,
+wrapped with an easy-to-manage package and all virtual. But we're getting ahead of ourselves. See,
 this is somewhat of a bold statemnt, but it comes from what HiveFS actually is. Clustered filesystems
 use raft consensus to write data and control locking. In the engineering world, Software Defined
 storage is a superset of clustered filesystems which enables some vitualized components. This is 
 what HiveFS is, software defined storage, but in addition, it is slightly more unusual than 
 traditional SDS in that its main virtualization component is a kernel driver that tricks the O/S 
 kernel into thinking it's only one local disk, when it's actually many remote network-based 
-filesystems in the same style as traditional SDS. On the backend, all data is stored in one global 
-virtual de-dupe pool. In addition, SDS usually is a single tree design shared between many servers. 
-HiveFS has a global tree with branches that represent shared filesystems, hosts, and other virtual 
-entities. (This layer doesn't actually exist anywhere except conceptually.) Under hosts, a 
-filesystem may be dedicated to that host, shared between many hosts, or junctioned partially from 
+filesystems in the same style as traditional SDS and storage arrays. On the backend, all data is 
+stored in one global virtual de-dupe pool. In addition, SDS usually is a single tree design shared 
+between many servers. HiveFS's first three layers on it's global tree is virtual, representing the
+machines which connect to the storage, shared filesystems, and filesystem attached to single machines.
+(This layer doesn't actually exist anywhere except conceptually & in the GUI.) Under hosts, a 
+filesystem may be dedicated to that host, shared between many hosts, or junctioned in part or full from 
 one host to another. No data has to be SAN mounted. It's recommended to have a small local cache on 
 SSD disk to make sure remote speed is no slower than local speed. Traditional SDS has a single global 
 cache, while HiveFS's local client cache makes a large percentage of reads extremely fast. This pairs
@@ -36,8 +45,10 @@ protocol, like any local filesystem, but with an additional node or nodes, it ca
 and object stores (see below). It was not originally designed to do everything internally, however. 
 It focuses on doing one thing well, block storage over network.
 
+### Components:
+
 There are 3 required and one optional companents to the "Hive" in general:
-1. The central "Hive" is one or more server(s), storage appliances, installed via ISO image. 
+1. The central "Hive" is one or more server(s) (storage appliances/nodes) installed via ISO image. 
    The ISO install will setup an embedded linux system and configure all storage behind the node
    for use as a blob of storage in the hive. From that point the storage can be managed without
    any traditional storage management (such as zoning, lun management, etc) since it is a
@@ -56,7 +67,10 @@ There are 3 required and one optional companents to the "Hive" in general:
    nodes and operate degradaded, but still retain viability.) Backend storage can be anything that 
    appears locally attached but the hive is tuned specifically for SSD (especially NVME). HSD is not 
    recommended. It uses a high-speed key/value store for de-dupe that is extremely fast as configured
-   and backed by SSD.
+   and backed by SSD. Storage Nodes run this software:
+         1. Hive_Guard: a program that runs the cluster & acts as security.
+         2. API Backend: All Rest-driver interface to internal data.
+         3. Web-based GUI for managing the Hive (storage Nodes).
 
 2. HiveFS is a kernel module that takes a small local disk and builds a superblock on it and cache.
    The superblock allows the FS to load and then points it to the central hive for inode data. A small 
@@ -94,6 +108,7 @@ There are 3 required and one optional companents to the "Hive" in general:
    prioritize its own function first.
 
 
+### Cloud Support
 Like any virtualization, HiveFS is designed by architecture to easily expand across a hybrid cloud or 
 multi-cloud setup by using local or cloud-vendor based SSD block storage and the hive can be installed 
 into virtual machines in any cloud. The clients do not need to be local to the hive install, however, 
@@ -107,6 +122,7 @@ node). However, whether you have 3 nodes or twenty, at least 3 copies of all dat
 split-writes across the nodes (the number of copies is cofigurable from 3+ or replication for 2). Single copy 
 is possible for small global filesystems and supported but carries the risk of loss of data, so is prefereable
 only for test environments.
+
 
 File versioning. A file can have a configurable number of historical copies as a backup method to go back to 
 previous versions of that file/dir. Replication covers large-scale outages, so traditional backup is built-in 

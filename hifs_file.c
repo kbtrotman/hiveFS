@@ -11,6 +11,8 @@
 #include <linux/uaccess.h>
 #include <linux/math64.h>
 #include <linux/uio.h>
+#include <linux/limits.h>
+#include <linux/string.h>
 
 struct hifs_write_desc {
 	uint64_t block_no;
@@ -164,7 +166,6 @@ ssize_t hifs_read(struct kiocb *iocb, struct iov_iter *to)
 	struct super_block *sb;
 	struct inode *inode;
 	struct hifs_inode *hiinode;
-	void *user_buf = to->__iov->iov_base;
 	size_t count = iov_iter_count(to);
 	size_t done = 0;
 	loff_t off = iocb->ki_pos;
@@ -205,9 +206,7 @@ ssize_t hifs_read(struct kiocb *iocb, struct iov_iter *to)
 			hifs_warning("dedupe rehydrate returned %d for block %llu",
 				     dedupe_ret, (unsigned long long)phys);
 
-		if (copy_to_user((char *)user_buf + done,
-				 bh->b_data + block_off,
-				 chunk)) {
+		if (copy_to_iter(bh->b_data + block_off, chunk, to) != chunk) {
 			brelse(bh);
 			return -EFAULT;
 		}
@@ -280,58 +279,66 @@ ssize_t hifs_write(struct kiocb *iocb, struct iov_iter *from)
 
 		while (count > 0) {
 			size_t chunk;
+			uint32_t block_off = off % block_size;
+			bool need_existing;
+			bool zero_fill = false;
 
-			if (hifs_fetch_block(sb, boff) < 0) {
-				bh = sb_bread(sb, boff);
-			if (!bh)
-				return -EIO;
-			memset(bh->b_data, 0, block_size);
-		} else {
+			chunk = min_t(size_t, block_size - block_off, count);
+			need_existing = (block_off != 0) || (chunk != block_size);
+			/* Partial updates require existing bytes; full blocks do not. */
+
+			if (need_existing) {
+				if (hifs_fetch_block(sb, boff) < 0)
+					zero_fill = true;
+			}
+
 			bh = sb_bread(sb, boff);
-		}
-		if (!bh) {
-			printk(KERN_ERR "Failed to read data block %zu\n", boff);
-			break;
-		}
+			if (!bh) {
+				printk(KERN_ERR "Failed to read data block %zu\n", boff);
+				break;
+			}
+			if (zero_fill)
+				memset(bh->b_data, 0, block_size);
 
-		chunk = min_t(size_t, block_size - (off % block_size), count);
+			buffer = bh->b_data + block_off;
+			if (!copy_from_iter_full(buffer, chunk, from)) {
+				brelse(bh);
+				return -EFAULT;
+			}
 
-		buffer = bh->b_data + (off % block_size);
-		if (!copy_from_iter_full(buffer, chunk, from)) {
-			brelse(bh);
-			return -EFAULT;
-		}
+			hash_algo = HIFS_HASH_ALGO_NONE;
+			dedupe_ret = hifs_dedupe_writes(sb, boff, bh->b_data,
+							block_size, block_hash,
+							&hash_algo);
+			if (dedupe_ret)
+				hifs_warning("dedupe placeholder returned %d for block %zu", dedupe_ret, boff);
 
-		hash_algo = HIFS_HASH_ALGO_NONE;
-		dedupe_ret = hifs_dedupe_writes(sb, boff, bh->b_data,
-						block_size, block_hash,
-						&hash_algo);
-		if (dedupe_ret)
-			hifs_warning("dedupe placeholder returned %d for block %zu", dedupe_ret, boff);
+			hifs_cache_mark_present(sb, boff);
+			hifs_cache_mark_dirty(sb, boff);
+			hifs_cache_mark_inode(sb, dinode->i_ino);
 
-		hifs_cache_mark_present(sb, boff);
-		hifs_cache_mark_dirty(sb, boff);
-		hifs_cache_mark_inode(sb, dinode->i_ino);
+			block_index = div64_u64((u64)off, block_size);
+			if (block_index >= HIFS_MAX_BLOCK_HASHES) {
+				memmove(dinode->i_block_fingerprints,
+					dinode->i_block_fingerprints + 1,
+					(HIFS_MAX_BLOCK_HASHES - 1) *
+					sizeof(dinode->i_block_fingerprints[0]));
+				hash_slot = HIFS_MAX_BLOCK_HASHES - 1;
+				if (dinode->i_hash_reserved != UINT16_MAX)
+					dinode->i_hash_reserved++;
+			} else {
+				hash_slot = (size_t)block_index;
+			}
 
-		block_index = div64_u64((u64)off, block_size);
-		if (block_index >= HIFS_MAX_BLOCK_HASHES) {
-			hifs_warning("block index %llu exceeds hash capacity for inode %llu",
-				     (unsigned long long)block_index,
-				     (unsigned long long)dinode->i_ino);
-			hash_slot = HIFS_MAX_BLOCK_HASHES - 1;
-		} else {
-			hash_slot = (size_t)block_index;
-		}
-
-		{
-			struct hifs_block_fingerprint *fp = &dinode->i_block_fingerprints[hash_slot];
-			memset(fp, 0, sizeof(*fp));
-			fp->block_no = (uint32_t)boff;
-			memcpy(fp->hash, block_hash, HIFS_BLOCK_HASH_SIZE);
-			fp->hash_algo = (uint8_t)hash_algo;
-		}
-		dinode->i_hash_count = max_t(uint16_t, dinode->i_hash_count,
-					     (uint16_t)(hash_slot + 1));
+			{
+				struct hifs_block_fingerprint *fp = &dinode->i_block_fingerprints[hash_slot];
+				memset(fp, 0, sizeof(*fp));
+				fp->block_no = (uint32_t)boff;
+				memcpy(fp->hash, block_hash, HIFS_BLOCK_HASH_SIZE);
+				fp->hash_algo = (uint8_t)hash_algo;
+			}
+			dinode->i_hash_count = max_t(uint16_t, dinode->i_hash_count,
+						     (uint16_t)(hash_slot + 1));
 
 			mark_buffer_dirty(bh);
 			sync_dirty_buffer(bh);
@@ -401,6 +408,8 @@ ssize_t hifs_write(struct kiocb *iocb, struct iov_iter *from)
 		loff_t new_size = max_t(loff_t, (loff_t)dinode->i_size, off);
 		dinode->i_size = (uint32_t)new_size;
 		dinode->i_bytes = dinode->i_size;
+		i_size_write(inode, new_size);
+		inode->i_blocks = dinode->i_blocks;
 	}
 
 	hifs_store_inode(sb, dinode);

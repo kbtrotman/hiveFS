@@ -380,6 +380,7 @@ int hg_kv_apply_put_block(const struct RaftPutBlock *cmd)
 			       vb_key, vb_key_len,
 			       (const char *)&vb, sizeof(vb));
 
+#if !HIFS_DEBUG_DISABLE_STRIPES
 	for (size_t i = 0; i < HIFS_EC_STRIPES; ++i) {
 		struct EstripeLoc loc = {
 			.shard_id = cmd->ec_stripes[i].shard_id,
@@ -393,6 +394,7 @@ int hg_kv_apply_put_block(const struct RaftPutBlock *cmd)
 				       es_key, es_key_len,
 				       (const char *)&loc, sizeof(loc));
 	}
+#endif
 
 	char *err = NULL;
 	rocksdb_writeoptions_t *wopt = rocksdb_writeoptions_create();

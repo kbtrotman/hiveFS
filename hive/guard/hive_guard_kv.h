@@ -32,7 +32,7 @@ struct Estripes {
 };
 struct H2SEntry {
     uint64_t ref_count;
-    uint64_t estripe_ids[6];
+    uint64_t estripe_ids[HIFS_EC_STRIPES];
     uint8_t  has_backup_hash;
     uint8_t  reserved[7];
     uint8_t  block_bck_hash[32];

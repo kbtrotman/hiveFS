@@ -24,6 +24,7 @@
 #include "hive_guard_sql.h"
 #include "../../hifs_shared_defs.h"
 #include <endian.h>
+#include <string.h>
 #include <limits.h>
 #include <errno.h>
 #include <pthread.h>
@@ -1017,8 +1018,24 @@ static bool handle_volume_dentry_store(Client *c, const JVal *root)
 		free(blob);
 		return send_error_json(c->fd, "bad_request", "payload size mismatch");
 	}
-	bool ok = hifs_volume_dentry_store(volume_id,
-					   (const struct hifs_volume_dentry *)blob);
+
+	struct hifs_volume_dentry raw = {0};
+	memcpy(&raw, blob, sizeof(raw));
+
+	struct hifs_volume_dentry dent = {0};
+	dent.de_flags = le32toh(raw.de_flags);
+	dent.de_parent = le64toh(raw.de_parent);
+	dent.de_inode = le64toh(raw.de_inode);
+	dent.de_epoch = le32toh(raw.de_epoch);
+	dent.de_type = le32toh(raw.de_type);
+
+	uint32_t name_len = le32toh(raw.de_name_len);
+	if (name_len > HIFS_MAX_NAME_SIZE)
+		name_len = HIFS_MAX_NAME_SIZE;
+	dent.de_name_len = name_len;
+	memcpy(dent.de_name, raw.de_name, name_len);
+
+	bool ok = hifs_volume_dentry_store(volume_id, &dent);
 	free(blob);
 	if (!ok)
 		return send_error_json(c->fd, "db_error", "unable to store dentry");
