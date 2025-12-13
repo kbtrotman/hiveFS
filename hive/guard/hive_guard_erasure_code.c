@@ -9,6 +9,7 @@
 // hifs_erasure.c
 
 #include <errno.h>
+#include <stdbool.h>
 #include <rocksdb/c.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -23,13 +24,48 @@
 
 
 static ec_ctx_t g_ec = { .desc = -1, .initialized = 0 };
+static bool g_ec_fallback = false;
+static bool g_ec_disabled = HIFS_DEBUG_DISABLE_EC ? true : false;
+static bool g_ec_disable_checked = HIFS_DEBUG_DISABLE_EC ? true : false;
+static bool g_ec_warning_emitted = false;
 int last_node_in_cascade;
 int cascade_length;
 
 /* ======================= Internal helpers ======================= */
 
+static void hifs_ec_check_disable_flag(void)
+{
+    if (g_ec_disable_checked)
+        return;
+    g_ec_disable_checked = true;
+    if (HIFS_DEBUG_DISABLE_EC) {
+        g_ec_disabled = true;
+        g_ec_fallback = true;
+        fprintf(stderr, "hivefs: Erasure coding disabled via HIFS_DEBUG_DISABLE_EC\n");
+        return;
+    }
+    const char *env = getenv("HIVE_GUARD_DISABLE_EC");
+    if (env && (*env == '1' || *env == 'y' || *env == 'Y' || *env == 't' || *env == 'T')) {
+        g_ec_disabled = true;
+        g_ec_fallback = true;
+        fprintf(stderr, "hivefs: Erasure coding disabled via HIVE_GUARD_DISABLE_EC\n");
+    }
+}
+
 static int hicomm_ec_ensure_initialized(size_t k, size_t m, size_t w, int checksum)
 {
+#if HIFS_DEBUG_DISABLE_EC
+    (void)k; (void)m; (void)w; (void)checksum;
+    return 0;
+#endif
+    hifs_ec_check_disable_flag();
+
+    if (g_ec_disabled)
+        return 0;
+
+    if (g_ec_fallback)
+        return 0;
+
     if (g_ec.initialized) {
         /* Reuse if params match; otherwise re-init */
         if (g_ec.k == k && g_ec.m == m && g_ec.w == w && g_ec.checksum == checksum)
@@ -42,8 +78,12 @@ static int hicomm_ec_ensure_initialized(size_t k, size_t m, size_t w, int checks
 
     ec_backend_id_t backend = EC_BACKEND_ISA_L_RS_VAND;
     if (!liberasurecode_backend_available(backend)) {
-        fprintf(stderr, "ISA-L backend not available (plugin or isa-l missing?)\n");
-        return -1;
+        if (!g_ec_warning_emitted) {
+            fprintf(stderr, "ISA-L backend not available (plugin or isa-l missing?)\n");
+            g_ec_warning_emitted = true;
+        }
+        g_ec_fallback = true;
+        return 0;
     }
 
     struct ec_args args = {0};
@@ -55,8 +95,12 @@ static int hicomm_ec_ensure_initialized(size_t k, size_t m, size_t w, int checks
 
     int desc = liberasurecode_instance_create(backend, &args);
     if (desc <= 0) {
-        fprintf(stderr, "liberasurecode_instance_create failed\n");
-        return -1;
+        if (!g_ec_warning_emitted) {
+            fprintf(stderr, "liberasurecode_instance_create failed\n");
+            g_ec_warning_emitted = true;
+        }
+        g_ec_fallback = true;
+        return 0;
     }
 
     g_ec.desc      = desc;
@@ -78,16 +122,118 @@ int hifs_ec_ensure_init(void)
 
 int hicomm_erasure_coding_init(void)
 {
+#if HIFS_DEBUG_DISABLE_EC
+    fprintf(stderr, "hivefs: Erasure coding disabled via HIFS_DEBUG_DISABLE_EC\n");
+    return 0;
+#endif
     return hifs_ec_ensure_init();
 }
 
 int hicomm_erasure_coding_cleanup(void)
 {
+#if HIFS_DEBUG_DISABLE_EC
+    return 0;
+#endif
+    if (g_ec_fallback) {
+        g_ec_fallback = false;
+        return 0;
+    }
     if (!g_ec.initialized) return 0;
     liberasurecode_instance_destroy(g_ec.desc);
     g_ec.desc = -1;
     g_ec.initialized = 0;
     return 0;
+}
+
+static int fallback_encode(const uint8_t *data, size_t data_len,
+                           uint8_t **encoded_chunks, size_t *chunk_size)
+{
+    const size_t total = HIFS_EC_K + HIFS_EC_M;
+
+    for (size_t i = 0; i < total; ++i) {
+        encoded_chunks[i] = (uint8_t *)malloc(data_len);
+        if (!encoded_chunks[i]) {
+            for (size_t j = 0; j < i; ++j) {
+                free(encoded_chunks[j]);
+                encoded_chunks[j] = NULL;
+            }
+            return -1;
+        }
+        memcpy(encoded_chunks[i], data, data_len);
+    }
+
+    *chunk_size = data_len;
+    return 0;
+}
+
+static int fallback_decode_common(uint8_t **encoded_chunks,
+                                  size_t chunk_size,
+                                  uint8_t *decoded_data,
+                                  size_t *data_len)
+{
+    const size_t total = HIFS_EC_K + HIFS_EC_M;
+    uint8_t *src = NULL;
+
+    for (size_t i = 0; i < total; ++i) {
+        if (encoded_chunks[i]) {
+            src = encoded_chunks[i];
+            break;
+        }
+    }
+
+    if (!src)
+        return -1;
+
+    if (*data_len < chunk_size) {
+        *data_len = chunk_size;
+        return -2;
+    }
+
+    memcpy(decoded_data, src, chunk_size);
+    *data_len = chunk_size;
+    return 0;
+}
+
+static bool hifs_ec_build_plain_stripes(const uint8_t *buf, uint32_t len,
+                                        enum hifs_hash_algorithm algo,
+                                        struct hifs_ec_stripe_set *out)
+{
+    const size_t total = HIFS_EC_K + HIFS_EC_M;
+
+    if (!buf || !out || len == 0 || len > HIFS_DEFAULT_BLOCK_SIZE)
+        return false;
+    if (algo != HIFS_HASH_ALGO_SHA256) {
+        hifs_warning("Unsupported hash algorithm %u", (unsigned)algo);
+        return false;
+    }
+
+    memset(out, 0, sizeof(*out));
+
+    out->chunks = calloc(total, sizeof(uint8_t *));
+    if (!out->chunks)
+        return false;
+
+    for (size_t i = 0; i < total; ++i) {
+        out->chunks[i] = (uint8_t *)malloc(len);
+        if (!out->chunks[i]) {
+            for (size_t j = 0; j < i; ++j)
+                free(out->chunks[j]);
+            free(out->chunks);
+            memset(out, 0, sizeof(*out));
+            return false;
+        }
+        memcpy(out->chunks[i], buf, len);
+    }
+
+    out->chunk_count = total;
+    out->chunk_len = len;
+    out->hash_algo = algo;
+
+    unsigned char digest[SHA256_DIGEST_LENGTH];
+    SHA256(buf, len, digest);
+    memcpy(out->hash, digest, sizeof(out->hash));
+
+    return true;
 }
 
 /*
@@ -112,7 +258,12 @@ int hicomm_erasure_coding_encode(const uint8_t *data, size_t data_len,
         return -1;
     }
 
+#if HIFS_DEBUG_DISABLE_EC
+    return fallback_encode(data, data_len, encoded_chunks, chunk_size);
+#endif
     if (hifs_ec_ensure_init() != 0) return -1;
+    if (g_ec_fallback)
+        return fallback_encode(data, data_len, encoded_chunks, chunk_size);
 
     char **data_frags = NULL, **parity_frags = NULL;
     uint64_t frag_len = 0;
@@ -160,7 +311,12 @@ int hicomm_erasure_coding_decode(uint8_t **encoded_chunks, size_t chunk_size,
                 num_data_chunks, num_parity_chunks, HIFS_EC_K, HIFS_EC_M);
         return -1;
     }
+#if HIFS_DEBUG_DISABLE_EC
+    return fallback_decode_common(encoded_chunks, chunk_size, decoded_data, data_len);
+#endif
     if (hifs_ec_ensure_init() != 0) return -1;
+    if (g_ec_fallback)
+        return fallback_decode_common(encoded_chunks, chunk_size, decoded_data, data_len);
 
     const size_t total = HIFS_EC_K + HIFS_EC_M;
 
@@ -210,7 +366,12 @@ int hicomm_erasure_coding_rebuild_from_partial(uint8_t **encoded_chunks, size_t 
                 num_data_chunks, num_parity_chunks, HIFS_EC_K, HIFS_EC_M);
         return -1;
     }
+#if HIFS_DEBUG_DISABLE_EC
+    return fallback_decode_common(encoded_chunks, chunk_size, decoded_data, data_len);
+#endif
     if (hifs_ec_ensure_init() != 0) return -1;
+    if (g_ec_fallback)
+        return fallback_decode_common(encoded_chunks, chunk_size, decoded_data, data_len);
 
     const size_t total = HIFS_EC_K + HIFS_EC_M;
     char **available = (char **)calloc(total, sizeof(char *));
@@ -277,6 +438,9 @@ bool hifs_volume_block_ec_encode(const uint8_t *buf, uint32_t len,
 				 enum hifs_hash_algorithm algo,
 				 struct hifs_ec_stripe_set *out)
 {
+#if HIFS_DEBUG_DISABLE_EC
+	return hifs_ec_build_plain_stripes(buf, len, algo, out);
+#else
 	const size_t total = HIFS_EC_K + HIFS_EC_M;
 	uint8_t *encoded_chunks[HIFS_EC_K + HIFS_EC_M] = {0};
 	size_t frag_size = 0;
@@ -296,10 +460,15 @@ bool hifs_volume_block_ec_encode(const uint8_t *buf, uint32_t len,
 		return false;
 	}
 
+	if (g_ec_disabled || g_ec_fallback)
+		return hifs_ec_build_plain_stripes(buf, len, algo, out);
+
 	if (hicomm_erasure_coding_encode(buf, len, encoded_chunks,
 					 &frag_size, HIFS_EC_K, HIFS_EC_M) != 0) {
 		hifs_warning("EC encode failed");
-		goto fail;
+		for (size_t i = 0; i < total; ++i)
+			free(encoded_chunks[i]);
+		return hifs_ec_build_plain_stripes(buf, len, algo, out);
 	}
 
 	out->chunks = calloc(total, sizeof(uint8_t *));
@@ -327,6 +496,7 @@ fail:
 	free(out->chunks);
 	memset(out, 0, sizeof(*out));
 	return false;
+#endif
 }
 
 void hifs_volume_block_ec_free(struct hifs_ec_stripe_set *ec)

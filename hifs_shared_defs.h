@@ -44,6 +44,21 @@
 /* FS Layout version/schema */
 #define HIFS_LAYOUT_VER		1
 
+/* Debug / temporary feature flags */
+#ifndef HIFS_DEBUG_DISABLE_EC
+#define HIFS_DEBUG_DISABLE_EC 1
+#endif
+#ifndef HIFS_DEBUG_DISABLE_STRIPES
+#define HIFS_DEBUG_DISABLE_STRIPES 1
+#endif
+
+/* Erasure coding profile shared with hive_guard */
+#define HIFS_EC_K         4
+#define HIFS_EC_M         2
+#define HIFS_EC_W         6
+#define HIFS_EC_CHECKSUM  CHKSUM_CRC32
+#define HIFS_EC_STRIPES  (HIFS_EC_K + HIFS_EC_M)
+
 /******************************
  * Queue Management Structures
  ******************************/

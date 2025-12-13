@@ -22,3 +22,21 @@ class Storage_Nodes(models.Model):
     class Meta:
         managed = False
         db_table = 'v_nodes'
+        
+class Storage_Node_Stats(models.Model):        
+    node_id = models.IntegerField(primary_key=True)
+    s_ts = models.DateTimeField()
+    cpu = models.IntegerField(null=True)
+    read_iops = models.IntegerField(null=True)
+    write_iops = models.IntegerField(null=True)
+    total_iops = models.IntegerField(null=True)
+    t_throughput = models.IntegerField(null=True)
+    c_net_in = models.IntegerField(null=True)
+    c_net_out = models.IntegerField(null=True)
+    s_net_in = models.IntegerField(null=True)
+    s_net_out = models.IntegerField(null=True)
+    avg_latency = models.IntegerField(null=True)
+
+    class Meta:
+        managed = False
+        db_table = 'v_sn_stats'

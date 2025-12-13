@@ -74,7 +74,7 @@ struct RaftPutBlock {
     uint64_t  block_no;
     uint64_t  version;
     uint8_t   hash[32];             /* SHA-256 of block */
-    struct StripeId ec_stripes[6];  /* 4 data + 2 parity or whatever profile */
+    struct StripeId ec_stripes[HIFS_EC_STRIPES];
 };
 
 struct RaftPutInode {

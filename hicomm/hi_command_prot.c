@@ -519,6 +519,8 @@ int hicomm_handle_command(int fd, const struct hifs_cmds *cmd)
 				hifs_info("hifs_dentry lookup miss volume=%" PRIu64
 					  " parent=%" PRIu64 " name=%s",
 					  volume_id, parent_no, name_hex);
+				msg_reply.dentry.de_inode = htole64(0);
+				msg_reply.dentry.de_flags = htole32(HIFS_DENTRY_MSGF_REQUEST);
 			}
 			save_local = true;
 		}

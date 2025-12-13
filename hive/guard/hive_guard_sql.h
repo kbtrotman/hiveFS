@@ -116,6 +116,10 @@
 	"FROM volume_dentries WHERE volume_id=%llu AND de_parent=%llu " \
 	"AND de_name=UNHEX('%.*s') LIMIT 1"
 
+#define SQL_DENTRY_DELETE_BY_NAME \
+	"DELETE FROM volume_dentries WHERE volume_id=%llu AND de_parent=%llu " \
+	"AND de_name=UNHEX('%.*s')"
+
 #define SQL_DENTRY_UPSERT \
 	"INSERT INTO volume_dentries " \
 	"(volume_id, de_parent, de_inode, de_epoch, de_type, de_name_len, de_name) " \

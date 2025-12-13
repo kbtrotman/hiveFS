@@ -22,7 +22,7 @@ from settings.views import SettingsRootView
 from audit.views import AuditRootView
 from monitor.views import MonitorRootView
 from tenant.views import TenantRootView
-from nodes.views import StorageNodeViewSet
+from nodes.views import StorageNodeViewSet, StorageNodeStatViewSet
 
 router = DefaultRouter(trailing_slash=False)
 #router.register(r'groups', GroupViewSet, basename='group')
@@ -32,7 +32,7 @@ router.register(r'audit', AuditRootView, basename='audit')
 router.register(r'monitor', MonitorRootView, basename='monitor')
 router.register(r'tenant', TenantRootView, basename='tenant')
 router.register(r'nodes', StorageNodeViewSet, basename='nodes')
-
+router.register(r'snstats', StorageNodeViewSet, basename='snstats')
 
 urlpatterns = [
     path("api/v1/", include(router.urls)),

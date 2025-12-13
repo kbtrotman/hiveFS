@@ -83,6 +83,21 @@ CREATE TABLE IF NOT EXISTS storage_nodes (
     ON DELETE RESTRICT
 ) ENGINE=InnoDB;
 
+CREATE TABLE IF NOT EXISTS storage_node_stats (
+  node_id INT UNSIGNED PRIMARY KEY,
+  s_ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  cpu INT UNSIGNED,
+  read_iops INT UNSIGNED,
+  write_iops INT UNSIGNED,
+  total_iops INT UNSIGNED,
+  t_throughput INT UNSIGNED,
+  c_net_in INT UNSIGNED,
+  c_net_out INT UNSIGNED,
+  s_net_in INT UNSIGNED,
+  s_net_out INT UNSIGNED,
+  avg_latency INT UNSIGNED,
+) ENGINE=InnoDB;
+
 CREATE TABLE IF NOT EXISTS shard_map (
   shard_id INT UNSIGNED PRIMARY KEY,
   node_id INT UNSIGNED NOT NULL,
@@ -312,6 +327,7 @@ CREATE OR REPLACE VIEW v_inodes   AS SELECT * FROM hive_meta.volume_inodes;
 CREATE OR REPLACE VIEW v_roots    AS SELECT * FROM hive_meta.volume_root_dentries;
 CREATE OR REPLACE VIEW v_nodes    AS SELECT * FROM hive_meta.storage_nodes;
 CREATE OR REPLACE VIEW v_stats    AS SELECT * FROM hive_meta.volume_stats;
+CREATE OR REPLACE VIEW v_sn_stats    AS SELECT * FROM hive_meta.storage_node_stats;
 
 -- Virtual nodes for GUI
 CREATE TABLE IF NOT EXISTS ui_virtual_node (

@@ -1150,6 +1150,7 @@ bool hifs_volume_dentry_store(uint64_t volume_id,
 				 const struct hifs_volume_dentry *dent)
 {
 	char sql_query[MAX_QUERY_SIZE];
+	char delete_query[MAX_QUERY_SIZE];
 	char name_hex[HIFS_MAX_NAME_SIZE * 2 + 1];
 	uint32_t name_len;
 
@@ -1161,6 +1162,23 @@ bool hifs_volume_dentry_store(uint64_t volume_id,
 		name_len = HIFS_MAX_NAME_SIZE;
 	bytes_to_hex((const uint8_t *)dent->de_name, name_len, name_hex);
 
+	hifs_debug("volume_dentry_store: vol=%llu parent=%llu inode=%llu epoch=%u "
+		   "type=%u name_len=%u name_hex=%s",
+		   (unsigned long long)volume_id,
+		   (unsigned long long)dent->de_parent,
+		   (unsigned long long)dent->de_inode,
+		   dent->de_epoch,
+		   dent->de_type,
+		   dent->de_name_len,
+		   name_hex);
+
+	snprintf(delete_query, sizeof(delete_query), SQL_DENTRY_DELETE_BY_NAME,
+		 (unsigned long long)volume_id,
+		 (unsigned long long)dent->de_parent,
+		 (int)(name_len * 2),
+		 name_hex);
+	hifs_insert_sql(delete_query);
+
 	snprintf(sql_query, sizeof(sql_query), SQL_DENTRY_UPSERT,
 		 (unsigned long long)volume_id,
 		 (unsigned long long)dent->de_parent,
@@ -1170,7 +1188,12 @@ bool hifs_volume_dentry_store(uint64_t volume_id,
 		 dent->de_name_len,
 		 name_hex);
 
-	return hifs_insert_sql(sql_query);
+	bool ok = hifs_insert_sql(sql_query);
+	hifs_debug("volume_dentry_store: metadata write %s (affected=%llu last_id=%llu)",
+		   ok ? "succeeded" : "failed",
+		   (unsigned long long)sqldb.last_affected,
+		   (unsigned long long)sqldb.last_insert_id);
+	return ok;
 }
 
 bool hifs_volume_inode_load(uint64_t volume_id, uint64_t inode,
@@ -1298,6 +1321,24 @@ bool hifs_volume_inode_store(uint64_t volume_id,
 	hash_reserved = le16toh(inode->i_hash_reserved);
 	epoch = ctime;
 
+	hifs_debug("volume_inode_store: vol=%llu ino=%llu mode=%#x uid=%u gid=%u "
+		   "size=%u blocks=%u bytes=%u links=%u hash_count=%u epoch=%u "
+		   "name_hex=%s extent_start=[%u,%u,%u,%u] extent_count=[%u,%u,%u,%u]",
+		   (unsigned long long)volume_id,
+		   (unsigned long long)ino_host,
+		   mode,
+		   uid,
+		   gid,
+		   size,
+		   blocks,
+		   bytes,
+		   links,
+		   hash_count,
+		   epoch,
+		   name_hex,
+		   extent_start[0], extent_start[1], extent_start[2], extent_start[3],
+		   extent_count[0], extent_count[1], extent_count[2], extent_count[3]);
+
 	size_t sql_len = snprintf(NULL, 0, SQL_VOLUME_INODE_UPSERT,
 				  (unsigned long long)volume_id,
 				  (unsigned long long)ino_host,
@@ -1321,16 +1362,23 @@ bool hifs_volume_inode_store(uint64_t volume_id,
 		 extent_count[0], extent_count[1], extent_count[2], extent_count[3],
 		 blocks, bytes, links, hash_count, hash_reserved, epoch);
 
-	if (!hifs_insert_sql(sql_query)) {
-		free(sql_query);
-		return false;
-	}
+	bool insert_ok = hifs_insert_sql(sql_query);
+	hifs_debug("volume_inode_store: metadata write %s (affected=%llu last_id=%llu)",
+		   insert_ok ? "succeeded" : "failed",
+		   (unsigned long long)sqldb.last_affected,
+		   (unsigned long long)sqldb.last_insert_id);
 	free(sql_query);
+	if (!insert_ok)
+		return false;
 
-	if (!hifs_volume_inode_fp_sync(volume_id,
-				       ino_host,
-				       inode->i_block_fingerprints,
-				       hash_count))
+	bool fp_ok = hifs_volume_inode_fp_sync(volume_id,
+					       ino_host,
+					       inode->i_block_fingerprints,
+					       hash_count);
+	hifs_debug("volume_inode_store: fingerprint sync %s (hash_count=%u)",
+		   fp_ok ? "succeeded" : "failed",
+		   hash_count);
+	if (!fp_ok)
 		return false;
 
 	return true;
@@ -1818,6 +1866,23 @@ bool hifs_store_block_to_stripe_locations(uint64_t volume_id, uint64_t block_no,
 
 	bytes_to_hex(hash, HIFS_BLOCK_HASH_SIZE, hash_hex);
 
+	hifs_debug("store_block_to_stripe_locations: volume=%llu block=%llu hash_algo=%u hash=%s count=%zu",
+		   (unsigned long long)volume_id,
+		   (unsigned long long)block_no,
+		   hash_algo,
+		   hash_hex,
+		   count);
+	for (size_t i = 0; i < count; ++i) {
+		const struct stripe_location *loc = &locations[i];
+		hifs_debug("store_block_to_stripe_locations: stripe[%zu]=idx=%u node=%u shard=%u estripe=%llu offset=%llu",
+			   i,
+			   loc->stripe_index,
+			   loc->storage_node_id,
+			   loc->shard_id,
+			   (unsigned long long)loc->estripe_id,
+			   (unsigned long long)loc->block_offset);
+	}
+
 	used += snprintf(sql_query + used, sizeof(sql_query) - used,
 			 "INSERT INTO block_stripe_locations "
 			 "(volume_id, block_no, hash_algo, block_hash, stripe_index, "
@@ -1849,7 +1914,12 @@ bool hifs_store_block_to_stripe_locations(uint64_t volume_id, uint64_t block_no,
 			 "block_offset=VALUES(block_offset), "
 			 "ref_count=ref_count+1");
 
-	return hifs_insert_sql(sql_query);
+	bool ok = hifs_insert_sql(sql_query);
+	hifs_debug("store_block_to_stripe_locations: metadata write %s (affected=%llu last_id=%llu)",
+		   ok ? "succeeded" : "failed",
+		   (unsigned long long)sqldb.last_affected,
+		   (unsigned long long)sqldb.last_insert_id);
+	return ok;
 }
 
 static struct stripe_locations hifs_read_block_to_stripe_locations(uint64_t volume_id, uint64_t block_no,
