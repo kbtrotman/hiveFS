@@ -7,7 +7,7 @@
  focuses on virtualization support and not on clustering setup/technology.)
 
 
-**(This project is still in development. See [Status.md](./status.md))**
+**(This project is still in development. See [Status.md](https://github.com/kbtrotman/hiveFS/blob/main/Status.md))**
 
 
 ## What is HiveFS, A Hive Mind Filesystem
