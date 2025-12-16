@@ -4,38 +4,59 @@
  * Hive Mind Filesystem
  * By K. B. Trotman
  * License: GNU GPL as of 2023
- *
  */
 
- // hg_stats.c
+// hg_stats.c
 #include "hg_stats.h"
+#include "hive_guard_sql.h"
+
+#include <pthread.h>
+#include <errno.h>
 
 hg_stats_counters_t g_stats = {0};
 
-static inline uint64_t hg_now_ns(void) {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
+/* -------------------------
+ * Internal thread state
+ * ------------------------- */
+static pthread_t g_stats_thread;
+static atomic_bool g_stats_thread_running = ATOMIC_VAR_INIT(false);
+static atomic_bool g_stats_thread_stop    = ATOMIC_VAR_INIT(false);
+
+/* We keep node_id here so start() can set it once in case the thread is seprated.
+ * storage_node_id is referenced by hifs_store_stats() via your SQL layer. */
+static int g_stats_node_id = storage_node_id;
+
+/* -------------------------
+ * Small helpers
+ * ------------------------- */
+static inline uint64_t bytes_per_sec_to_mbps(uint64_t bps)
+{
+    // Mbps = (bytes/sec)*8 / 1,000,000
+    return (bps * 8ull) / 1000000ull;
 }
 
-static hg_stats_snapshot_t hg_stats_take_interval(void) {
+/* Take-and-reset only the counters you truly want “per interval” */
+static hg_stats_snapshot_t hg_stats_take_interval(void)
+{
     hg_stats_snapshot_t s = {0};
-    s.kv_putblock_calls   = atomic_exchange(&g_stats.kv_putblock_calls, 0);
-    s.kv_putblock_bytes   = atomic_exchange(&g_stats.kv_putblock_bytes, 0);
-    s.dedup_hits          = atomic_exchange(&g_stats.kv_putblock_dedup_hits, 0);
-    s.dedup_misses        = atomic_exchange(&g_stats.kv_putblock_dedup_misses, 0);
 
-    s.rocksdb_writes      = atomic_exchange(&g_stats.kv_rocksdb_writes, 0);
-    s.rocksdb_write_ns    = atomic_exchange(&g_stats.kv_rocksdb_write_ns, 0);
+    s.kv_putblock_calls = atomic_exchange(&g_stats.kv_putblock_calls, 0);
+    s.kv_putblock_bytes = atomic_exchange(&g_stats.kv_putblock_bytes, 0);
+    s.dedup_hits        = atomic_exchange(&g_stats.kv_putblock_dedup_hits, 0);
+    s.dedup_misses      = atomic_exchange(&g_stats.kv_putblock_dedup_misses, 0);
 
-    s.contig_calls        = atomic_exchange(&g_stats.contig_write_calls, 0);
-    s.contig_bytes        = atomic_exchange(&g_stats.contig_write_bytes, 0);
+    s.rocksdb_writes    = atomic_exchange(&g_stats.kv_rocksdb_writes, 0);
+    s.rocksdb_write_ns  = atomic_exchange(&g_stats.kv_rocksdb_write_ns, 0);
 
-    s.tcp_rx_bytes        = atomic_exchange(&g_stats.tcp_rx_bytes, 0);
-    s.tcp_tx_bytes        = atomic_exchange(&g_stats.tcp_tx_bytes, 0);
+    s.contig_calls      = atomic_exchange(&g_stats.contig_write_calls, 0);
+    s.contig_bytes      = atomic_exchange(&g_stats.contig_write_bytes, 0);
+
     return s;
 }
 
+/* -------------------------
+ * /proc readers (your existing code, unchanged)
+ * ------------------------- */
 
 static int read_cpu_stat(cpu_stat_t *s)
 {
@@ -96,6 +117,7 @@ static int hg_read_mem_info(uint64_t *used_kb, uint64_t *avail_kb)
 
 static int hg_read_loadavg(char *out, size_t len)
 {
+    (void)len;
     FILE *f = fopen("/proc/loadavg", "r");
     if (!f) return -1;
 
@@ -125,9 +147,8 @@ static uint64_t hg_loadavg_to_x100(const char *val)
         }
     }
 
-    if (frac_digits == 1) {
+    if (frac_digits == 1)
         frac *= 10;
-    }
 
     return whole * 100 + frac;
 }
@@ -161,22 +182,20 @@ static const char *hg_stats_net_iface(void)
 
     if (!iface || !iface[0]) {
         const char *env_iface = getenv("HG_STATS_NET_IFACE");
-        if (env_iface && env_iface[0])
-            iface = env_iface;
-        else
-            iface = "eth0";
+        iface = (env_iface && env_iface[0]) ? env_iface : "eth0";
     }
 
     return iface;
 }
 
 // Function to read disk statistics for a specific device
-int hg_read_disk_stats(const char* device, DiskStats* stats) {
+int hg_read_disk_stats(const char* device, DiskStats* stats)
+{
     FILE *fp;
     char line[256];
     char dev_name[32];
     int major, minor;
-    unsigned long long discard, discard_sectors, flush_requests, flush_time;
+    unsigned long long discard;
 
     fp = fopen(STATS_FILE, "r");
     if (fp == NULL) {
@@ -184,26 +203,24 @@ int hg_read_disk_stats(const char* device, DiskStats* stats) {
         return -1;
     }
 
-    // Iterate through lines until the desired device is found
     while (fgets(line, sizeof(line), fp) != NULL) {
-        // Use sscanf to parse the fields (there are more than 14, but we only need a few)
         if (sscanf(line, "%d %d %s %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu",
                    &major, &minor, dev_name,
                    &stats->reads_completed, &discard, &discard, &stats->time_spent_reading,
                    &stats->writes_completed, &discard, &discard, &stats->time_spent_writing,
                    &discard, &discard, &discard, &discard) >= 14) {
-            
+
             if (strcmp(dev_name, device) == 0) {
                 stats->total_ios = stats->reads_completed + stats->writes_completed;
                 fclose(fp);
-                return 0; // Success
+                return 0;
             }
         }
     }
 
     fclose(fp);
     fprintf(stderr, "Device %s not found in %s\n", device, STATS_FILE);
-    return -1; // Device not found
+    return -1;
 }
 
 int hg_compute_latest_stats(void)
@@ -274,9 +291,268 @@ int hg_compute_latest_stats(void)
     if (cur_net.tx >= prev_net.tx)
         tx_delta = cur_net.tx - prev_net.tx;
 
+    // bytes/sec for the storage-node NIC (from /proc/net/dev)
     atomic_store(&g_stats.s_net_in, rx_delta / INTERVAL_SEC);
     atomic_store(&g_stats.s_net_out, tx_delta / INTERVAL_SEC);
     prev_net = cur_net;
 
     return 0;
+}
+
+/* -------------------------
+ * Periodic stats thread
+ * ------------------------- */
+
+static void *hg_stats_thread_main(void *arg)
+{
+    (void)arg;
+
+    // Prime /proc baselines
+    hg_compute_latest_stats();
+
+    // Prime TCP baselines (monotonic totals updated by hot paths)
+    uint64_t prev_tcp_rx = atomic_load(&g_stats.tcp_rx_bytes);
+    uint64_t prev_tcp_tx = atomic_load(&g_stats.tcp_tx_bytes);
+
+    while (!atomic_load(&g_stats_thread_stop)) {
+
+        sleep(INTERVAL_SEC);
+
+        // 1) Sample /proc gauges (cpu/mem/load + disk iops + sn net bps)
+        (void)hg_compute_latest_stats();
+
+        // 2) Take per-interval deltas from hot-path counters (KV + contig + rocksdb time)
+        hg_stats_snapshot_t s = hg_stats_take_interval();
+
+        // 3) Compute client network deltas from monotonic TCP counters
+        uint64_t cur_tcp_rx = atomic_load(&g_stats.tcp_rx_bytes);
+        uint64_t cur_tcp_tx = atomic_load(&g_stats.tcp_tx_bytes);
+
+        uint64_t rx_delta = (cur_tcp_rx >= prev_tcp_rx) ? (cur_tcp_rx - prev_tcp_rx) : 0;
+        uint64_t tx_delta = (cur_tcp_tx >= prev_tcp_tx) ? (cur_tcp_tx - prev_tcp_tx) : 0;
+
+        prev_tcp_rx = cur_tcp_rx;
+        prev_tcp_tx = cur_tcp_tx;
+
+        uint64_t c_rx_bps = rx_delta / INTERVAL_SEC;
+        uint64_t c_tx_bps = tx_delta / INTERVAL_SEC;
+
+        atomic_store(&g_stats.c_net_in_bps, c_rx_bps);
+        atomic_store(&g_stats.c_net_out_bps, c_tx_bps);
+
+        atomic_store(&g_stats.incoming_mbps, bytes_per_sec_to_mbps(c_rx_bps));
+        atomic_store(&g_stats.cl_outgoing_mbps, bytes_per_sec_to_mbps(c_tx_bps));
+
+        // 4) Compute write throughput from KV logical bytes (per-interval)
+        uint64_t kv_write_bps = s.kv_putblock_bytes / INTERVAL_SEC;
+        uint64_t writes_mbps  = bytes_per_sec_to_mbps(kv_write_bps);
+
+        atomic_store(&g_stats.writes_mbps, writes_mbps);
+
+        // Reads not tracked here (yet)
+        atomic_store(&g_stats.reads_mbps, 0);
+
+        // Total throughput (Mbps)
+        atomic_store(&g_stats.t_throughput,
+                     (uint64_t)atomic_load(&g_stats.writes_mbps) +
+                     (uint64_t)atomic_load(&g_stats.reads_mbps));
+
+        // 5) Avg write latency from RocksDB timing counters (store microseconds)
+        if (s.rocksdb_writes > 0) {
+            uint64_t avg_ns = s.rocksdb_write_ns / s.rocksdb_writes;
+            atomic_store(&g_stats.avg_wr_latency, avg_ns / 1000ull); // us
+        } else {
+            atomic_store(&g_stats.avg_wr_latency, 0);
+        }
+
+        // 6) Optionally compute SN NIC Mbps from /proc/net/dev bytes/sec gauges
+        uint64_t sn_in_bps = atomic_load(&g_stats.s_net_in);
+        uint64_t sn_out_bps = atomic_load(&g_stats.s_net_out);
+        atomic_store(&g_stats.sn_node_in_mbps, bytes_per_sec_to_mbps(sn_in_bps));
+        atomic_store(&g_stats.sn_node_out_mbps, bytes_per_sec_to_mbps(sn_out_bps));
+
+        // 7) Persist one row
+        (void)hifs_store_stats(g_stats);
+
+        // Optional roll-ups (enable if you want)
+        // (void)hg_stats_trim_to_five_minute_marks();
+        // (void)hg_stats_trim_to_twenty_minute_marks();
+    }
+
+    return NULL;
+}
+
+void hg_stats_flush_periodic_start(int node_id, const char *mysql_dsn_or_cfg)
+{
+    (void)mysql_dsn_or_cfg; // keep signature; init SQL in main SQL file
+
+    if (atomic_exchange(&g_stats_thread_running, true)) {
+        // already running
+        return;
+    }
+
+    extern unsigned int storage_node_id;
+    // (This compiles if storage_node_id is defined in hive_guard_sql.* or hive_guard.*)
+
+    atomic_store(&g_stats_thread_stop, false);
+
+    int rc = pthread_create(&g_stats_thread, NULL, hg_stats_thread_main, NULL);
+    if (rc != 0) {
+        atomic_store(&g_stats_thread_running, false);
+        atomic_store(&g_stats.sees_error, 1);
+        atomic_store(&g_stats.last_error_msg, "failed to start stats thread");
+    }
+}
+
+void hg_stats_flush_periodic_stop(void)
+{
+    if (!atomic_load(&g_stats_thread_running))
+        return;
+
+    atomic_store(&g_stats_thread_stop, true);
+    pthread_join(g_stats_thread, NULL);
+    atomic_store(&g_stats_thread_running, false);
+}
+
+/* -----------------------------------------------------
+ * DB insert (fixed to use c_net_in_bps/c_net_out_bps)
+ * ----------------------------------------------------- */
+
+int hifs_store_stats(struct hg_stats_counters stats)
+{
+    (void)stats;
+
+    if (!sqldb.sql_init || !sqldb.conn)
+        return 0;
+
+    char sql_query[MAX_QUERY_SIZE];
+    char lavg_buf[16];
+
+    uint64_t lavg_x100 = atomic_load(&g_stats.load_avg_x100);
+    snprintf(lavg_buf, sizeof(lavg_buf), "%llu.%02llu",
+             (unsigned long long)(lavg_x100 / 100ull),
+             (unsigned long long)(lavg_x100 % 100ull));
+
+    const char *msg_raw = atomic_load(&g_stats.last_error_msg);
+    char *msg_sql = NULL;
+    if (msg_raw && msg_raw[0])
+        msg_sql = hifs_get_quoted_value(msg_raw);
+
+    const char *cont1_raw = atomic_load(&g_stats.cont1_message);
+    char *cont1_sql = NULL;
+    if (cont1_raw && cont1_raw[0])
+        cont1_sql = hifs_get_quoted_value(cont1_raw);
+
+    const char *cont2_raw = atomic_load(&g_stats.cont2_message);
+    char *cont2_sql = NULL;
+    if (cont2_raw && cont2_raw[0])
+        cont2_sql = hifs_get_quoted_value(cont2_raw);
+
+    unsigned int cpu              = (unsigned int)atomic_load(&g_stats.cpu_counter);
+    unsigned int mem_used         = (unsigned int)atomic_load(&g_stats.mem_used_counter);
+    unsigned int mem_avail        = (unsigned int)atomic_load(&g_stats.mem_avail_counter);
+    unsigned int read_iops        = (unsigned int)atomic_load(&g_stats.read_iops);
+    unsigned int write_iops       = (unsigned int)atomic_load(&g_stats.write_iops);
+    unsigned int total_iops       = (unsigned int)atomic_load(&g_stats.total_iops);
+    unsigned int meta_chan_ps     = (unsigned int)atomic_load(&g_stats.meta_chan_ps);
+    unsigned int incoming_mbps    = (unsigned int)atomic_load(&g_stats.incoming_mbps);
+    unsigned int cl_outgoing_mbps = (unsigned int)atomic_load(&g_stats.cl_outgoing_mbps);
+    unsigned int sn_in_mbps       = (unsigned int)atomic_load(&g_stats.sn_node_in_mbps);
+    unsigned int sn_out_mbps      = (unsigned int)atomic_load(&g_stats.sn_node_out_mbps);
+    unsigned int writes_mbps      = (unsigned int)atomic_load(&g_stats.writes_mbps);
+    unsigned int reads_mbps       = (unsigned int)atomic_load(&g_stats.reads_mbps);
+    unsigned int throughput       = (unsigned int)atomic_load(&g_stats.t_throughput);
+
+    // FIX: use computed bytes/sec gauges, not the monotonic counters
+    unsigned int c_net_in         = (unsigned int)atomic_load(&g_stats.c_net_in_bps);
+    unsigned int c_net_out        = (unsigned int)atomic_load(&g_stats.c_net_out_bps);
+
+    unsigned int s_net_in         = (unsigned int)atomic_load(&g_stats.s_net_in);   // bytes/sec
+    unsigned int s_net_out        = (unsigned int)atomic_load(&g_stats.s_net_out);  // bytes/sec
+
+    unsigned int avg_wr_latency   = (unsigned int)atomic_load(&g_stats.avg_wr_latency);
+    unsigned int avg_rd_latency   = (unsigned int)atomic_load(&g_stats.avg_rd_latency);
+    unsigned int sees_warning     = (unsigned int)atomic_load(&g_stats.sees_warning);
+    unsigned int sees_error       = (unsigned int)atomic_load(&g_stats.sees_error);
+    unsigned int cont1_isok       = (unsigned int)atomic_load(&g_stats.cont1_isok);
+    unsigned int cont2_isok       = (unsigned int)atomic_load(&g_stats.cont2_isok);
+    unsigned int clients          = (unsigned int)atomic_load(&g_stats.clients);
+
+    uint64_t now_ts = (uint64_t)time(NULL);
+
+    snprintf(sql_query, sizeof(sql_query), SQL_STORAGE_NODE_STATS_INSERT,
+             (unsigned long long)storage_node_id,
+             (unsigned long long)now_ts,
+             cpu,
+             mem_used,
+             mem_avail,
+             read_iops,
+             write_iops,
+             total_iops,
+             meta_chan_ps,
+             incoming_mbps,
+             cl_outgoing_mbps,
+             sn_in_mbps,
+             sn_out_mbps,
+             writes_mbps,
+             reads_mbps,
+             throughput,
+             c_net_in,
+             c_net_out,
+             s_net_in,
+             s_net_out,
+             avg_wr_latency,
+             avg_rd_latency,
+             lavg_buf,
+             sees_warning,
+             sees_error,
+             msg_sql ? msg_sql : "",
+             cont1_isok,
+             cont2_isok,
+             cont1_sql ? cont1_sql : "",
+             cont2_sql ? cont2_sql : "",
+             clients);
+
+    bool ok = hifs_insert_data(sql_query);
+    hifs_debug("storage_node_stats insert %s (affected=%llu last_id=%llu)",
+               ok ? "succeeded" : "failed",
+               (unsigned long long)sqldb.last_affected,
+               (unsigned long long)sqldb.last_insert_id);
+
+    free(msg_sql);
+    free(cont1_sql);
+    free(cont2_sql);
+
+    return ok ? 1 : 0;
+}
+
+/* -------------------------
+ * Rollups 
+ * ------------------------- */
+
+static bool hg_stats_execute_rollup(const char *sql_fmt)
+{
+    char sql_query[MAX_QUERY_SIZE];
+
+    if (!sqldb.sql_init || !sqldb.conn || storage_node_id == 0)
+        return false;
+
+    int written = snprintf(sql_query, sizeof(sql_query), sql_fmt,
+                           (unsigned long long)storage_node_id);
+    if (written <= 0 || written >= (int)sizeof(sql_query)) {
+        hifs_warning("stats roll-up query truncated");
+        return false;
+    }
+
+    return hifs_insert_data(sql_query);
+}
+
+bool hg_stats_trim_to_five_minute_marks(void)
+{
+    return hg_stats_execute_rollup(SQL_STORAGE_NODE_STATS_TRIM_TO_5_MINUTES);
+}
+
+bool hg_stats_trim_to_twenty_minute_marks(void)
+{
+    return hg_stats_execute_rollup(SQL_STORAGE_NODE_STATS_TRIM_TO_20_MINUTES);
 }

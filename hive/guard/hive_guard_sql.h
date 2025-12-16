@@ -200,10 +200,24 @@ struct stripe_location {
 	"storage_overhead_bytes=VALUES(storage_overhead_bytes)"
 
 
-/* The great news here is we removed a LOT of slow SQL by moving Rocks to a C-Library form rather than
- * controlled by MariaDB. And the cost was only a little bit of code in hive_guard_kv. (though knowing
- * me it may bloat over time-I'm already wondering what other features I can add to the KV.) 
- * */
+#define SQL_STORAGE_NODE_STATS_INSERT \
+	"INSERT INTO storage_node_stats " \
+	"(node_id, s_ts, cpu, mem_used, mem_avail, read_iops, write_iops, total_iops, " \
+	"meta_chan_ps, incoming_mbps, cl_outgoing_mbps, sn_node_in_mbps, sn_node_out_mbps, " \
+	"writes_mbps, reads_mbps, t_throughput, c_net_in, c_net_out, s_net_in, s_net_out, " \
+	"avg_wr_latency, avg_rd_latency, lavg, sees_warning, sees_error, message, " \
+	"cont1_isok, cont2_isok, cont1_message, cont2_message, clients) " \
+	"VALUES (%llu, FROM_UNIXTIME(%llu), %u, %u, %u, %u, %u, %u, %u, %u, %u, %u, %u, %u, %u, %u, %u, %u, %u, %u, %u, %u, '%s', %u, %u, '%s', %u, %u, '%s', '%s', %u)"
+
+#define SQL_STORAGE_NODE_STATS_TRIM_TO_5_MINUTES \
+	"DELETE FROM storage_node_stats " \
+	"WHERE node_id=%llu AND s_ts < NOW() - INTERVAL 20 MINUTE " \
+	"AND (UNIX_TIMESTAMP(s_ts) %% 300) != 0"
+
+#define SQL_STORAGE_NODE_STATS_TRIM_TO_20_MINUTES \
+	"DELETE FROM storage_node_stats " \
+	"WHERE node_id=%llu AND s_ts < NOW() - INTERVAL 2 WEEK " \
+	"AND (UNIX_TIMESTAMP(s_ts) %% 1200) != 0"
 
 
 /* Prototypes */
