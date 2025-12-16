@@ -30,6 +30,38 @@
 #include <pthread.h>
 #include <openssl/sha.h>
 
+static int hex_nibble(char c)
+{
+	if (c >= '0' && c <= '9')
+		return c - '0';
+	if (c >= 'a' && c <= 'f')
+		return 10 + (c - 'a');
+	if (c >= 'A' && c <= 'F')
+		return 10 + (c - 'A');
+	return -1;
+}
+
+static bool hex_to_bytes_local(const char *hex, size_t hex_len,
+			       uint8_t *dst, size_t dst_len)
+{
+	if (!hex || !dst)
+		return false;
+	if (hex_len % 2 != 0)
+		return false;
+	if (dst_len < hex_len / 2)
+		return false;
+	for (size_t i = 0; i < hex_len / 2; ++i) {
+		int hi = hex_nibble(hex[i * 2]);
+		int lo = hex_nibble(hex[i * 2 + 1]);
+		if (hi < 0 || lo < 0)
+			return false;
+		dst[i] = (uint8_t)((hi << 4) | lo);
+	}
+	if (dst_len > hex_len / 2)
+		memset(dst + hex_len / 2, 0, dst_len - hex_len / 2);
+	return true;
+}
+
 static int write_framed_json(int fd, const char *json);
 
 
@@ -1099,6 +1131,10 @@ static bool handle_volume_block_put(Client *c, const JVal *root)
 	if (!get_u64(root, "volume_id", &volume_id) ||
 	    !get_u64(root, "block_no", &block_no))
 		return send_error_json(c->fd, "bad_request", "missing args");
+	uint32_t hash_algo = 0;
+	const char *hash_hex = jstr(jobj_get(root, "hash"));
+	if (!get_u32(root, "hash_algo", &hash_algo) || !hash_hex)
+		return send_error_json(c->fd, "bad_request", "missing hash metadata");
 
 	uint8_t *blob = NULL;
 	size_t blob_len = 0;
@@ -1109,17 +1145,20 @@ static bool handle_volume_block_put(Client *c, const JVal *root)
 		return send_error_json(c->fd, "bad_request", "block too large");
 	}
 
-	uint8_t digest[SHA256_DIGEST_LENGTH];
-	SHA256(blob, blob_len, digest);
 	uint8_t hash_bytes[HIFS_BLOCK_HASH_SIZE];
-	memcpy(hash_bytes, digest, HIFS_BLOCK_HASH_SIZE);
+	if (!hex_to_bytes_local(hash_hex, strlen(hash_hex),
+				hash_bytes, sizeof(hash_bytes))) {
+		free(blob);
+		return send_error_json(c->fd, "bad_request", "invalid hash");
+	}
 
 	if (!pending_write_register(c->fd, volume_id, block_no, hash_bytes)) {
 		free(blob);
 		return send_error_json(c->fd, "server_busy", "unable to queue write ack");
 	}
 
-	int rc = hifs_put_block(volume_id, block_no, blob, blob_len, HIFS_HASH_ALGO_SHA256);
+	int rc = hifs_put_block(volume_id, block_no, blob, blob_len,
+				(enum hifs_hash_algorithm)hash_algo, hash_bytes);
 	free(blob);
 	if (rc == -EAGAIN) {
 		pending_write_cancel(c->fd, volume_id, block_no, hash_bytes);
@@ -1178,8 +1217,15 @@ static bool handle_volume_block_put_contig(Client *c, const JVal *root)
 	}
 
 	lens = (const uint32_t *)(blob + sizeof(hdr));
-	cursor = blob + meta_len;
-	data_len = blob_len - meta_len;
+	size_t hash_bytes = (size_t)block_count * sizeof(struct hifs_block_hash_wire);
+	if (blob_len < meta_len + hash_bytes) {
+		free(blob);
+		return send_error_json(c->fd, "bad_request", "payload truncated");
+	}
+	const struct hifs_block_hash_wire *hash_entries =
+		(const struct hifs_block_hash_wire *)(blob + meta_len);
+	cursor = blob + meta_len + hash_bytes;
+	data_len = blob_len - meta_len - hash_bytes;
 
 	/* TODO: Once the writer is working well, this needs to be changed. here
 	 * it currently iterates through blocks and writes each individually.
@@ -1203,8 +1249,11 @@ static bool handle_volume_block_put_contig(Client *c, const JVal *root)
 		}
 
 		const uint8_t *blk_data = cursor + consumed;
+		const struct hifs_block_hash_wire *entry = &hash_entries[i];
 		int rc = hifs_put_block(volume_id, block_start + i,
-					blk_data, len, HIFS_HASH_ALGO_SHA256);
+					blk_data, len,
+					(enum hifs_hash_algorithm)entry->hash_algo,
+					entry->hash);
 		if (rc == -EAGAIN) {
 			free(blob);
 			return send_error_json(c->fd, "not_leader", "forward to leader");

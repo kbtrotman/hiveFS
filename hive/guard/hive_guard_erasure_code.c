@@ -436,6 +436,7 @@ void hifs_ec_choose_placement(uint64_t volume_id,
 
 bool hifs_volume_block_ec_encode(const uint8_t *buf, uint32_t len,
 				 enum hifs_hash_algorithm algo,
+				 const uint8_t *pre_hash,
 				 struct hifs_ec_stripe_set *out)
 {
 #if HIFS_DEBUG_DISABLE_EC
@@ -447,10 +448,6 @@ bool hifs_volume_block_ec_encode(const uint8_t *buf, uint32_t len,
 
 	if (!buf || !out || len == 0 || len > HIFS_DEFAULT_BLOCK_SIZE)
 		return false;
-	if (algo != HIFS_HASH_ALGO_SHA256) {
-		hifs_warning("Unsupported hash algorithm %u", (unsigned)algo);
-		return false;
-	}
 
 	memset(out, 0, sizeof(*out));
 
@@ -482,10 +479,18 @@ bool hifs_volume_block_ec_encode(const uint8_t *buf, uint32_t len,
 	out->chunk_count = total;
 	out->chunk_len = frag_size;
 	out->hash_algo = algo;
-
-	unsigned char digest[HIFS_BLOCK_HASH_SIZE];
-	SHA256(buf, len, digest);
-	memcpy(out->hash, digest, sizeof(out->hash));
+	if (pre_hash) {
+		memcpy(out->hash, pre_hash, sizeof(out->hash));
+	} else {
+		if (algo != HIFS_HASH_ALGO_SHA256) {
+			hifs_warning("Unsupported hash algorithm %u without pre-hash",
+				     (unsigned)algo);
+			goto fail;
+		}
+		unsigned char digest[HIFS_BLOCK_HASH_SIZE];
+		SHA256(buf, len, digest);
+		memcpy(out->hash, digest, sizeof(out->hash));
+	}
 
 	return true;
 
@@ -511,16 +516,63 @@ void hifs_volume_block_ec_free(struct hifs_ec_stripe_set *ec)
 	memset(ec, 0, sizeof(*ec));
 }
 
+static int hifs_submit_existing_block(uint64_t volume_id, uint64_t block_no,
+				      enum hifs_hash_algorithm algo,
+				      const uint8_t hash[HIFS_BLOCK_HASH_SIZE],
+				      const struct H2SEntry *entry)
+{
+	struct RaftPutBlock cmd = {0};
+	size_t i;
+
+	if (!entry)
+		return -EINVAL;
+
+	cmd.hash_algo = (uint8_t)algo;
+	cmd.volume_id = volume_id;
+	cmd.block_no = block_no;
+	memcpy(cmd.hash, hash, HIFS_BLOCK_HASH_SIZE);
+
+	for (i = 0; i < HIFS_EC_STRIPES; ++i) {
+		uint64_t estripe = entry->estripe_ids[i];
+		struct EstripeLoc loc;
+
+		if (!estripe)
+			return -ENOENT;
+		if (hg_kv_get_estripe_loc(estripe, &loc) != 0)
+			return -ENOENT;
+
+		cmd.ec_stripes[i].estripe_id = estripe;
+		cmd.ec_stripes[i].storage_node_id = loc.storage_node_id;
+		cmd.ec_stripes[i].shard_id = loc.shard_id;
+		cmd.ec_stripes[i].block_offset = loc.block_offset;
+	}
+
+	return hifs_raft_submit_put_block(&cmd);
+}
+
 bool hifs_volume_block_store(uint64_t volume_id, uint64_t block_no,
-			     const uint8_t *buf, uint32_t len)
+			     const uint8_t *buf, uint32_t len,
+			     enum hifs_hash_algorithm algo,
+			     const uint8_t hash[HIFS_BLOCK_HASH_SIZE])
 {
 	struct hifs_ec_stripe_set ec = {0};
 	bool ok = false;
+	struct H2SEntry existing = {0};
 
 	if (!buf || len == 0)
 		return false;
 
-	if (!hifs_volume_block_ec_encode(buf, len, HIFS_HASH_ALGO_SHA256, &ec))
+	if (hash && hg_kv_get_h2s((uint8_t)algo, hash, &existing) == 0) {
+		int rc = hifs_submit_existing_block(volume_id, block_no, algo,
+						    hash, &existing);
+		if (rc == 0)
+			return true;
+		hifs_warning("Existing hash lookup failed for vol=%llu block=%llu, forcing re-store",
+			     (unsigned long long)volume_id,
+			     (unsigned long long)block_no);
+	}
+
+	if (!hifs_volume_block_ec_encode(buf, len, algo, hash, &ec))
 		return false;
 
 	if (hifs_put_block_stripes(volume_id, block_no, &ec, ec.hash_algo) == 0)
@@ -532,17 +584,29 @@ bool hifs_volume_block_store(uint64_t volume_id, uint64_t block_no,
 
 int hifs_put_block(uint64_t volume_id, uint64_t block_no,
 		   const void *data, size_t len,
-		   enum hifs_hash_algorithm algo)
+		   enum hifs_hash_algorithm algo,
+		   const uint8_t hash[HIFS_BLOCK_HASH_SIZE])
 {
 	struct hifs_ec_stripe_set ec = {0};
 	int rc;
+	struct H2SEntry existing = {0};
 
 	if (!hg_guard_local_can_write())
 		return -EAGAIN;
 	if (!data || len == 0 || len > HIFS_DEFAULT_BLOCK_SIZE)
 		return -EINVAL;
 
-	if (!hifs_volume_block_ec_encode(data, (uint32_t)len, algo, &ec))
+	if (hash && hg_kv_get_h2s((uint8_t)algo, hash, &existing) == 0) {
+		rc = hifs_submit_existing_block(volume_id, block_no, algo,
+						hash, &existing);
+		if (rc == 0)
+			return 0;
+		hifs_warning("Existing hash lookup failed for vol=%llu block=%llu, forcing re-store",
+			     (unsigned long long)volume_id,
+			     (unsigned long long)block_no);
+	}
+
+	if (!hifs_volume_block_ec_encode(data, (uint32_t)len, algo, hash, &ec))
 		return -EIO;
 
 	rc = hifs_put_block_stripes(volume_id, block_no, &ec, algo);

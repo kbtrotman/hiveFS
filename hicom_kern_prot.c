@@ -825,7 +825,8 @@ out:
 
 int hifs_publish_block(struct super_block *sb, uint64_t block_no,
                        const void *data, u32 data_len, bool request_only,
-                       u32 flags)
+                       u32 flags, const uint8_t *hash,
+		       enum hifs_hash_algorithm hash_algo)
 {
     struct hifs_sb_info *info;
     struct hifs_cmds cmd;
@@ -836,7 +837,7 @@ int hifs_publish_block(struct super_block *sb, uint64_t block_no,
 
     if (!sb)
         return -EINVAL;
-    if (!request_only && (!data || data_len == 0))
+    if (!request_only && (!data || data_len == 0 || !hash))
         return -EINVAL;
     if (data_len > HIFS_DEFAULT_BLOCK_SIZE)
         return -EINVAL;
@@ -872,6 +873,13 @@ int hifs_publish_block(struct super_block *sb, uint64_t block_no,
                                    (flags & (HIFS_BLOCK_MSGF_CONTIG_START |
                                              HIFS_BLOCK_MSGF_CONTIG_END)));
     msg_local->data_len = cpu_to_le32(request_only ? 0 : data_len);
+    if (!request_only && hash) {
+        msg_local->hash_algo = hash_algo;
+        memcpy(msg_local->hash, hash, sizeof(msg_local->hash));
+    } else {
+        msg_local->hash_algo = HIFS_HASH_ALGO_NONE;
+        memset(msg_local->hash, 0, sizeof(msg_local->hash));
+    }
 
     hifs_debug("publish block %llu len %u flags %#x",
                (unsigned long long)block_no, data_len,
