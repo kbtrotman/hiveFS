@@ -1459,17 +1459,26 @@ bool hifs_volume_block_load(uint64_t volume_id, uint64_t block_no,
 }
 
 bool hifs_volume_block_store(uint64_t volume_id, uint64_t block_no,
-			     const uint8_t *buf, uint32_t len)
+			     const uint8_t *buf, uint32_t len,
+			     const uint8_t *hash, uint8_t hash_algo)
 {
 	if (!buf || len == 0)
 		return false;
 
-	char hash_hex[SHA256_DIGEST_LENGTH * 2 + 1];
-	sha256_hex(buf, len, hash_hex);
+	char hash_hex[HIFS_BLOCK_HASH_SIZE * 2 + 1];
+	uint8_t algo = hash_algo;
+
+	if (!hash) {
+		sha256_hex(buf, len, hash_hex);
+		algo = HIFS_HASH_ALGO_SHA256;
+	} else {
+		bytes_to_hex(hash, HIFS_BLOCK_HASH_SIZE, hash_hex);
+	}
 
 	struct guard_field fields[] = {
 		GUARD_FIELD_U64("volume_id", volume_id),
 		GUARD_FIELD_U64("block_no", block_no),
+		GUARD_FIELD_U32("hash_algo", algo),
 		GUARD_FIELD_STR("hash", hash_hex),
 	};
 	return guard_store_struct("volume_block_put",
@@ -1479,7 +1488,9 @@ bool hifs_volume_block_store(uint64_t volume_id, uint64_t block_no,
 
 bool hifs_contig_block_send(uint64_t volume_id, uint64_t block_start,
 			    const uint32_t *lengths, size_t block_count,
-			    const uint8_t *data, size_t data_len)
+			    const uint8_t *data, size_t data_len,
+			    const uint8_t *hash_algos,
+			    const uint8_t *hashes)
 {
 	struct guard_field fields[] = {
 		GUARD_FIELD_U64("volume_id", volume_id),
@@ -1492,12 +1503,13 @@ bool hifs_contig_block_send(uint64_t volume_id, uint64_t block_start,
 		.reserved = 0,
 	};
 	size_t lengths_bytes;
+	size_t meta_bytes;
 	size_t expected = 0;
 	uint8_t *payload;
 	uint8_t *cursor;
 	bool ok;
 
-	if (!lengths || !data || !block_count)
+	if (!lengths || !data || !hash_algos || !hashes || !block_count)
 		return false;
 
 	for (size_t i = 0; i < block_count; ++i) {
@@ -1511,9 +1523,10 @@ bool hifs_contig_block_send(uint64_t volume_id, uint64_t block_start,
 	if (block_count > (SIZE_MAX - sizeof(header)) / sizeof(uint32_t))
 		return false;
 	lengths_bytes = block_count * sizeof(uint32_t);
-	if (data_len > SIZE_MAX - (sizeof(header) + lengths_bytes))
+	meta_bytes = block_count * sizeof(struct hifs_block_hash_wire);
+	if (data_len > SIZE_MAX - (sizeof(header) + lengths_bytes + meta_bytes))
 		return false;
-	payload = malloc(sizeof(header) + lengths_bytes + data_len);
+	payload = malloc(sizeof(header) + lengths_bytes + meta_bytes + data_len);
 	if (!payload)
 		return false;
 
@@ -1523,11 +1536,20 @@ bool hifs_contig_block_send(uint64_t volume_id, uint64_t block_start,
 		uint32_t le = htole32(lengths[i]);
 		memcpy(cursor + i * sizeof(uint32_t), &le, sizeof(le));
 	}
-	memcpy(cursor + lengths_bytes, data, data_len);
+	struct hifs_block_hash_wire *meta =
+		(struct hifs_block_hash_wire *)(cursor + lengths_bytes);
+	for (size_t i = 0; i < block_count; ++i) {
+		struct hifs_block_hash_wire *entry = &meta[i];
+		entry->hash_algo = hash_algos[i];
+		memset(entry->reserved, 0, sizeof(entry->reserved));
+		memcpy(entry->hash, hashes + i * HIFS_BLOCK_HASH_SIZE,
+		       HIFS_BLOCK_HASH_SIZE);
+	}
+	memcpy((uint8_t *)meta + meta_bytes, data, data_len);
 
 	ok = guard_store_struct("volume_block_put_contig",
 				fields, ARRAY_SIZE(fields),
-				payload, sizeof(header) + lengths_bytes + data_len);
+				payload, sizeof(header) + lengths_bytes + meta_bytes + data_len);
 	free(payload);
 	return ok;
 }

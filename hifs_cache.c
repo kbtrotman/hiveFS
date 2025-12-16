@@ -87,7 +87,7 @@ struct hifs_inode *cache_get_inode(void)
 	if (WARN_ON(!hifs_inode_cache))
 		return NULL;
 
-	hii = kmem_cache_alloc(hifs_inode_cache, GFP_KERNEL);
+	hii = kmem_cache_zalloc(hifs_inode_cache, GFP_KERNEL);
 	printk(KERN_INFO "#: hifs cache_get_inode : di=%p\n", hii);
 
 	return hii;
@@ -1156,7 +1156,7 @@ int hifs_fetch_block(struct super_block *sb, uint64_t block)
     }
 
     hifs_debug("cache miss block %llu", (unsigned long long)block);
-    ret = hifs_publish_block(sb, block, NULL, 0, true, 0);
+    ret = hifs_publish_block(sb, block, NULL, 0, true, 0, NULL, HIFS_HASH_ALGO_NONE);
     if (ret < 0)
         return ret;
 
@@ -1167,9 +1167,10 @@ int hifs_fetch_block(struct super_block *sb, uint64_t block)
 }
 
 int hifs_push_block(struct super_block *sb, uint64_t block,
-                    const void *data, u32 data_len, u32 flags)
+                    const void *data, u32 data_len, u32 flags,
+		    const uint8_t *hash, enum hifs_hash_algorithm hash_algo)
 {
-    if (!sb || !data)
+    if (!sb || !data || !hash)
         return -EINVAL;
 
     hifs_cache_mark_dirty(sb, block);
@@ -1182,7 +1183,8 @@ int hifs_push_block(struct super_block *sb, uint64_t block,
     }
 
     {
-        int ret = hifs_publish_block(sb, block, data, data_len, false, flags);
+        int ret = hifs_publish_block(sb, block, data, data_len, false, flags,
+				     hash, hash_algo);
         hifs_dedupe_mark_clean(sb, block, ret >= 0);
         return ret;
     }

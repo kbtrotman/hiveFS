@@ -32,10 +32,16 @@ static bool hifs_command_equals(const struct hifs_cmds *cmd, const char *name)
 struct hifs_block_chain_ctx {
 	uint8_t *data;
 	uint32_t *lengths;
+	uint8_t *hashes;
+	uint8_t *algos;
 	size_t data_len;
 	size_t data_cap;
 	size_t lengths_len;
 	size_t lengths_cap;
+	size_t hashes_len;
+	size_t hashes_cap;
+	size_t algos_len;
+	size_t algos_cap;
 	uint64_t volume_id;
 	uint64_t start_block;
 	uint64_t next_block;
@@ -55,6 +61,8 @@ static void hifs_block_chain_reset(struct hifs_block_chain_ctx *ctx)
 	ctx->next_block = 0;
 	ctx->data_len = 0;
 	ctx->lengths_len = 0;
+	ctx->hashes_len = 0;
+	ctx->algos_len = 0;
 }
 
 static bool hifs_block_chain_reserve(void **buf, size_t *cap,
@@ -115,7 +123,8 @@ static bool hifs_block_chain_flush(struct hifs_block_chain_ctx *ctx)
 	if (ctx->lengths_len) {
 		sent = hifs_contig_block_send(ctx->volume_id, ctx->start_block,
 					      ctx->lengths, ctx->lengths_len,
-					      ctx->data, ctx->data_len);
+					      ctx->data, ctx->data_len,
+					      ctx->algos, ctx->hashes);
 		if (!sent)
 			hifs_warning("contiguous block send failed for volume %llu start %llu, falling back",
 				     (unsigned long long)ctx->volume_id,
@@ -133,7 +142,9 @@ static bool hifs_block_chain_flush(struct hifs_block_chain_ctx *ctx)
 				break;
 			}
 			if (!hifs_volume_block_store(ctx->volume_id, block_no,
-						     cursor, len)) {
+						     cursor, len,
+						     ctx->hashes + (i * HIFS_BLOCK_HASH_SIZE),
+						     ctx->algos ? ctx->algos[i] : HIFS_HASH_ALGO_SHA256)) {
 				hifs_err("Failed to persist contiguous block %llu for volume %llu",
 					 (unsigned long long)block_no,
 					 (unsigned long long)ctx->volume_id);
@@ -165,14 +176,17 @@ static bool hifs_block_chain_begin(struct hifs_block_chain_ctx *ctx,
 	ctx->next_block = block_no;
 	ctx->data_len = 0;
 	ctx->lengths_len = 0;
+	ctx->hashes_len = 0;
+	ctx->algos_len = 0;
 	return true;
 }
 
 static bool hifs_block_chain_append(struct hifs_block_chain_ctx *ctx,
 				    uint64_t block_no,
-				    const uint8_t *data, uint32_t len)
+				    const uint8_t *data, uint32_t len,
+				    const uint8_t *hash, uint8_t hash_algo)
 {
-	if (!ctx || !ctx->active || !data || !len)
+	if (!ctx || !ctx->active || !data || !len || !hash)
 		return false;
 	if (block_no != ctx->next_block)
 		return false;
@@ -184,10 +198,20 @@ static bool hifs_block_chain_append(struct hifs_block_chain_ctx *ctx,
 	if (!hifs_block_chain_reserve((void **)&ctx->lengths, &ctx->lengths_cap,
 				      ctx->lengths_len + 1, sizeof(uint32_t), 16))
 		return false;
+	if (!hifs_block_chain_reserve((void **)&ctx->hashes, &ctx->hashes_cap,
+				      (ctx->lengths_len + 1) * HIFS_BLOCK_HASH_SIZE,
+				      sizeof(uint8_t), HIFS_BLOCK_HASH_SIZE))
+		return false;
+	if (!hifs_block_chain_reserve((void **)&ctx->algos, &ctx->algos_cap,
+				      ctx->lengths_len + 1, sizeof(uint8_t), 16))
+		return false;
 
 	memcpy(ctx->data + ctx->data_len, data, len);
 	ctx->data_len += len;
 	ctx->lengths[ctx->lengths_len++] = len;
+	memcpy(ctx->hashes + ctx->hashes_len, hash, HIFS_BLOCK_HASH_SIZE);
+	ctx->hashes_len += HIFS_BLOCK_HASH_SIZE;
+	ctx->algos[ctx->algos_len++] = hash_algo;
 	ctx->next_block++;
 	return true;
 }
@@ -708,7 +732,9 @@ int hicomm_handle_command(int fd, const struct hifs_cmds *cmd)
 
 				if (g_block_chain_ctx.active) {
 					if (!hifs_block_chain_append(&g_block_chain_ctx, block_no,
-								     store_buf, store_len)) {
+								     store_buf, store_len,
+								     msg_local.hash,
+								     msg_local.hash_algo)) {
 						hifs_warning("Failed to append block %" PRIu64
 							     " for volume %" PRIu64 " to contiguous buffer",
 							     block_no, volume_id);
@@ -723,7 +749,9 @@ int hicomm_handle_command(int fd, const struct hifs_cmds *cmd)
 
 			if (!buffered && store_len) {
 				if (!hifs_volume_block_store(volume_id, block_no,
-							     store_buf, store_len)) {
+							     store_buf, store_len,
+							     msg_local.hash,
+							     msg_local.hash_algo)) {
 					hifs_err("Failed to persist block %" PRIu64 " for volume %" PRIu64,
 						 block_no, volume_id);
 				}

@@ -123,6 +123,7 @@ struct hifs_ec_stripe_set {
 
 bool hifs_volume_block_ec_encode(const uint8_t *buf, uint32_t len,
 				 enum hifs_hash_algorithm algo,
+				 const uint8_t *pre_hash,
 				 struct hifs_ec_stripe_set *out);
 void hifs_volume_block_ec_free(struct hifs_ec_stripe_set *ec);
 bool hifs_volume_block_store_encoded(uint64_t volume_id, uint64_t block_no,
@@ -132,6 +133,7 @@ int hifs_put_block_stripes(uint64_t volume_id, uint64_t block_no,
 			   enum hifs_hash_algorithm algo);
 int hifs_put_block(uint64_t volume_id, uint64_t block_no,
 		   const void *data, size_t len,
-		   enum hifs_hash_algorithm algo);
+		   enum hifs_hash_algorithm algo,
+		   const uint8_t hash[HIFS_BLOCK_HASH_SIZE]);
 void hifs_guard_notify_write_ack(uint64_t volume_id, uint64_t block_no,
 			 const uint8_t *hash, size_t hash_len);

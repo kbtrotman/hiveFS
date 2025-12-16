@@ -142,10 +142,12 @@ int hifs_publish_inode(struct super_block *sb, const struct hifs_inode *hii,
                        bool request_only);
 int hifs_publish_block(struct super_block *sb, uint64_t block_no,
 		       const void *data, u32 data_len, bool request_only,
-		       u32 flags);
+		       u32 flags, const uint8_t *hash,
+		       enum hifs_hash_algorithm hash_algo);
 int hifs_fetch_block(struct super_block *sb, uint64_t block_no);
 int hifs_push_block(struct super_block *sb, uint64_t block_no,
-		    const void *data, u32 data_len, u32 flags);
+		    const void *data, u32 data_len, u32 flags,
+		    const uint8_t *hash, enum hifs_hash_algorithm hash_algo);
 int hifs_flush_dirty_cache_items(void);
 
 /*hicom_kern_mm.c*/

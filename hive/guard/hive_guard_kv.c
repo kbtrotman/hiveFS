@@ -356,9 +356,16 @@ int hg_kv_apply_put_block(const struct RaftPutBlock *cmd)
 		return -1;
 
 	struct H2SEntry h2s = {0};
-	h2s.ref_count = 1;
-	for (size_t i = 0; i < HIFS_EC_STRIPES; ++i)
-		h2s.estripe_ids[i] = cmd->ec_stripes[i].estripe_id;
+	bool have_existing = (hg_kv_get_h2s(cmd->hash_algo, cmd->hash, &h2s) == 0);
+
+	if (have_existing) {
+		if (h2s.ref_count < UINT64_MAX)
+			h2s.ref_count++;
+	} else {
+		h2s.ref_count = 1;
+		for (size_t i = 0; i < HIFS_EC_STRIPES; ++i)
+			h2s.estripe_ids[i] = cmd->ec_stripes[i].estripe_id;
+	}
 
 	struct VbEntry vb = {0};
 	vb.hash_algo = cmd->hash_algo;
@@ -396,6 +403,18 @@ int hg_kv_apply_put_block(const struct RaftPutBlock *cmd)
 	}
 #endif
 
+	uint64_t t0 = hg_now_ns();
+
+	atomic_fetch_add(&g_stats.kv_putblock_calls, 1);
+	atomic_fetch_add(&g_stats.kv_putblock_bytes, HIFS_DEFAULT_BLOCK_SIZE );
+
+	if (have_existing) {
+		atomic_fetch_add(&g_stats.kv_putblock_dedup_hits, 1);
+	} else {
+		atomic_fetch_add(&g_stats.kv_putblock_dedup_misses, 1);
+	}
+
+
 	char *err = NULL;
 	rocksdb_writeoptions_t *wopt = rocksdb_writeoptions_create();
 	rocksdb_write(g_db, wopt, wb, &err);
@@ -407,6 +426,10 @@ int hg_kv_apply_put_block(const struct RaftPutBlock *cmd)
 		free(err);
 		return -1;
 	}
+
+	uint64_t t1 = hg_now_ns();
+	atomic_fetch_add(&g_stats.kv_rocksdb_writes, 1);
+	atomic_fetch_add(&g_stats.kv_rocksdb_write_ns, (t1 - t0));
 
 	return 0;
 }

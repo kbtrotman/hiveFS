@@ -19,6 +19,8 @@ CREATE TABLE IF NOT EXISTS cluster (
   cluster_created     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   cluster_updated     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
                                    ON UPDATE CURRENT_TIMESTAMP,
+  is_ok BOOLEAN NOT NULL DEFAULT 1,
+  off_line BOOLEAN NOT NULL DEFAULT 1,
   mgmt_api_port       INT NULL,
   mgmt_api_version    VARCHAR(32) NULL,
   cluster_state       ENUM('active', 'degraded', 'maintenance', 'offline')
@@ -58,17 +60,27 @@ CREATE TABLE IF NOT EXISTS storage_nodes (
   hive_version INT NOT NULL,
   hive_patch_level INT NOT NULL,
   fenced BOOLEAN NOT NULL DEFAULT 0,
+  down BOOLEAN NOT NULL DEFAULT 0,
+  is_ok BOOLEAN NOT NULL DEFAULT 1,
+  gui_up BOOLEAN NOT NULL DEFAULT 1,
+  api_up BOOLEAN NOT NULL DEFAULT 1,
+  hg_up BOOLEAN NOT NULL DEFAULT 1,
   last_maintenance TIMESTAMP NULL,
   maintenance_reason VARCHAR(255) NULL,
   maintenance_started_at TIMESTAMP NULL,
   maintenance_ended_at TIMESTAMP NULL,
   date_added_to_cluster TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  meta_capacity_bytes BIGINT UNSIGNED NOT NULL,
+  meta_used_bytes BIGINT UNSIGNED NOT NULL,
+  meta_reserved_bytes BIGINT UNSIGNED NOT NULL,
+  meta_overhead_bytes BIGINT UNSIGNED NOT NULL,
   storage_capacity_bytes BIGINT UNSIGNED NOT NULL,
   storage_used_bytes BIGINT UNSIGNED NOT NULL,
   storage_reserved_bytes BIGINT UNSIGNED NOT NULL,
   storage_overhead_bytes BIGINT UNSIGNED NOT NULL,
   client_connect_timout INT DEFAULT '60000',
   sn_connect_timeout INT DEFAULT '30000',
+  last_uptime VARCHAR(25) DEFAULT NULL,
   UNIQUE KEY u_node_name (node_name),
   UNIQUE KEY u_node_address (node_address),
 
@@ -84,18 +96,63 @@ CREATE TABLE IF NOT EXISTS storage_nodes (
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS storage_node_stats (
-  node_id INT UNSIGNED PRIMARY KEY,
+  node_id INT UNSIGNED NOT NULL,
   s_ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
   cpu INT UNSIGNED,
+  mem_used INT UNSIGNED,
+  mem_avail INT UNSIGNED,
+
   read_iops INT UNSIGNED,
   write_iops INT UNSIGNED,
   total_iops INT UNSIGNED,
+
+  meta_chan_ps INT UNSIGNED,
+
+  incoming_mbps INT UNSIGNED,
+  cl_outgoing_mbps INT UNSIGNED,
+
+  sn_node_in_mbps INT UNSIGNED,
+  sn_node_out_mbps INT UNSIGNED,
+
+  writes_mbps INT UNSIGNED,
+  reads_mbps INT UNSIGNED,
   t_throughput INT UNSIGNED,
+
   c_net_in INT UNSIGNED,
   c_net_out INT UNSIGNED,
   s_net_in INT UNSIGNED,
   s_net_out INT UNSIGNED,
-  avg_latency INT UNSIGNED,
+
+  avg_wr_latency INT UNSIGNED,
+  avg_rd_latency INT UNSIGNED,
+
+  lavg VARCHAR(10) DEFAULT NULL,
+
+  sees_warning BOOLEAN NOT NULL DEFAULT 0,
+  sees_error BOOLEAN NOT NULL DEFAULT 0,
+  message VARCHAR(200) DEFAULT NULL,
+
+  cont1_isok BOOLEAN NOT NULL DEFAULT 0,
+  cont2_isok BOOLEAN NOT NULL DEFAULT 0,
+  cont1_message VARCHAR(200) DEFAULT NULL,
+  cont2_message VARCHAR(200) DEFAULT NULL,
+
+  clients INT UNSIGNED,
+
+  PRIMARY KEY (node_id, s_ts),
+  KEY idx_ts (s_ts)
+) ENGINE=InnoDB;
+
+
+CREATE TABLE IF NOT EXISTS alerts (
+  id INT UNSIGNED KEY,
+  a_lvl INT UNSIGNED DEFAULT 0,
+  a_class INT UNSIGNED DEFAULT 0,
+  a_comp INT UNISIGNED DEFAULT 0,
+  a_msg VARCHAR(200) DEFAULT NULL,
+  a_desc VARCHAR(200) DEFAULT NULL,
+  a_ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS shard_map (
