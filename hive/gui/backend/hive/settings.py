@@ -67,7 +67,6 @@ INSTALLED_APPS = [
     'tree',
     'nodes',
     'disk',
-    'perf',
     'api',
     'allauth.socialaccount.providers.okta',
     'allauth.socialaccount.providers.microsoft',

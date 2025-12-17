@@ -126,7 +126,7 @@ bool hifs_volume_inode_store(uint64_t volume_id,
                              const struct hifs_inode_wire *inode);
 bool hifs_volume_block_load(uint64_t volume_id, uint64_t block_no,
                             uint8_t *buf, uint32_t *len);
-bool hifs_volume_block_store(uint64_t volume_id, uint64_t block_no,
+bool hifs_volume_block_send(uint64_t volume_id, uint64_t block_no,
                              const uint8_t *buf, uint32_t len,
 			     const uint8_t *hash, uint8_t hash_algo);
 bool hifs_contig_block_send(uint64_t volume_id, uint64_t block_start,

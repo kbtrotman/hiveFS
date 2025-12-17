@@ -149,10 +149,10 @@ CREATE TABLE IF NOT EXISTS alerts (
   id INT UNSIGNED KEY,
   a_lvl INT UNSIGNED DEFAULT 0,
   a_class INT UNSIGNED DEFAULT 0,
-  a_comp INT UNISIGNED DEFAULT 0,
+  a_comp INT UNSIGNED DEFAULT 0,
   a_msg VARCHAR(200) DEFAULT NULL,
   a_desc VARCHAR(200) DEFAULT NULL,
-  a_ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  a_ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS shard_map (
@@ -383,8 +383,8 @@ CREATE OR REPLACE VIEW v_dentries AS SELECT * FROM hive_meta.volume_dentries;
 CREATE OR REPLACE VIEW v_inodes   AS SELECT * FROM hive_meta.volume_inodes;
 CREATE OR REPLACE VIEW v_roots    AS SELECT * FROM hive_meta.volume_root_dentries;
 CREATE OR REPLACE VIEW v_nodes    AS SELECT * FROM hive_meta.storage_nodes;
-CREATE OR REPLACE VIEW v_stats    AS SELECT * FROM hive_meta.volume_stats;
-CREATE OR REPLACE VIEW v_sn_stats    AS SELECT * FROM hive_meta.storage_node_stats;
+CREATE OR REPLACE VIEW v_vstats    AS SELECT * FROM hive_meta.volume_stats;
+CREATE OR REPLACE VIEW v_stats    AS SELECT * FROM hive_meta.storage_node_stats;
 
 -- Virtual nodes for GUI
 CREATE TABLE IF NOT EXISTS ui_virtual_node (
