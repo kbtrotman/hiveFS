@@ -172,8 +172,10 @@ struct stripe_location {
 #define SQL_STORAGE_NODES_SELECT \
 "SELECT node_id, node_name, node_address, node_uid, node_serial, " \
 "node_guard_port, node_data_port, UNIX_TIMESTAMP(last_heartbeat) AS last_heartbeat, " \
-"hive_version, hive_patch_level, fenced, " \
+"hive_version, hive_patch_level, fenced, down, " \
 "UNIX_TIMESTAMP(last_maintenance) AS last_maintenance, maintenance_reason, " \
+"UNIX_TIMESTAMP(maintenance_started_at) AS maintenance_started_at, " \
+"UNIX_TIMESTAMP(maintenance_ended_at) AS maintenance_ended_at, " \
 "date_added_to_cluster, storage_capacity_bytes, storage_used_bytes, " \
 "storage_reserved_bytes, storage_overhead_bytes, client_connect_timout, " \
 "sn_connect_timeout " \

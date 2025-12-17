@@ -187,21 +187,33 @@ static int hg_read_net_bytes(const char *iface, net_stat_t *s)
 
 static const char *hg_stats_net_iface(void)
 {
-    static const char *iface;
+	static const char *iface;
 
-    if (!iface || !iface[0]) {
-        const char *env_iface = getenv("HG_STATS_NET_IFACE");
-        iface = (env_iface && env_iface[0]) ? env_iface : "eth0";
-    }
+	if (!iface || !iface[0]) {
+		const char *env_iface = getenv("HG_STATS_NET_IFACE");
+		iface = (env_iface && env_iface[0]) ? env_iface : "eth0";
+	}
 
-    return iface;
+	return iface;
+}
+
+static const char *hg_stats_disk_device(void)
+{
+	static const char *dev;
+
+	if (!dev || !dev[0]) {
+		const char *env_dev = getenv("HG_STATS_DISK_DEV");
+		dev = (env_dev && env_dev[0]) ? env_dev : DEVICE_NAME;
+	}
+
+	return dev;
 }
 
 // Function to read disk statistics for a specific device
 int hg_read_disk_stats(const char* device, DiskStats* stats)
 {
-    FILE *fp;
-    char line[256];
+	FILE *fp;
+	char line[256];
     char dev_name[32];
     int major, minor;
     unsigned long long discard;
@@ -234,78 +246,104 @@ int hg_read_disk_stats(const char* device, DiskStats* stats)
 
 int hg_compute_latest_stats(void)
 {
-    static cpu_stat_t prev_cpu;
-    static DiskStats prev_disk;
-    static net_stat_t prev_net;
-    static int initialized = 0;
+	static cpu_stat_t prev_cpu;
+	static DiskStats prev_disk;
+	static net_stat_t prev_net;
+	static int initialized = 0;
+	static bool have_disk = false;
+	static bool have_net = false;
 
-    cpu_stat_t cur_cpu;
-    DiskStats cur_disk;
-    net_stat_t cur_net;
+	cpu_stat_t cur_cpu;
+	DiskStats cur_disk;
+	net_stat_t cur_net;
 
-    if (read_cpu_stat(&cur_cpu) != 0)
-        return -1;
-    if (hg_read_disk_stats(DEVICE_NAME, &cur_disk) != 0)
-        return -1;
-    if (hg_read_net_bytes(hg_stats_net_iface(), &cur_net) != 0)
-        return -1;
+	bool cpu_ok = (read_cpu_stat(&cur_cpu) == 0);
+	bool disk_ok = (hg_read_disk_stats(hg_stats_disk_device(), &cur_disk) == 0);
+	bool net_ok = (hg_read_net_bytes(hg_stats_net_iface(), &cur_net) == 0);
 
-    uint64_t mem_used = 0, mem_avail = 0;
-    if (hg_read_mem_info(&mem_used, &mem_avail) == 0) {
-        atomic_store(&g_stats.mem_used_counter, mem_used);
-        atomic_store(&g_stats.mem_avail_counter, mem_avail);
+	uint64_t mem_used = 0, mem_avail = 0;
+	if (hg_read_mem_info(&mem_used, &mem_avail) == 0) {
+		atomic_store(&g_stats.mem_used_counter, mem_used);
+		atomic_store(&g_stats.mem_avail_counter, mem_avail);
     }
 
     char loadavg_buf[16] = {0};
-    if (hg_read_loadavg(loadavg_buf, sizeof(loadavg_buf)) == 0)
-        atomic_store(&g_stats.load_avg_x100, hg_loadavg_to_x100(loadavg_buf));
+	if (hg_read_loadavg(loadavg_buf, sizeof(loadavg_buf)) == 0)
+		atomic_store(&g_stats.load_avg_x100, hg_loadavg_to_x100(loadavg_buf));
 
-    if (!initialized) {
-        prev_cpu = cur_cpu;
-        prev_disk = cur_disk;
-        prev_net = cur_net;
-        atomic_store(&g_stats.cpu_counter, 0);
-        atomic_store(&g_stats.read_iops, 0);
-        atomic_store(&g_stats.write_iops, 0);
-        atomic_store(&g_stats.total_iops, 0);
-        atomic_store(&g_stats.s_net_in, 0);
-        atomic_store(&g_stats.s_net_out, 0);
-        initialized = 1;
-        return 0;
-    }
+	if (!initialized) {
+		if (cpu_ok)
+			prev_cpu = cur_cpu;
+		if (disk_ok) {
+			prev_disk = cur_disk;
+			have_disk = true;
+		}
+		if (net_ok) {
+			prev_net = cur_net;
+			have_net = true;
+		}
+		atomic_store(&g_stats.cpu_counter, 0);
+		atomic_store(&g_stats.read_iops, 0);
+		atomic_store(&g_stats.write_iops, 0);
+		atomic_store(&g_stats.total_iops, 0);
+		atomic_store(&g_stats.s_net_in, 0);
+		atomic_store(&g_stats.s_net_out, 0);
+		initialized = 1;
+		return cpu_ok ? 0 : -1;
+	}
 
-    atomic_store(&g_stats.cpu_counter, (uint64_t)hg_cpu_usage_percent(&prev_cpu, &cur_cpu));
-    prev_cpu = cur_cpu;
+	if (cpu_ok) {
+		atomic_store(&g_stats.cpu_counter, (uint64_t)hg_cpu_usage_percent(&prev_cpu, &cur_cpu));
+		prev_cpu = cur_cpu;
+	}
 
-    uint64_t read_delta = 0;
-    uint64_t write_delta = 0;
+	uint64_t read_delta = 0;
+	uint64_t write_delta = 0;
 
-    if (cur_disk.reads_completed >= prev_disk.reads_completed)
-        read_delta = (uint64_t)(cur_disk.reads_completed - prev_disk.reads_completed);
-    if (cur_disk.writes_completed >= prev_disk.writes_completed)
-        write_delta = (uint64_t)(cur_disk.writes_completed - prev_disk.writes_completed);
+	if (disk_ok && have_disk) {
+		if (cur_disk.reads_completed >= prev_disk.reads_completed)
+			read_delta = (uint64_t)(cur_disk.reads_completed - prev_disk.reads_completed);
+		if (cur_disk.writes_completed >= prev_disk.writes_completed)
+			write_delta = (uint64_t)(cur_disk.writes_completed - prev_disk.writes_completed);
+		prev_disk = cur_disk;
+	} else {
+		read_delta = 0;
+		write_delta = 0;
+		if (disk_ok) {
+			prev_disk = cur_disk;
+			have_disk = true;
+		}
+	}
 
-    uint64_t total_delta = read_delta + write_delta;
+	uint64_t total_delta = read_delta + write_delta;
 
-    atomic_store(&g_stats.read_iops, read_delta / INTERVAL_SEC);
-    atomic_store(&g_stats.write_iops, write_delta / INTERVAL_SEC);
-    atomic_store(&g_stats.total_iops, total_delta / INTERVAL_SEC);
-    prev_disk = cur_disk;
+	atomic_store(&g_stats.read_iops, read_delta / INTERVAL_SEC);
+	atomic_store(&g_stats.write_iops, write_delta / INTERVAL_SEC);
+	atomic_store(&g_stats.total_iops, total_delta / INTERVAL_SEC);
 
-    uint64_t rx_delta = 0;
-    uint64_t tx_delta = 0;
+	uint64_t rx_delta = 0;
+	uint64_t tx_delta = 0;
 
-    if (cur_net.rx >= prev_net.rx)
-        rx_delta = cur_net.rx - prev_net.rx;
-    if (cur_net.tx >= prev_net.tx)
-        tx_delta = cur_net.tx - prev_net.tx;
+	if (net_ok && have_net) {
+		if (cur_net.rx >= prev_net.rx)
+			rx_delta = cur_net.rx - prev_net.rx;
+		if (cur_net.tx >= prev_net.tx)
+			tx_delta = cur_net.tx - prev_net.tx;
+		prev_net = cur_net;
+	} else {
+		rx_delta = 0;
+		tx_delta = 0;
+		if (net_ok) {
+			prev_net = cur_net;
+			have_net = true;
+		}
+	}
 
-    // bytes/sec for the storage-node NIC (from /proc/net/dev)
-    atomic_store(&g_stats.s_net_in, rx_delta / INTERVAL_SEC);
-    atomic_store(&g_stats.s_net_out, tx_delta / INTERVAL_SEC);
-    prev_net = cur_net;
+	// bytes/sec for the storage-node NIC (from /proc/net/dev)
+	atomic_store(&g_stats.s_net_in, rx_delta / INTERVAL_SEC);
+	atomic_store(&g_stats.s_net_out, tx_delta / INTERVAL_SEC);
 
-    return 0;
+	return cpu_ok ? 0 : -1;
 }
 
 /* -------------------------

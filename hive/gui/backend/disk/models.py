@@ -60,5 +60,5 @@ class Storage_Node_Stats(models.Model):
 
     class Meta:
         managed = False
-        db_table = 'v_sn_stats'
+        db_table = 'v_stats'
         
