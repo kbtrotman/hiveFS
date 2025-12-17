@@ -1,5 +1,5 @@
 # Minimal Makefile for the wrapper.
-# Adjust LIBS depending on your distro. Common combos:
+# Adjust LIBS depending on distro. Common combos:
 #   Ubuntu/Debian: -lrocksdb -lz -lbz2 -lsnappy -llz4 -lzstd -lm -lpthread -ldl -lssl -lcrypto
 #   MariaDB: -lmariadb (or -lmysqlclient on some systems)
 #
@@ -31,7 +31,8 @@ UV_LIB := /usr/lib
 #PROTO_HDRS := $(PROTO_SRCS:.proto=.pb.h)
 
 # ---- Sources ----
-SRCS_C  := hive_guard.c hive_guard_tcp.c hive_guard_sql.c hive_guard_erasure_code.c hive_guard_raft.c hive_guard_sn_tcp.c hive_guard_kv.c
+SRCS_C  := hive_guard.c hive_guard_tcp.c hive_guard_sql.c hive_guard_erasure_code.c hive_guard_raft.c hive_guard_sn_tcp.c hive_guard_kv.c \
+           hive_guard_stats.c
 #SRCS_CC := hive_guard_raft_rpc.cc \
 #           hive_guard_raft_statemachine.cc \
 #           hive_guard_raft.cc \

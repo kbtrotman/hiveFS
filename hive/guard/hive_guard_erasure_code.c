@@ -440,6 +440,7 @@ bool hifs_volume_block_ec_encode(const uint8_t *buf, uint32_t len,
 				 struct hifs_ec_stripe_set *out)
 {
 #if HIFS_DEBUG_DISABLE_EC
+	(void)pre_hash;
 	return hifs_ec_build_plain_stripes(buf, len, algo, out);
 #else
 	const size_t total = HIFS_EC_K + HIFS_EC_M;
@@ -562,14 +563,18 @@ bool hifs_volume_block_store(uint64_t volume_id, uint64_t block_no,
 	if (!buf || len == 0)
 		return false;
 
-	if (hash && hg_kv_get_h2s((uint8_t)algo, hash, &existing) == 0) {
-		int rc = hifs_submit_existing_block(volume_id, block_no, algo,
-						    hash, &existing);
-		if (rc == 0)
-			return true;
-		hifs_warning("Existing hash lookup failed for vol=%llu block=%llu, forcing re-store",
-			     (unsigned long long)volume_id,
-			     (unsigned long long)block_no);
+	if (hash) {
+		uint8_t hash_full[32] = {0};
+		memcpy(hash_full, hash, HIFS_BLOCK_HASH_SIZE);
+		if (hg_kv_get_h2s((uint8_t)algo, hash_full, &existing) == 0) {
+			int rc = hifs_submit_existing_block(volume_id, block_no, algo,
+							    hash, &existing);
+			if (rc == 0)
+				return true;
+			hifs_warning("Existing hash lookup failed for vol=%llu block=%llu, forcing re-store",
+				     (unsigned long long)volume_id,
+				     (unsigned long long)block_no);
+		}
 	}
 
 	if (!hifs_volume_block_ec_encode(buf, len, algo, hash, &ec))
@@ -596,14 +601,18 @@ int hifs_put_block(uint64_t volume_id, uint64_t block_no,
 	if (!data || len == 0 || len > HIFS_DEFAULT_BLOCK_SIZE)
 		return -EINVAL;
 
-	if (hash && hg_kv_get_h2s((uint8_t)algo, hash, &existing) == 0) {
-		rc = hifs_submit_existing_block(volume_id, block_no, algo,
-						hash, &existing);
-		if (rc == 0)
-			return 0;
-		hifs_warning("Existing hash lookup failed for vol=%llu block=%llu, forcing re-store",
-			     (unsigned long long)volume_id,
-			     (unsigned long long)block_no);
+	if (hash) {
+		uint8_t hash_full[32] = {0};
+		memcpy(hash_full, hash, HIFS_BLOCK_HASH_SIZE);
+		if (hg_kv_get_h2s((uint8_t)algo, hash_full, &existing) == 0) {
+			rc = hifs_submit_existing_block(volume_id, block_no, algo,
+							hash, &existing);
+			if (rc == 0)
+				return 0;
+			hifs_warning("Existing hash lookup failed for vol=%llu block=%llu, forcing re-store",
+				     (unsigned long long)volume_id,
+				     (unsigned long long)block_no);
+		}
 	}
 
 	if (!hifs_volume_block_ec_encode(data, (uint32_t)len, algo, hash, &ec))

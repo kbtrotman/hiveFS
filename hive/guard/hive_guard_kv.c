@@ -14,11 +14,14 @@
  *
  * Simple KV store interface using high-speed SSD-optimized RocksDB key/value store
  */
-#include "hive_guard_kv.h"
-#include "hive_guard_erasure_code.h"
-#include <string.h>
+
+ #include <string.h>
 #include <stdio.h>
 #include <rocksdb/c.h>
+
+#include "hive_guard_kv.h"
+#include "hive_guard_erasure_code.h"
+#include "hive_guard_stats.h"
 
 static rocksdb_t *g_db = NULL;
 

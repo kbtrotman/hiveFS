@@ -141,7 +141,7 @@ static bool hifs_block_chain_flush(struct hifs_block_chain_ctx *ctx)
 				sent = false;
 				break;
 			}
-			if (!hifs_volume_block_store(ctx->volume_id, block_no,
+			if (!hifs_volume_block_send(ctx->volume_id, block_no,
 						     cursor, len,
 						     ctx->hashes + (i * HIFS_BLOCK_HASH_SIZE),
 						     ctx->algos ? ctx->algos[i] : HIFS_HASH_ALGO_SHA256)) {
@@ -748,7 +748,7 @@ int hicomm_handle_command(int fd, const struct hifs_cmds *cmd)
 			}
 
 			if (!buffered && store_len) {
-				if (!hifs_volume_block_store(volume_id, block_no,
+				if (!hifs_volume_block_send(volume_id, block_no,
 							     store_buf, store_len,
 							     msg_local.hash,
 							     msg_local.hash_algo)) {

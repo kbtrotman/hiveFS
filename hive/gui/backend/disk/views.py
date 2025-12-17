@@ -89,6 +89,11 @@ class DiskNodeStatViewSet(ViewSet):
             {
                 "key": stats.node_id,
                 "s_ts": stats.s_ts,
+                "cpu": stats.cpu,
+                "mem_used": stats.mem_used,
+                "mem_avail": stats.mem_avail,                   
+                "writes_mbps": stats.writes_mbps,
+                "reads_mbps": stats.read_mbps,
                 "read_iops": stats.read_iops,
                 "write_iops": stats.write_iops,
                 "total_iops": stats.total_iops,
@@ -96,9 +101,21 @@ class DiskNodeStatViewSet(ViewSet):
                 "c_net_in": stats.c_net_in,
                 "c_net_out": stats.c_net_out,
                 "s_net_in": stats.s_net_in,
-                "s_net_out": stats.s_net_out,
-                "avg_latency": stats.avg_latency,
+                "s_net_out": stats.s_net_out,  
+                "meta_chan_ps": stats.meta_chan_ps,
+                "avg_wr_latency": stats.avg_wr_latency,
+                "avg_wr_latency": stats.avg_wr_latency,
+                "sees_warning": stats.sees_warning,
+                "sees_error": stats.sees_error,
+                "message": stats.message,
+                "cont1_isok": stats.cont1_isok,
+                "cont2_isok": stats.cont2_isok,
+                "cont1_message": stats.cont1_message,
+                "cont2_message": stats.cont2_message,
+                "clients": stats.clients,
+                "lavg": stats.lavg,
             }
             for stats in qs
         ]
         return Response(payload)
+    

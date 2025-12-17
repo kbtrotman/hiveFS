@@ -35,7 +35,7 @@ router.register(r'tenant', TenantRootView, basename='tenant')
 router.register(r'nodes', StorageNodeViewSet, basename='nodes')
 router.register(r'snstats', StorageNodeViewSet, basename='snstats')
 router.register(r'disk', DiskNodeViewSet, basename='disk')
-router.register(r'dstats', DiskNodeViewSet, basename='dstats')
+router.register(r'stats', DiskNodeViewSet, basename='stats')
 
 urlpatterns = [
     path("api/v1/", include(router.urls)),

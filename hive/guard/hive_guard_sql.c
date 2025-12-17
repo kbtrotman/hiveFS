@@ -753,23 +753,31 @@ bool get_hive_host_data(void)
 
 	char *serial_q = hifs_get_quoted_value(hive_mach_id);
 	char *name_q = hifs_get_quoted_value(name);
+	char *addr_q = hifs_get_quoted_value(ip_address);
 	char *os_name_q = hifs_get_quoted_value(uts.sysname);
 	char *os_version_q = hifs_get_quoted_value(uts.release);
-	if (!serial_q || !name_q || !os_name_q || !os_version_q) {
+	if (!serial_q || !name_q || !addr_q || !os_name_q || !os_version_q) {
 		free(serial_q);
 		free(name_q);
+		free(addr_q);
 		free(os_name_q);
 		free(os_version_q);
 		hifs_err("Out of memory while preparing host registration query");
 		return 0;
 	}
 
+	unsigned int hicom_port = hifs_local_guard_port();
+	uint64_t epoch = (uint64_t)time(NULL);
+	unsigned int fenced = 0;
+
 	snprintf(sql_query, sizeof(sql_query), SQL_HOST_UPSERT,
 		 safe_str(serial_q), safe_str(name_q), hive_host_id,
-		 safe_str(os_name_q), safe_str(os_version_q));
+		 safe_str(addr_q), safe_str(os_name_q), safe_str(os_version_q),
+		 hicom_port, (unsigned long long)epoch, fenced);
 
 	free(serial_q);
 	free(name_q);
+	free(addr_q);
 	free(os_name_q);
 	free(os_version_q);
 

@@ -1458,7 +1458,7 @@ bool hifs_volume_block_load(uint64_t volume_id, uint64_t block_no,
 	return true;
 }
 
-bool hifs_volume_block_store(uint64_t volume_id, uint64_t block_no,
+bool hifs_volume_block_send(uint64_t volume_id, uint64_t block_no,
 			     const uint8_t *buf, uint32_t len,
 			     const uint8_t *hash, uint8_t hash_algo)
 {

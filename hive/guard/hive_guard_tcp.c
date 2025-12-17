@@ -887,6 +887,15 @@ static bool get_u64(const JVal *root, const char *key, uint64_t *out)
 	return false;
 }
 
+static bool get_u32(const JVal *root, const char *key, uint32_t *out)
+{
+	uint64_t tmp = 0;
+	if (!get_u64(root, key, &tmp) || tmp > UINT32_MAX)
+		return false;
+	*out = (uint32_t)tmp;
+	return true;
+}
+
 static const char *safe_str(const char *s)
 {
 	return s ? s : "";

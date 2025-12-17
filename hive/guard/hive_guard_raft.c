@@ -13,19 +13,19 @@
 
 #include <errno.h>
 
-#include "../../hifs_shared_defs.h"
-#include "hive_guard_erasure_code.h"
-#include "hive_guard_raft.h"
-#include "hive_guard_sql.h"
-#include "hive_guard_kv.h"
-#include "hive_guard.h"
-
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <uv.h>
+
+#include "../../hifs_shared_defs.h"
+#include "hive_guard_erasure_code.h"
+#include "hive_guard_raft.h"
+#include "hive_guard_sql.h"
+#include "hive_guard_kv.h"
+#include "hive_guard.h"
 
 struct uv_raft;
 
