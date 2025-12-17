@@ -1753,8 +1753,11 @@ bool hifs_load_storage_nodes(void)
 		COL_VERSION,
 		COL_PATCH_LEVEL,
 		COL_FENCED,
+		COL_DOWN,
 		COL_LAST_MAINT,
 		COL_MAINT_REASON,
+		COL_MAINT_STARTED,
+		COL_MAINT_ENDED,
 		COL_DATE_ADDED,
 		COL_SN_CAPCITY,
 		COL_SN_USED_CAPACITY,
@@ -1777,8 +1780,36 @@ bool hifs_load_storage_nodes(void)
 		return false;
 
 	row_count = (size_t)mysql_num_rows(res);
-	if (row_count == 0)
-		goto fail;
+	if (row_count == 0) {
+		/* Fresh DB: seed with this node and persist it */
+		mysql_free_result(res);
+		sqldb.last_query = NULL;
+		struct hive_storage_node local_seed;
+		if (!hifs_get_local_node_identity(&local_seed))
+			return false;
+		if (storage_node_id == 0)
+			storage_node_id = 1;
+		local_seed.id = storage_node_id;
+		int ver = 0, patch = 0;
+		hifs_parse_version(&ver, &patch);
+		local_seed.hive_version = (uint32_t)ver;
+		local_seed.hive_patch_level = (uint32_t)patch;
+		local_seed.last_heartbeat = (uint64_t)time(NULL);
+		local_seed.storage_node_connect_timeout_ms = 0;
+		local_seed.client_connect_timeout_ms = 0;
+		(void)hifs_persist_storage_node(local_seed.id,
+						local_seed.address,
+						local_seed.guard_port);
+
+		nodes = calloc(1, sizeof(*nodes));
+		if (!nodes)
+			return false;
+		nodes[0] = local_seed;
+		row_count = 1;
+		sqldb.rows = (int)row_count;
+		/* re-use post-load path with synthetic nodes */
+		goto loaded_nodes_ready;
+	}
 
 	nodes = calloc(row_count, sizeof(*nodes));
 	if (!nodes)
@@ -1800,11 +1831,14 @@ bool hifs_load_storage_nodes(void)
 			strncpy(nodes[i].serial, row[COL_SERIAL], sizeof(nodes[i].serial) - 1);
 		nodes[i].guard_port = (uint16_t)sql_to_u32(row[COL_GUARD_PORT]);
 		nodes[i].stripe_port = (uint16_t)sql_to_u32(row[COL_DATA_PORT]);
+		nodes[i].online = row[COL_DOWN] ? (uint8_t)!sql_to_u32(row[COL_DOWN]) : 1;
 		nodes[i].fenced = (uint8_t)sql_to_u32(row[COL_FENCED]);
 		nodes[i].last_heartbeat = sql_to_u64(row[COL_LAST_HEARTBEAT]);
 		nodes[i].hive_version = sql_to_u32(row[COL_VERSION]);
 		nodes[i].hive_patch_level = sql_to_u32(row[COL_PATCH_LEVEL]);
 		nodes[i].last_maintenance = sql_to_u64(row[COL_LAST_MAINT]);
+		nodes[i].maintenance_started_at = sql_to_u64(row[COL_MAINT_STARTED]);
+		nodes[i].maintenance_ended_at = sql_to_u64(row[COL_MAINT_ENDED]);
 		if (row[COL_MAINT_REASON])
 			strncpy(nodes[i].maintenance_reason,
 				row[COL_MAINT_REASON],
@@ -1831,6 +1865,7 @@ bool hifs_load_storage_nodes(void)
 	sqldb.last_query = NULL;
 	sqldb.rows = (int)row_count;
 
+loaded_nodes_ready:
 	old_nodes = loaded_storage_nodes;
 	loaded_storage_nodes = nodes;
 	loaded_storage_node_count = row_count;

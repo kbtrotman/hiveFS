@@ -14,12 +14,14 @@
  * independantly started threads.
  */
 
-#include "hive_guard_raft.h"
-#include "hive_guard.h"
+
 #include <errno.h>
 #include <string.h>
 #include <sys/stat.h>
 
+#include "hive_guard_raft.h"
+#include "hive_guard.h"
+#include "hive_guard_stats.h"
 #include "hive_guard_sn_tcp.h"
 #include "hive_guard_erasure_code.h"
 #include "hive_guard_sql.h"
@@ -164,8 +166,8 @@ int main(void)
 		.num_peers    = (unsigned)peer_count,
 	};
 
-    fprintf(stderr, "main: starting\n");
-    fflush(stderr);
+	fprintf(stderr, "main: starting\n");
+	fflush(stderr);
 
 	if (hg_raft_init(&rcfg) != 0) {
 		fprintf(stderr, "main: hg_raft_init failed, exiting without Raft\n");
@@ -174,14 +176,20 @@ int main(void)
 	}
 	if (dynamic_peers)
 		free_peer_buffers(dynamic_peers, peer_addr_bufs, peer_count);
+
 	if (hifs_sn_tcp_start(0, hifs_recv_stripe_from_node) != 0) {
 		fprintf(stderr, "main: failed to start data listener\n");
 	}
 
-    /* Now start the existing epoll-based TCP server.
-     * Raft is running in its own thread; both will make progress.
-     */
+	if (storage_node_id == 0)
+		storage_node_id = (unsigned int)self_id;
+	hg_stats_flush_periodic_start((int)storage_node_id, NULL);
+
+	/* Now start the existing epoll-based TCP server.
+	 * Raft is running in its own thread; both will make progress.
+	 */
 	ret = hive_guard_server_main();
+	hg_stats_flush_periodic_stop();
 	hg_kv_shutdown();
 	return ret;
 }
