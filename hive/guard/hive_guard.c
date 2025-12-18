@@ -16,8 +16,12 @@
 
 
 #include <errno.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 #include "hive_guard_raft.h"
 #include "hive_guard.h"
@@ -27,9 +31,87 @@
 #include "hive_guard_sql.h"
 #include "hive_guard_kv.h"
 
-#define HIVE_GUARD_STATE_ROOT "/var/lib/hivefs"
-#define HIVE_GUARD_RAFT_DIR   HIVE_GUARD_STATE_ROOT "/hive_guard_raft"
-#define HIVE_GUARD_KV_DIR     HIVE_GUARD_STATE_ROOT "/hive_guard_kv"
+
+static bool needs_bootstrap(void)
+{
+	struct stat st;
+	char *buf = NULL;
+	size_t len;
+	const char *key = "\"cluster_state\"";
+	char *p;
+	bool ret = false;
+
+	if (stat(HIVE_NODE_CONF_PATH, &st) != 0 || st.st_size <= 0)
+		return false;
+
+	len = (size_t)st.st_size;
+	buf = malloc(len + 1);
+	if (!buf)
+		return false;
+
+	FILE *f = fopen(HIVE_NODE_CONF_PATH, "r");
+	if (!f) {
+		free(buf);
+		return false;
+	}
+
+	len = fread(buf, 1, len, f);
+	fclose(f);
+	buf[len] = '\0';
+
+	p = strstr(buf, key);
+	if (p) {
+		p += strlen(key);
+		while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')
+			++p;
+		if (*p == ':') {
+			++p;
+			while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')
+				++p;
+			if (*p == '"') {
+				const char *val = ++p;
+				while (*p && *p != '"')
+					++p;
+				size_t vlen = (size_t)(p - val);
+				if ((vlen == strlen("unconfigured") &&
+				     strncmp(val, "unconfigured", vlen) == 0) ||
+				    (vlen == strlen("pending") &&
+				     strncmp(val, "pending", vlen) == 0)) {
+					ret = true;
+				}
+			}
+		}
+	}
+
+	free(buf);
+	return ret;
+}
+
+static void maybe_run_bootstrap(void)
+{
+	if (!needs_bootstrap())
+		return;
+
+	pid_t pid = fork();
+	if (pid == 0) {
+		execlp(HIVE_BOOTSTRAP_BIN, HIVE_BOOTSTRAP_BIN, (char *)NULL);
+		_exit(127);
+	}
+	if (pid < 0) {
+		fprintf(stderr, "hive_guard: failed to fork for bootstrap: %s\n",
+			strerror(errno));
+		return;
+	}
+
+	int status;
+	if (waitpid(pid, &status, 0) < 0) {
+		fprintf(stderr, "hive_guard: waitpid for bootstrap failed: %s\n",
+			strerror(errno));
+	} else if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+		fprintf(stderr, "hive_guard: bootstrap exited abnormally (%d)\n",
+			status);
+	}
+}
 
 static bool ensure_directory(const char *path)
 {
@@ -136,6 +218,8 @@ int main(void)
 	uint64_t self_id = fallback_peers[0].id;
 	const char *self_address = fallback_peers[0].address;
 	int ret;
+
+	maybe_run_bootstrap();
 
 	if (!ensure_directory(HIVE_GUARD_STATE_ROOT) ||
 	    !ensure_directory(HIVE_GUARD_RAFT_DIR) ||

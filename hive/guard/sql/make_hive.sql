@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS cluster (
   off_line BOOLEAN NOT NULL DEFAULT 1,
   mgmt_api_port       INT NULL,
   mgmt_api_version    VARCHAR(32) NULL,
-  cluster_state       ENUM('active', 'degraded', 'maintenance', 'offline')
+  cluster_state       ENUM('unconfigured', 'pending', 'active', 'degraded', 'maintenance', 'offline')
                       NOT NULL DEFAULT 'active',
   cluster_health      ENUM('ok', 'warning', 'critical') 
                       NOT NULL DEFAULT 'ok',

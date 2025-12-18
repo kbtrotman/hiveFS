@@ -35,6 +35,12 @@
 
 #include "../../hicomm/hi_command.h"
 
+#define HIVE_GUARD_STATE_ROOT "/var/lib/hivefs"
+#define HIVE_GUARD_RAFT_DIR   HIVE_GUARD_STATE_ROOT "/hive_guard_raft"
+#define HIVE_GUARD_KV_DIR     HIVE_GUARD_STATE_ROOT "/hive_guard_kv"
+#define HIVE_NODE_CONF_PATH   "/etc/hivefs/node.json.conf"
+#define HIVE_BOOTSTRAP_BIN    "hive_bootstrap"
+
 
 #define ENV_LISTEN_ADDR  "WRAP_LISTEN_ADDR"
 #define ENV_LISTEN_PORT  "WRAP_LISTEN_PORT"
