@@ -24,6 +24,7 @@ from monitor.views import MonitorRootView
 from tenant.views import TenantRootView
 from nodes.views import StorageNodeViewSet, StorageNodeStatViewSet
 from disk.views import DiskNodeViewSet, DiskNodeStatViewSet
+from api.views import BootstrapError, BootstrapInitView, BootstrapStatusView, AddNodeView
 
 router = DefaultRouter(trailing_slash=False)
 #router.register(r'groups', GroupViewSet, basename='group')
@@ -36,6 +37,9 @@ router.register(r'nodes', StorageNodeViewSet, basename='nodes')
 router.register(r'snstats', StorageNodeViewSet, basename='snstats')
 router.register(r'disk', DiskNodeViewSet, basename='disk')
 router.register(r'stats', DiskNodeStatViewSet, basename='stats')
+router.register(r'bootstrap/status', BootstrapStatusView, basename='bootstrap-status')
+router.register(r'bootstrap/init', BootstrapInitView, basename='bootstrap-init')
+router.register(r'bootstrap/addnode', AddNodeView, basename='bootstrap-add_node')
 
 urlpatterns = [
     path("api/v1/", include(router.urls)),
