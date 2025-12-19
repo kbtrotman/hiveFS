@@ -7,10 +7,11 @@
  *
  */
 
-#include "hive_bootstrap.h"
-#include "hive_bootstrap_sock.h"
 
 #include <sys/un.h>
+
+#include "hive_bootstrap.h"
+#include "hive_bootstrap_sock.h"
 
 #define HIVE_BOOTSTRAP_SOCK_PATH "/run/hive_bootstrap.sock"
 #define HIVE_BOOTSTRAP_MSG_MAX   4096
@@ -20,11 +21,17 @@ struct hive_bootstrap_request {
 	char command[32];
 	uint64_t cluster_id;
 	uint64_t node_id;
-	char cluster_name[31];
+	char cluster_name[30];
 	char cluster_desc[201];
-	char node_name[31];
+	char node_name[50];
 	char join_token[201];
 };
+
+static char g_status_message[64] = "IDLE";
+static unsigned int g_status_percent = 0;
+static char g_socket_path[sizeof(((struct sockaddr_un *)0)->sun_path)] =
+	HIVE_BOOTSTRAP_SOCK_PATH;
+static const char *configure_status(void);
 
 static inline const char *skip_ws(const char *p)
 {
@@ -118,6 +125,16 @@ static void safe_copy(char *dst, size_t dst_len, const char *src)
 	dst[to_copy] = '\0';
 }
 
+static void bootstrap_status_update(const char *message, unsigned int percent)
+{
+	if (percent > 100)
+		percent = 100;
+	if (!message || !*message)
+		message = "IDLE";
+	safe_copy(g_status_message, sizeof(g_status_message), message);
+	g_status_percent = percent;
+}
+
 static bool parse_bootstrap_request(const char *json,
 				    struct hive_bootstrap_request *req)
 {
@@ -144,6 +161,7 @@ static bool parse_bootstrap_request(const char *json,
 
 static void configure_cluster(const struct hive_bootstrap_request *req)
 {
+	bootstrap_status_update("cluster_config: processing", 25);
 	hbc.cluster_id = req->cluster_id;
 	safe_copy(hbc.cluster_state, sizeof(hbc.cluster_state), "configuring");
 	safe_copy(hbc.database_state, sizeof(hbc.database_state), "pending");
@@ -154,10 +172,12 @@ static void configure_cluster(const struct hive_bootstrap_request *req)
 		(unsigned long long)req->cluster_id,
 		req->cluster_name,
 		req->cluster_desc);
+	bootstrap_status_update("cluster_config: complete", 100);
 }
 
 static void configure_node(const struct hive_bootstrap_request *req)
 {
+	bootstrap_status_update("node_join: processing", 25);
 	hbc.cluster_id = req->cluster_id;
 	hbc.storage_node_id = (uint32_t)req->node_id;
 	safe_copy(hbc.storage_node_name, sizeof(hbc.storage_node_name),
@@ -170,12 +190,16 @@ static void configure_node(const struct hive_bootstrap_request *req)
 		(unsigned long long)req->cluster_id,
 		(unsigned long long)req->node_id,
 		req->node_name);
+	bootstrap_status_update("node_join: complete", 100);
 }
 
-static bool dispatch_bootstrap_request(const struct hive_bootstrap_request *req)
+static bool dispatch_bootstrap_request(const struct hive_bootstrap_request *req,
+				       const char **ok_message_out)
 {
 	if (!req)
 		return false;
+	if (ok_message_out)
+		*ok_message_out = NULL;
 	if (strcmp(req->command, "cluster_config") == 0 ||
 	    strcmp(req->command, "cluster") == 0) {
 		configure_cluster(req);
@@ -190,7 +214,8 @@ static bool dispatch_bootstrap_request(const struct hive_bootstrap_request *req)
     	if (strcmp(req->command, "status") == 0 ||
 	    strcmp(req->command, "stat") == 0 ||
 	    strcmp(req->command, "alive") == 0) {
-		configure_status(req);
+		if (ok_message_out)
+			*ok_message_out = configure_status();
 		return true;
 	}
 	return false;
@@ -251,6 +276,7 @@ static bool process_client(int fd)
 {
 	char buf[HIVE_BOOTSTRAP_MSG_MAX];
 	struct hive_bootstrap_request req;
+	const char *ok_message = NULL;
 
 	if (!read_json_request(fd, buf, sizeof(buf))) {
 		respond(fd, "ERR invalid payload\n");
@@ -260,12 +286,18 @@ static bool process_client(int fd)
 		respond(fd, "ERR invalid JSON\n");
 		return false;
 	}
-	if (!dispatch_bootstrap_request(&req)) {
+	if (!dispatch_bootstrap_request(&req, &ok_message)) {
 		respond(fd, "ERR unknown command\n");
 		return false;
 	}
 
-	respond(fd, "OK\n");
+	if (ok_message && *ok_message) {
+		respond(fd, "OK ");
+		respond(fd, ok_message);
+		respond(fd, "\n");
+	} else {
+		respond(fd, "OK\n");
+	}
 	return true;
 }
 
@@ -282,9 +314,15 @@ static int create_listener(const char *path)
 	memset(&addr, 0, sizeof(addr));
 	addr.sun_family = AF_UNIX;
 	safe_copy(addr.sun_path, sizeof(addr.sun_path), path);
+	safe_copy(g_socket_path, sizeof(g_socket_path), addr.sun_path);
 	unlink(path);
 	if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
 		close(fd);
+		return -1;
+	}
+	if (chmod(path, 0666) != 0) {
+		close(fd);
+		unlink(path);
 		return -1;
 	}
 	if (listen(fd, HIVE_BOOTSTRAP_BACKLOG) != 0) {
@@ -320,4 +358,43 @@ int hive_bootstrap_sock_run(const char *socket_path)
 	close(listener);
 	unlink(path);
 	return handled ? 0 : -1;
+}
+
+static inline const char *state_or_unknown(const char *state)
+{
+	return (state && *state) ? state : "unknown";
+}
+
+static const char *configure_status(void)
+{
+	static char status_buf[HIVE_BOOTSTRAP_MSG_MAX];
+	struct stat st;
+
+	if (stat(g_socket_path, &st) != 0) {
+		snprintf(status_buf, sizeof(status_buf),
+			 "{\"ok\":false,"
+			 "\"status\":\"NO BOOTSTRAPS\","
+			 "\"percent\":0,"
+			 "\"cluster_state\":\"unknown\","
+			 "\"database_state\":\"unknown\","
+			 "\"cont1_state\":\"unknown\","
+			 "\"cont2_state\":\"unknown\"}");
+		return status_buf;
+	}
+
+	snprintf(status_buf, sizeof(status_buf),
+		 "{\"ok\":true,"
+		 "\"status\":\"%s\","
+		 "\"percent\":%u,"
+		 "\"cluster_state\":\"%s\","
+		 "\"database_state\":\"%s\","
+		 "\"cont1_state\":\"%s\","
+		 "\"cont2_state\":\"%s\"}",
+		 g_status_message,
+		 g_status_percent,
+		 state_or_unknown(hbc.cluster_state),
+		 state_or_unknown(hbc.database_state),
+		 state_or_unknown(hbc.cont1_state),
+		 state_or_unknown(hbc.cont2_state));
+	return status_buf;
 }

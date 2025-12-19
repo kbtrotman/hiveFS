@@ -25,7 +25,7 @@ UV_INC := /usr/include
 UV_LIB := /usr/lib
 
 # ---- Sources ----
-SRCS_C  := hive_bootstrap.c hive_bootstrap_sql.c
+SRCS_C  := hive_bootstrap.c hive_bootstrap_sql.c hive_bootstrap_sock.c
 
 
 OBJS_C  := $(SRCS_C:.c=.o)
