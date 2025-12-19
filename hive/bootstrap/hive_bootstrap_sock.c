@@ -187,6 +187,12 @@ static bool dispatch_bootstrap_request(const struct hive_bootstrap_request *req)
 		configure_node(req);
 		return true;
 	}
+    	if (strcmp(req->command, "status") == 0 ||
+	    strcmp(req->command, "stat") == 0 ||
+	    strcmp(req->command, "alive") == 0) {
+		configure_status(req);
+		return true;
+	}
 	return false;
 }
 
