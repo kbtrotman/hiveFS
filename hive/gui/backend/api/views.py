@@ -1,9 +1,10 @@
 from rest_framework.response import Response
 from rest_framework.viewsets import ViewSet
+from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status as http_status
 from .bootstrap import call_bootstrap, BootstrapError
-class BootstrapStatusView(ViewSet):
+class BootstrapStatusView(APIView):
     authentication_classes = []  # allow pre-login if desired
     permission_classes = []      # tighten later
 
@@ -14,7 +15,7 @@ class BootstrapStatusView(ViewSet):
         except BootstrapError as e:
             return Response({"ok": False, "error": str(e)}, status=http_status.HTTP_502_BAD_GATEWAY)
 
-class BootstrapInitView(ViewSet):
+class BootstrapInitView(APIView):
     authentication_classes = []
     permission_classes = []
 
@@ -25,7 +26,12 @@ class BootstrapInitView(ViewSet):
         except BootstrapError as e:
             return Response({"ok": False, "error": str(e)}, status=http_status.HTTP_502_BAD_GATEWAY)
 
-class AddNodeView(ViewSet):
+class AddNodeView(APIView):
+    '''
+    Mutation to Add a Node
+    To be called only from the correct interface and in the correct format.
+    A published protocol is not available to do this remotely. 
+    '''
     authentication_classes = []
     permission_classes = []
 

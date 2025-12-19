@@ -21,6 +21,7 @@
 #include <unistd.h>
 
 #include "hive_bootstrap.h"
+#include "hive_bootstrap_sock.h"
 #include "../guard/hive_guard.h"
 #include "../guard/hive_guard_sn_tcp.h"
 #include "../guard/hive_guard_sql.h"
@@ -162,68 +163,70 @@ static void apply_node_config(const char *json)
 	uint64_t val;
 
 	if (parse_json_u64_value(json, "storage_node_id", &val))
-		storage_node_id = (unsigned int)val;
+		hbc.storage_node_id = (unsigned int)val;
 	if (parse_json_u64_value(json, "cluster_id", &val))
-		cluster_id = (unsigned int)val;
+		hbc.cluster_id = (unsigned int)val;
 	parse_json_string_value(json, "cluster_state",
-		cluster_state, sizeof(cluster_state));
+		hbc.cluster_state, sizeof(hbc.cluster_state));
 	parse_json_string_value(json, "database_state",
-		database_state, sizeof(database_state));
+		hbc.database_state, sizeof(hbc.database_state));
+	parse_json_string_value(json, "kv_state",
+		hbc.kv_state, sizeof(hbc.kv_state));		
 	parse_json_string_value(json, "cont1_state",
-		cont1_state, sizeof(cont1_state));
+		hbc.cont1_state, sizeof(hbc.cont1_state));
 	parse_json_string_value(json, "cont2_state",
-		cont2_state, sizeof(cont2_state));
+		hbc.cont2_state, sizeof(hbc.cont2_state));
 	if (parse_json_u64_value(json, "min_nodes_req", &val))
-		min_nodes_req = (unsigned int)val;
+		hbc.min_nodes_req = (unsigned int)val;
 	parse_json_string_value(json, "bootstrap_token",
-		bootstrap_token, sizeof(bootstrap_token));	
+		hbc.bootstrap_token, sizeof(hbc.bootstrap_token));	
 	parse_json_string_value(json, "first_boot_ts",
-		first_boot_ts, sizeof(first_boot_ts));
+		hbc.first_boot_ts, sizeof(hbc.first_boot_ts));
 
 	parse_json_string_value(json, "storage_node_name",
-		storage_node_name, sizeof(storage_node_name));
+		hbc.storage_node_name, sizeof(hbc.storage_node_name));
 
 	parse_json_string_value(json, "storage_node_address",
-		storage_node_address, sizeof(storage_node_address));
+		hbc.storage_node_address, sizeof(hbc.storage_node_address));
 	parse_json_string_value(json, "storage_node_uid",
-		storage_node_uid, sizeof(storage_node_uid));
+		hbc.storage_node_uid, sizeof(hbc.storage_node_uid));
 	parse_json_string_value(json, "storage_node_serial",
-		storage_node_serial, sizeof(storage_node_serial));
+		hbc.storage_node_serial, sizeof(hbc.storage_node_serial));
 	if (parse_json_u64_value(json, "storage_node_guard_port", &val))
-		storage_node_guard_port = (uint16_t)val;
+		hbc.storage_node_guard_port = (uint16_t)val;
 	if (parse_json_u64_value(json, "storage_node_stripe_port", &val))
-		storage_node_stripe_port = (uint16_t)val;
+		hbc.storage_node_stripe_port = (uint16_t)val;
 	if (parse_json_u64_value(json, "storage_node_last_heartbeat", &val))
-		storage_node_last_heartbeat = val;
+		hbc.storage_node_last_heartbeat = val;
 	if (parse_json_u64_value(json, "storage_node_fenced", &val))
-		storage_node_fenced = (uint8_t)val;
+		hbc.storage_node_fenced = (uint8_t)val;
 	if (parse_json_u64_value(json, "storage_node_hive_version", &val))
-		storage_node_hive_version = (uint32_t)val;
+		hbc.storage_node_hive_version = (uint32_t)val;
 	if (parse_json_u64_value(json, "storage_node_hive_patch_level", &val))
-		storage_node_hive_patch_level = (uint32_t)val;
+		hbc.storage_node_hive_patch_level = (uint32_t)val;
 	if (parse_json_u64_value(json, "storage_node_last_maintenance", &val))
-		storage_node_last_maintenance = val;
+		hbc.storage_node_last_maintenance = val;
 	parse_json_string_value(json, "storage_node_maintenance_reason",
-		storage_node_maintenance_reason,
-		sizeof(storage_node_maintenance_reason));
+		hbc.storage_node_maintenance_reason,
+		sizeof(hbc.storage_node_maintenance_reason));
 	if (parse_json_u64_value(json, "storage_node_maintenance_started_at", &val))
-		storage_node_maintenance_started_at = val;
+		hbc.storage_node_maintenance_started_at = val;
 	if (parse_json_u64_value(json, "storage_node_maintenance_ended_at", &val))
-		storage_node_maintenance_ended_at = val;
+		hbc.storage_node_maintenance_ended_at = val;
 	if (parse_json_u64_value(json, "storage_node_date_added_to_cluster", &val))
-		storage_node_date_added_to_cluster = val;
+		hbc.storage_node_date_added_to_cluster = val;
 	if (parse_json_u64_value(json, "storage_node_storage_capacity_bytes", &val))
-		storage_node_storage_capacity_bytes = val;
+		hbc.storage_node_storage_capacity_bytes = val;
 	if (parse_json_u64_value(json, "storage_node_storage_used_bytes", &val))
-		storage_node_storage_used_bytes = val;
+		hbc.storage_node_storage_used_bytes = val;
 	if (parse_json_u64_value(json, "storage_node_storage_reserved_bytes", &val))
-		storage_node_storage_reserved_bytes = val;
+		hbc.storage_node_storage_reserved_bytes = val;
 	if (parse_json_u64_value(json, "storage_node_storage_overhead_bytes", &val))
-		storage_node_storage_overhead_bytes = val;
+		hbc.storage_node_storage_overhead_bytes = val;
 	if (parse_json_u64_value(json, "storage_node_client_connect_timeout_ms", &val))
-		storage_node_client_connect_timeout_ms = (uint32_t)val;
+		hbc.storage_node_client_connect_timeout_ms = (uint32_t)val;
 	if (parse_json_u64_value(json, "storage_node_storage_node_connect_timeout_ms", &val))
-		storage_node_storage_node_connect_timeout_ms = (uint32_t)val;
+		hbc.storage_node_storage_node_connect_timeout_ms = (uint32_t)val;
 }
 
 static bool load_node_config(void)
@@ -531,8 +534,8 @@ static bool update_database_state_flag(const char *state)
 	fclose(fp);
 	free(new_buf);
 	if (ok) {
-		strncpy(database_state, state, sizeof(database_state));
-		database_state[sizeof(database_state) - 1] = '\0';
+		strncpy(hbc.database_state, state, sizeof(hbc.database_state));
+		hbc.database_state[sizeof(hbc.database_state) - 1] = '\0';
 	}
 	return ok;
 }
@@ -735,18 +738,93 @@ int main(void)
 {
 
 	load_node_config();
-
-	if (strcmp(cluster_state, "unconfigured") == 0) {
-		db_config();
-		kv_config();
-	}
-
-
+	bool bootstrap_needed =
+		strcmp(hbc.cluster_state, "unconfigured") == 0 &&
+		(strcmp(hbc.database_state, "configured") != 0 ||
+		 strcmp(hbc.kv_state, "configured") != 0);
+	bool node_init_needed = false;
 
 	fprintf(stderr, "main: starting\n");
 	fflush(stderr);
 
+	if (bootstrap_needed) {
+		for (unsigned int attempt = 0;
+		     attempt < 3 && strcmp(hbc.database_state, "configured") != 0;
+		     ++attempt) {
+			fprintf(stderr,
+				"bootstrap: configuring database (attempt %u)\n",
+				attempt + 1);
+			if (db_config() != 0)
+				fprintf(stderr,
+					"bootstrap: db_config attempt %u failed\n",
+					attempt + 1);
+			load_node_config();
+		}
+		if (strcmp(hbc.database_state, "configured") != 0) {
+			fprintf(stderr,
+				"bootstrap: database configuration failed after 3 attempts; please contact support\n");
+			return 1;
+		}
 
+		for (unsigned int attempt = 0;
+		     attempt < 3 && strcmp(hbc.kv_state, "configured") != 0;
+		     ++attempt) {
+			fprintf(stderr,
+				"bootstrap: configuring KV store (attempt %u)\n",
+				attempt + 1);
+			kv_config();
+			load_node_config();
+		}
+		if (strcmp(hbc.kv_state, "configured") != 0) {
+			fprintf(stderr,
+				"bootstrap: KV configuration failed after 3 attempts; please contact support\n");
+			return 1;
+		}
+
+		if (strcmp(hbc.cluster_state, "unconfigured") != 0) {
+			fprintf(stderr,
+				"bootstrap: unexpected cluster state after configuration; please contact support\n");
+			return 1;
+		}
+		node_init_needed = true;
+	} else if (strcmp(hbc.cluster_state, "unconfigured") == 0 &&
+		   strcmp(hbc.database_state, "configured") == 0 &&
+		   strcmp(hbc.kv_state, "configured") == 0) {
+		node_init_needed = true;
+	} else if (strcmp(hbc.database_state, "configured") != 0 ||
+		   strcmp(hbc.kv_state, "configured") != 0) {
+		fprintf(stderr,
+			"bootstrap: invalid configuration state detected; please contact support\n");
+		return 1;
+	}
+
+	if (node_init_needed) {
+		int rc = -1;
+
+		for (unsigned int attempt = 0; attempt < 3; ++attempt) {
+			fprintf(stderr,
+				"bootstrap: listening for cluster/node requests (attempt %u)\n",
+				attempt + 1);
+			fflush(stderr);
+			rc = hive_bootstrap_sock_run(NULL);
+			if (rc == 0) {
+				fprintf(stderr,
+					"bootstrap: request handled, continuing startup\n");
+				break;
+			}
+			fprintf(stderr,
+				"bootstrap: socket listener failed (attempt %u)\n",
+				attempt + 1);
+		}
+
+		if (rc != 0) {
+			fprintf(stderr,
+				"bootstrap: failed to initialize cluster/node after 3 attempts; please contact support\n");
+			return 1;
+		}
+	}
+
+ 
 //	if (storage_node_id == 0)
 //		storage_node_id = (unsigned int)self_id;
 

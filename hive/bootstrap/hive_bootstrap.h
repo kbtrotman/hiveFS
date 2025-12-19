@@ -50,6 +50,7 @@ struct hive_bootstrap_config {
 	uint64_t cluster_id;
 	char cluster_state[15];
 	char database_state[15];
+	char kv_state[15];
 	char cont1_state[15];
 	char cont2_state[15];
 	uint64_t min_nodes_req;
@@ -82,14 +83,7 @@ struct hive_bootstrap_config {
 
 extern struct hive_bootstrap_config hbc;
 
-#define cluster_id      hbc.cluster_id
-#define cluster_state   hbc.cluster_state
-#define database_state  hbc.database_state
-#define cont1_state     hbc.cont1_state
-#define cont2_state     hbc.cont2_state
-#define min_nodes_req   hbc.min_nodes_req
-#define bootstrap_token hbc.bootstrap_token
-#define first_boot_ts   hbc.first_boot_ts
+
 
 // Prototypes
 int hive_bootstrap_main(void);

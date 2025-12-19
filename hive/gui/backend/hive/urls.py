@@ -37,12 +37,12 @@ router.register(r'nodes', StorageNodeViewSet, basename='nodes')
 router.register(r'snstats', StorageNodeViewSet, basename='snstats')
 router.register(r'disk', DiskNodeViewSet, basename='disk')
 router.register(r'stats', DiskNodeStatViewSet, basename='stats')
-router.register(r'bootstrap/status', BootstrapStatusView, basename='bootstrap-status')
-router.register(r'bootstrap/init', BootstrapInitView, basename='bootstrap-init')
-router.register(r'bootstrap/addnode', AddNodeView, basename='bootstrap-add_node')
 
 urlpatterns = [
     path("api/v1/", include(router.urls)),
     path("api/v1/accounts/", include("accounts.urls")),
+    path("api/v1/bootstrap/status", BootstrapStatusView.as_view()),
+    path("api/v1/bootstrap/init", BootstrapInitView.as_view()),
+    path("api/v1/bootstrap/addnode", AddNodeView.as_view()),
     path('admin/', admin.site.urls),
 ]
