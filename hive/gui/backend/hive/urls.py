@@ -24,7 +24,7 @@ from monitor.views import MonitorRootView
 from tenant.views import TenantRootView
 from nodes.views import StorageNodeViewSet, StorageNodeStatViewSet
 from disk.views import DiskNodeViewSet, DiskNodeStatViewSet
-from api.views import BootstrapError, BootstrapInitView, BootstrapStatusView, AddNodeView
+from api.views import BootstrapError, BootstrapInitView, BootstrapStatusView, AddNodeView, AddForeignerView
 
 router = DefaultRouter(trailing_slash=False)
 #router.register(r'groups', GroupViewSet, basename='group')
@@ -44,5 +44,6 @@ urlpatterns = [
     path("api/v1/bootstrap/status", BootstrapStatusView.as_view()),
     path("api/v1/bootstrap/init", BootstrapInitView.as_view()),
     path("api/v1/bootstrap/addnode", AddNodeView.as_view()),
+    path("api/v1/bootstrap/addforeigner", AddForeignerView.as_view()),
     path('admin/', admin.site.urls),
 ]

@@ -21,7 +21,7 @@ class BootstrapInitView(APIView):
 
     def post(self, request):
         try:
-            r = call_bootstrap("cluster_config", request.data)
+            r = call_bootstrap("cluster_init", request.data)
             return Response(r)
         except BootstrapError as e:
             return Response({"ok": False, "error": str(e)}, status=http_status.HTTP_502_BAD_GATEWAY)
@@ -38,6 +38,17 @@ class AddNodeView(APIView):
     def post(self, request):
         try:
             r = call_bootstrap("node_join", request.data)
+            return Response(r)
+        except BootstrapError as e:
+            return Response({"ok": False, "error": str(e)}, status=http_status.HTTP_502_BAD_GATEWAY)
+
+class AddForeignerView(APIView):
+    authentication_classes = []
+    permission_classes = []
+
+    def post(self, request):
+        try:
+            r = call_bootstrap("add_foreigner", request.data)
             return Response(r)
         except BootstrapError as e:
             return Response({"ok": False, "error": str(e)}, status=http_status.HTTP_502_BAD_GATEWAY)
