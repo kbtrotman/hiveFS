@@ -29,6 +29,7 @@ struct hive_bootstrap_request {
 
 static char g_status_message[64] = "IDLE";
 static unsigned int g_status_percent = 0;
+static char g_config_state[16] = "IDLE";
 static char g_socket_path[sizeof(((struct sockaddr_un *)0)->sun_path)] =
 	HIVE_BOOTSTRAP_SOCK_PATH;
 static const char *configure_status(void);
@@ -125,7 +126,58 @@ static void safe_copy(char *dst, size_t dst_len, const char *src)
 	dst[to_copy] = '\0';
 }
 
-static void bootstrap_status_update(const char *message, unsigned int percent)
+static const char *json_escape_string(const char *src, char *dst, size_t dst_sz)
+{
+	size_t j = 0;
+
+	if (!dst || dst_sz == 0)
+		return "";
+	if (!src)
+		src = "";
+	for (size_t i = 0; src[i] && j + 2 < dst_sz; ++i) {
+		unsigned char c = (unsigned char)src[i];
+
+		switch (c) {
+		case '"':
+		case '\\':
+			dst[j++] = '\\';
+			dst[j++] = (char)c;
+			break;
+		case '\n':
+			dst[j++] = '\\';
+			dst[j++] = 'n';
+			break;
+		case '\r':
+			dst[j++] = '\\';
+			dst[j++] = 'r';
+			break;
+		case '\t':
+			dst[j++] = '\\';
+			dst[j++] = 't';
+			break;
+		default:
+			if (c < 0x20) {
+				if (j + 6 >= dst_sz)
+					goto done;
+				int n = snprintf(dst + j, dst_sz - j, "\\u%04x", c);
+				if (n <= 0)
+					goto done;
+				j += (size_t)n;
+			} else {
+				dst[j++] = (char)c;
+			}
+			break;
+		}
+		if (j >= dst_sz - 1)
+			break;
+	}
+done:
+	dst[j] = '\0';
+	return dst;
+}
+
+static void bootstrap_status_update(const char *message, unsigned int percent,
+				    const char *state)
 {
 	if (percent > 100)
 		percent = 100;
@@ -133,6 +185,10 @@ static void bootstrap_status_update(const char *message, unsigned int percent)
 		message = "IDLE";
 	safe_copy(g_status_message, sizeof(g_status_message), message);
 	g_status_percent = percent;
+	if (state && *state)
+		safe_copy(g_config_state, sizeof(g_config_state), state);
+	else if (!g_config_state[0])
+		safe_copy(g_config_state, sizeof(g_config_state), "IDLE");
 }
 
 static bool parse_bootstrap_request(const char *json,
@@ -142,6 +198,7 @@ static bool parse_bootstrap_request(const char *json,
 		return false;
 	memset(req, 0, sizeof(*req));
 
+    sprintf("Json: %s", json);
 	parse_json_string_value(json, "command",
 				req->command, sizeof(req->command));
 	parse_json_u64_value(json, "cluster_id", &req->cluster_id);
@@ -161,7 +218,7 @@ static bool parse_bootstrap_request(const char *json,
 
 static void configure_cluster(const struct hive_bootstrap_request *req)
 {
-	bootstrap_status_update("cluster_config: processing", 25);
+	bootstrap_status_update("cluster_config: processing", 25, "OP_PENDING");
 	hbc.cluster_id = req->cluster_id;
 	safe_copy(hbc.cluster_state, sizeof(hbc.cluster_state), "configuring");
 	safe_copy(hbc.database_state, sizeof(hbc.database_state), "pending");
@@ -172,12 +229,12 @@ static void configure_cluster(const struct hive_bootstrap_request *req)
 		(unsigned long long)req->cluster_id,
 		req->cluster_name,
 		req->cluster_desc);
-	bootstrap_status_update("cluster_config: complete", 100);
+	bootstrap_status_update("cluster_config: complete", 100, "IDLE");
 }
 
 static void configure_node(const struct hive_bootstrap_request *req)
 {
-	bootstrap_status_update("node_join: processing", 25);
+	bootstrap_status_update("node_join: processing", 25, "OP_PENDING");
 	hbc.cluster_id = req->cluster_id;
 	hbc.storage_node_id = (uint32_t)req->node_id;
 	safe_copy(hbc.storage_node_name, sizeof(hbc.storage_node_name),
@@ -190,7 +247,15 @@ static void configure_node(const struct hive_bootstrap_request *req)
 		(unsigned long long)req->cluster_id,
 		(unsigned long long)req->node_id,
 		req->node_name);
-	bootstrap_status_update("node_join: complete", 100);
+	bootstrap_status_update("node_join: complete", 100, "IDLE");
+}
+
+static void configure_foreigner(const struct hive_bootstrap_request *req)
+{
+	(void)req;
+	bootstrap_status_update("add_foreigner: processing", 50, "OP_PENDING");
+	fprintf(stdout, "bootstrap: add_foreigner request received\n");
+	bootstrap_status_update("add_foreigner: complete", 100, "IDLE");
 }
 
 static bool dispatch_bootstrap_request(const struct hive_bootstrap_request *req,
@@ -200,15 +265,28 @@ static bool dispatch_bootstrap_request(const struct hive_bootstrap_request *req,
 		return false;
 	if (ok_message_out)
 		*ok_message_out = NULL;
-	if (strcmp(req->command, "cluster_config") == 0 ||
-	    strcmp(req->command, "cluster") == 0) {
+	if (strcmp(req->command, "cluster_init") == 0 ||
+	    strcmp(req->command, "cluster") == 0 ||
+	    strcmp(req->command, "cluster_config") == 0) {
 		configure_cluster(req);
+		if (ok_message_out)
+			*ok_message_out = configure_status();
 		return true;
 	}
 	if (strcmp(req->command, "node_config") == 0 ||
 	    strcmp(req->command, "node_join") == 0 ||
 	    strcmp(req->command, "node") == 0) {
 		configure_node(req);
+		if (ok_message_out)
+			*ok_message_out = configure_status();
+		return true;
+	}
+	if (strcmp(req->command, "foreigner_config") == 0 ||
+	    strcmp(req->command, "add_foreigner") == 0 ||
+	    strcmp(req->command, "foreigner") == 0) {
+		configure_foreigner(req);
+		if (ok_message_out)
+			*ok_message_out = configure_status();
 		return true;
 	}
     	if (strcmp(req->command, "status") == 0 ||
@@ -368,33 +446,87 @@ static inline const char *state_or_unknown(const char *state)
 static const char *configure_status(void)
 {
 	static char status_buf[HIVE_BOOTSTRAP_MSG_MAX];
+	char msg_buf[128];
+	char state_buf[32];
+	char token_buf[256];
+	char ts_buf[128];
 	struct stat st;
+	const char *config_state = json_escape_string(g_config_state,
+						      state_buf,
+						      sizeof(state_buf));
+	const char *config_msg = json_escape_string(g_status_message,
+						    msg_buf,
+						    sizeof(msg_buf));
+	const char *token = json_escape_string(hbc.bootstrap_token,
+					       token_buf,
+					       sizeof(token_buf));
+	const char *boot_ts = json_escape_string(hbc.first_boot_ts,
+						 ts_buf,
+						 sizeof(ts_buf));
+	unsigned int percent = g_status_percent;
+	char progress_text[8];
+
+	if (percent > 100)
+		percent = 100;
+	snprintf(progress_text, sizeof(progress_text), "%u%%", percent);
 
 	if (stat(g_socket_path, &st) != 0) {
 		snprintf(status_buf, sizeof(status_buf),
 			 "{\"ok\":false,"
-			 "\"status\":\"NO BOOTSTRAPS\","
+			 "\"command\":\"status\","
+			 "\"config_status\":\"IN_ERROR\","
+			 "\"status\":\"IN_ERROR\","
+			 "\"config_progress\":\"0%%\","
 			 "\"percent\":0,"
+			 "\"config_msg\":\"NO BOOTSTRAPS\","
 			 "\"cluster_state\":\"unknown\","
 			 "\"database_state\":\"unknown\","
+			 "\"kv_state\":\"unknown\","
 			 "\"cont1_state\":\"unknown\","
-			 "\"cont2_state\":\"unknown\"}");
+			 "\"cont2_state\":\"unknown\","
+			 "\"cluster_id\":0,"
+			 "\"node_id\":0,"
+			 "\"min_nodes_req\":0,"
+			 "\"bootstrap_token\":\"\","
+			 "\"first_boot_ts\":\"\","
+			 "\"config_progress_value\":0}");
 		return status_buf;
 	}
 
 	snprintf(status_buf, sizeof(status_buf),
 		 "{\"ok\":true,"
+		 "\"command\":\"status\","
+		 "\"config_status\":\"%s\","
 		 "\"status\":\"%s\","
+		 "\"config_progress\":\"%s\","
 		 "\"percent\":%u,"
+		 "\"config_msg\":\"%s\","
 		 "\"cluster_state\":\"%s\","
 		 "\"database_state\":\"%s\","
+		 "\"kv_state\":\"%s\","
 		 "\"cont1_state\":\"%s\","
-		 "\"cont2_state\":\"%s\"}",
-		 g_status_message,
-		 g_status_percent,
+		 "\"cont2_state\":\"%s\","
+		 "\"cluster_id\":%llu,"
+		 "\"node_id\":%u,"
+		 "\"min_nodes_req\":%llu,"
+		 "\"bootstrap_token\":\"%s\","
+		 "\"first_boot_ts\":\"%s\","
+		 "\"config_progress_value\":%u}",
+		 config_state,
+		 config_state,
+		 progress_text,
+		 percent,
+		 config_msg,
 		 state_or_unknown(hbc.cluster_state),
 		 state_or_unknown(hbc.database_state),
+		 state_or_unknown(hbc.kv_state),
 		 state_or_unknown(hbc.cont1_state),
-		 state_or_unknown(hbc.cont2_state));
+		 state_or_unknown(hbc.cont2_state),
+		 (unsigned long long)hbc.cluster_id,
+		 hbc.storage_node_id,
+		 (unsigned long long)hbc.min_nodes_req,
+		 token,
+		 boot_ts,
+		 percent);
 	return status_buf;
 }
