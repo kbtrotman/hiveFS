@@ -32,7 +32,7 @@ UV_LIB := /usr/lib
 
 # ---- Sources ----
 SRCS_C  := hive_guard.c hive_guard_tcp.c hive_guard_sql.c hive_guard_erasure_code.c hive_guard_raft.c hive_guard_sn_tcp.c hive_guard_kv.c \
-           hive_guard_stats.c
+           hive_guard_stats.c ../common/hive_common_sql.c
 #SRCS_CC := hive_guard_raft_rpc.cc \
 #           hive_guard_raft_statemachine.cc \
 #           hive_guard_raft.cc \
@@ -65,7 +65,7 @@ CXXFLAGS = $(WARN) $(DEBUG) $(OPT) $(INCS) -std=gnu++17
 # Library search paths for linker
 LDFLAGS  += -L$(BRPC_LIB) -L$(RAFT_LIB) -L$(UV_LIB)
 
-LDLIBS   = -lbrpc -lraft -luv -lprotobuf -lgflags -lssl -lcrypto -lm -lpthread -ldl -lerasurecode
+LDLIBS   = -lbrpc -lraft -luv -lgflags -lssl -lcrypto -lm -lpthread -ldl -lerasurecode -lrocksdb -lprotobuf
 
 # ---- MariaDB / MySQL flags ----
 MYSQL_CONFIG := $(shell command -v mysql_config 2>/dev/null)
@@ -77,14 +77,14 @@ else
   LDLIBS   += $(shell $(MYSQL_CONFIG) --libs) -lcrypto
 endif
 
-# Additional libs
-LIBS :=  -lrocksdb -lleveldb    # adjust to what brpc/braft were built with and other additionals
+# Additional libs (deprecated at present)
+LIBS :=  -lleveldb  
 
 # ---- Build ----
 all: $(MAIN)
 
 $(MAIN): $(OBJS)
-	$(CXX) -o $@ $(OBJS) $(LDFLAGS) $(LDLIBS) $(LIBS)
+	$(CXX) -o $@ $(OBJS) $(LDFLAGS) $(LDLIBS)
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
