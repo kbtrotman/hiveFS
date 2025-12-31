@@ -19,16 +19,16 @@ CREATE TABLE IF NOT EXISTS cluster (
   cluster_created     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   cluster_updated     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
                                    ON UPDATE CURRENT_TIMESTAMP,
-  is_ok BOOLEAN NOT NULL DEFAULT 1,
-  off_line BOOLEAN NOT NULL DEFAULT 1,
+  is_ok               BOOLEAN NOT NULL DEFAULT 1,
+  off_line            BOOLEAN NOT NULL DEFAULT 1,
   mgmt_api_port       INT NULL,
   mgmt_api_version    VARCHAR(32) NULL,
-  cluster_state       ENUM('unconfigured', 'pending', 'active', 'degraded', 'offline', 'retired', 'blanked', 'configured')
+  cluster_state       ENUM('unconfigured', 'pending', 'active', 'degraded', 'offline', 'retired', 'blanked', 'configured', 'invalid_op')
                       NOT NULL DEFAULT 'active',
   cluster_health      ENUM('ok', 'warning', 'critical', 'offline') 
                       NOT NULL DEFAULT 'ok',
   min_node_req        INT UNSIGNED DEFAULT 4,
-  cluster_node_count          INT UNSIGNED NULL,
+  cluster_node_count  INT UNSIGNED NULL,
   last_health_check   TIMESTAMP NULL,
   last_health_reason  VARCHAR(255) NULL,
   cluster_capacity_bytes      BIGINT UNSIGNED NULL,
@@ -83,7 +83,6 @@ CREATE TABLE IF NOT EXISTS storage_nodes (
   storage_overhead_bytes BIGINT UNSIGNED DEFAULT NULL,
   client_connect_timout INT DEFAULT '60000',
   sn_connect_timeout INT DEFAULT '30000',
-  last_uptime      VARCHAR(25) DEFAULT NULL,
   tags             JSON NULL
   UNIQUE KEY u_node_name (node_name),
   UNIQUE KEY u_node_address (node_address),
@@ -150,25 +149,25 @@ CREATE TABLE IF NOT EXISTS storage_node_stats (
 
 
 CREATE TABLE IF NOT EXISTS alerts (
-  id INT UNSIGNED KEY,
-  a_lvl INT UNSIGNED DEFAULT 0,
-  a_class INT UNSIGNED DEFAULT 0,
-  a_comp INT UNSIGNED DEFAULT 0,
-  a_msg VARCHAR(200) DEFAULT NULL,
-  a_desc VARCHAR(200) DEFAULT NULL,
-  a_ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+  id               INT UNSIGNED KEY,
+  a_lvl            INT UNSIGNED DEFAULT 0,
+  a_class          INT UNSIGNED DEFAULT 0,
+  a_comp           INT UNSIGNED DEFAULT 0,
+  a_msg            VARCHAR(200) DEFAULT NULL,
+  a_desc           VARCHAR(200) DEFAULT NULL,
+  a_ts             TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS shard_map (
-  shard_id INT UNSIGNED PRIMARY KEY,
-  node_id INT UNSIGNED NOT NULL,
-  shard_name VARCHAR(100) NOT NULL,
-  storage_node_id INT UNSIGNED NOT NULL,
-  date_added TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  stripes BIGINT UNSIGNED NOT NULL,
-  ec_group INT UNSIGNED NOT NULL,
-  stripe_id_low BIGINT UNSIGNED NOT NULL,
-  stripe_id_high BIGINT UNSIGNED NOT NULL,
+  shard_id         INT UNSIGNED PRIMARY KEY,
+  node_id          INT UNSIGNED NOT NULL,
+  shard_name       VARCHAR(100) NOT NULL,
+  storage_node_id  INT UNSIGNED NOT NULL,
+  date_added       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  stripes          BIGINT UNSIGNED NOT NULL,
+  ec_group         INT UNSIGNED NOT NULL,
+  stripe_id_low    BIGINT UNSIGNED NOT NULL,
+  stripe_id_high   BIGINT UNSIGNED NOT NULL,
   UNIQUE KEY u_shard_name (shard_name),
   CONSTRAINT fk_shard_node FOREIGN KEY (storage_node_id)
     REFERENCES storage_nodes(node_id) ON DELETE CASCADE
@@ -197,20 +196,21 @@ CREATE TABLE IF NOT EXISTS host (
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS host_auth (
-  id           BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
-  serial       VARCHAR(255),
-  machine_uid  VARCHAR(128) NOT NULL UNIQUE,
-  name         VARCHAR(255),
-  priv_key_pem TEXT,
-  issued_on    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  expires_at   DATETIME NOT NULL,
-  revoked_at   TIMESTAMP NULL,
-  revoked_by   VARCHAR(128) NULL,
+  id             BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  serial         VARCHAR(255),
+  machine_uid    VARCHAR(128) NOT NULL UNIQUE,
+  name           VARCHAR(255),
+  priv_key_pem   TEXT,
+  pub_key_pem    TEXT,
+  issued_on      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  expires_at     DATETIME NOT NULL,
+  revoked_at     TIMESTAMP NULL,
+  revoked_by     VARCHAR(128) NULL,
   revocation_reason VARCHAR(255) NULL,
-  intended_ip  VARBINARY(16) NULL,
-  claims       JSON,
-  status       ENUM('pending','approved','revoked') NOT NULL DEFAULT 'pending',
-  created_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+  intended_ip    VARBINARY(16) NULL,
+  claims         JSON,
+  status         ENUM('pending','approved','revoked') NOT NULL DEFAULT 'pending',
+  created_at     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS host_tokens (
@@ -302,7 +302,7 @@ CREATE TABLE IF NOT EXISTS volume_inodes (
   inode         BIGINT UNSIGNED NOT NULL,
   volume_id     BIGINT UNSIGNED NOT NULL,
   type          CHAR(1),
-  i_name         VARBINARY(256) NOT NULL, -- inode name (for quick lookup)
+  i_name        VARBINARY(256) NOT NULL, -- inode name (for quick lookup)
   i_msg_flags   INT UNSIGNED NOT NULL,
   i_version     TINYINT UNSIGNED NOT NULL,
   i_flags       TINYINT UNSIGNED NOT NULL,
@@ -339,29 +339,29 @@ CREATE TABLE IF NOT EXISTS volume_inodes (
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS block_stripe_locations (
-    volume_id  BIGINT NOT NULL,
-    block_no   BIGINT NOT NULL,
-    hash_algo  TINYINT NOT NULL,
-    block_hash BINARY(16) NOT NULL,
+    volume_id    BIGINT NOT NULL,
+    block_no     BIGINT NOT NULL,
+    hash_algo    TINYINT NOT NULL,
+    block_hash   BINARY(16) NOT NULL,
     stripe_index TINYINT NOT NULL,  -- 0..5 for k+m
     storage_node_id INT NOT NULL,
-    shard_id  INT NOT NULL,
-    estripe_id BIGINT NOT NULL,
+    shard_id     INT NOT NULL,
+    estripe_id   BIGINT NOT NULL,
     block_offset BIGINT NOT NULL,
-    ref_count INT UNSIGNED NOT NULL DEFAULT 1,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    ref_count    INT UNSIGNED NOT NULL DEFAULT 1,
+    created_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (volume_id, block_no, stripe_index),
     KEY idx_hash (hash_algo, block_hash)
 ) ENGINE=InnoDB;
 
 -- Extended attributes per inode (optional GUI exposure)
 CREATE TABLE IF NOT EXISTS volume_xattrs (
-  volume_id   BIGINT UNSIGNED NOT NULL,
-  inode       BIGINT UNSIGNED NOT NULL,
-  ns          TINYINT UNSIGNED NOT NULL,  -- namespace (user/system/etc)
-  name        VARBINARY(255) NOT NULL,
-  value       BLOB NOT NULL,
-  updated_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+  volume_id      BIGINT UNSIGNED NOT NULL,
+  inode          BIGINT UNSIGNED NOT NULL,
+  ns             TINYINT UNSIGNED NOT NULL,  -- namespace (user/system/etc)
+  name           VARBINARY(255) NOT NULL,
+  value          BLOB NOT NULL,
+  updated_at     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
                          ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (volume_id, inode, ns, name),
   CONSTRAINT fk_xattr_inode FOREIGN KEY (volume_id, inode)
@@ -369,11 +369,11 @@ CREATE TABLE IF NOT EXISTS volume_xattrs (
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS volume_stats (
-  volume_id    BIGINT UNSIGNED NOT NULL PRIMARY KEY,
-  file_count   BIGINT UNSIGNED NOT NULL DEFAULT 0,
-  dir_count    BIGINT UNSIGNED NOT NULL DEFAULT 0,
-  total_bytes  BIGINT UNSIGNED NOT NULL DEFAULT 0,
-  updated_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+  volume_id      BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+  file_count     BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  dir_count      BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  total_bytes    BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  updated_at     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
                          ON UPDATE CURRENT_TIMESTAMP,
   CONSTRAINT fk_volume_stats FOREIGN KEY (volume_id)
     REFERENCES volume_superblocks(volume_id) ON DELETE CASCADE
@@ -394,14 +394,14 @@ CREATE OR REPLACE VIEW v_stats    AS SELECT * FROM hive_meta.storage_node_stats;
 
 -- Virtual nodes for GUI
 CREATE TABLE IF NOT EXISTS ui_virtual_node (
-  id            BIGINT PRIMARY KEY AUTO_INCREMENT,
-  parent_id     BIGINT NULL,
-  name          VARCHAR(255) NOT NULL,
-  node_kind     ENUM('virtual','mount') NOT NULL,
-  target_type   ENUM('none','host','dentry') NOT NULL DEFAULT 'none',
-  target_host   VARCHAR(128) NULL,
-  target_dentry BIGINT NULL,         -- references hive_meta.volume_dentries.dentry_id (logical)
-  sort_order    INT DEFAULT 0,
+  id             BIGINT PRIMARY KEY AUTO_INCREMENT,
+  parent_id      BIGINT NULL,
+  name           VARCHAR(255) NOT NULL,
+  node_kind      ENUM('virtual','mount') NOT NULL,
+  target_type    ENUM('none','host','dentry') NOT NULL DEFAULT 'none',
+  target_host    VARCHAR(128) NULL,
+  target_dentry  BIGINT NULL,         -- references hive_meta.volume_dentries.dentry_id (logical)
+  sort_order     INT DEFAULT 0,
   UNIQUE KEY uk_ui_virtual_parent_name (parent_id, name),
   KEY idx_ui_virtual_parent (parent_id),
   KEY idx_ui_virtual_kind (node_kind)
@@ -409,8 +409,8 @@ CREATE TABLE IF NOT EXISTS ui_virtual_node (
 
 -- Map a host to a physical root dentry (by surrogate id)
 CREATE TABLE IF NOT EXISTS ui_host_map (
-  host_id     VARCHAR(128) PRIMARY KEY,
-  root_dentry BIGINT NOT NULL,       -- hive_meta.volume_dentries.dentry_id
+  host_id        VARCHAR(128) PRIMARY KEY,
+  root_dentry    BIGINT NOT NULL,       -- hive_meta.volume_dentries.dentry_id
   KEY idx_ui_host_root (root_dentry)
 ) ENGINE=InnoDB;
 

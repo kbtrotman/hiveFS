@@ -25,7 +25,7 @@ UV_INC := /usr/include
 UV_LIB := /usr/lib
 
 # ---- Sources ----
-SRCS_C  := hive_bootstrap.c hive_bootstrap_sql.c hive_bootstrap_sock.c
+SRCS_C  := hive_bootstrap.c hive_bootstrap_sql.c hive_bootstrap_sock.c ../common/hive_common_sql.c
 
 
 OBJS_C  := $(SRCS_C:.c=.o)
@@ -49,7 +49,8 @@ CFLAGS   = $(CSTD) $(WARN) $(DEBUG) $(OPT) $(INCS)
 # Library search paths for linker
 LDFLAGS  += -L$(BRPC_LIB) -L$(RAFT_LIB) -L$(UV_LIB)
 
-LDLIBS   = -lbrpc -luv -lgflags -lssl -lcrypto -lm -lpthread -ldl
+OPENSSL_LIBS := -lssl -lcrypto
+LDLIBS   = -lbrpc -luv -lgflags -lm -lpthread -ldl $(OPENSSL_LIBS)
 
 # ---- MariaDB / MySQL flags ----
 MYSQL_CONFIG := $(shell command -v mysql_config 2>/dev/null)
@@ -58,7 +59,7 @@ ifeq ($(MYSQL_CONFIG),)
 else
   CFLAGS   += $(shell $(MYSQL_CONFIG) --cflags)
  # CXXFLAGS += $(shell $(MYSQL_CONFIG) --cflags)
-  LDLIBS   += $(shell $(MYSQL_CONFIG) --libs) -lcrypto
+  LDLIBS   += $(shell $(MYSQL_CONFIG) --libs)
 endif
 
 # Additional libs

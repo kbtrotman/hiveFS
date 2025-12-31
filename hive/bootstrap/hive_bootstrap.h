@@ -58,7 +58,7 @@ struct hive_bootstrap_config {
 	char first_boot_ts[30];
 
 	uint32_t storage_node_id;
-	char storage_node_name[50];
+	char storage_node_name[100];
 	char storage_node_address[64];
 	char storage_node_uid[128];
 	char storage_node_serial[100];
