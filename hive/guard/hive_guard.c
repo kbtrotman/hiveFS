@@ -30,6 +30,7 @@
 #include "hive_guard_erasure_code.h"
 #include "hive_guard_sql.h"
 #include "hive_guard_kv.h"
+#include "hive_guard_sock.h"
 
 
 static bool needs_bootstrap(void)
@@ -264,6 +265,11 @@ int main(void)
 	if (hifs_sn_tcp_start(0, hifs_recv_stripe_from_node) != 0) {
 		fprintf(stderr, "main: failed to start data listener\n");
 	}
+	if (hive_guard_sock_start() != 0) {
+		fprintf(stderr,
+			"main: failed to start guard control socket listener: %s\n",
+			strerror(errno));
+	}
 
 	if (storage_node_id == 0)
 		storage_node_id = (unsigned int)self_id;
@@ -273,6 +279,7 @@ int main(void)
 	 * Raft is running in its own thread; both will make progress.
 	 */
 	ret = hive_guard_server_main();
+	hive_guard_sock_stop();
 	hg_stats_flush_periodic_stop();
 	hg_kv_shutdown();
 	return ret;

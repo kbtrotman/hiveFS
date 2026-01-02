@@ -14,8 +14,11 @@
 #include "hive_bootstrap.h"
 #include "hive_bootstrap_sock.h"
 #include "../guard/hive_guard.h"
+#include "../guard/hive_guard_sock.h"
 #include "../guard/hive_guard_sql.h"
 #include "../common/hive_common_sql.h"
+#include "../common/hive_common_sock.h"
+#include "../../hifs_shared_defs.h"
 #include <openssl/asn1.h>
 #include <openssl/bio.h>
 #include <openssl/bn.h>
@@ -24,13 +27,6 @@
 #include <openssl/rsa.h>
 #include <openssl/x509.h>
 
-
-#define HIVE_BOOTSTRAP_SOCK_PATH "/run/hive_bootstrap.sock"
-#define HIVE_GUARD_CONTROL_SOCK_PATH "/run/hive_guard.sock"
-#define HIVE_BOOTSTRAP_MSG_MAX   4096
-#define HIVE_BOOTSTRAP_BACKLOG   4
-#define NODE_CERT_KEY_BITS       2048
-#define NODE_CERT_VALID_DAYS     365
 
 struct hive_bootstrap_request {
 	char command[32];
@@ -393,251 +389,6 @@ static uint64_t lookup_existing_node_id(const char *uid, const char *serial)
 		node_id = (uint64_t)strtoull(row[0], NULL, 10);
 	mysql_free_result(res);
 	return node_id;
-}
-
-int distribute_node_tokens_to_existing_nodes(uint64_t cluster_id,
-					     uint64_t node_id,
-					     const char *machine_uid)
-{
-	if (!sqldb.conn || !machine_uid || !*machine_uid)
-		return -1;
-
-	int rc = -1;
-	char *token = NULL;
-	char *pub_key = NULL;
-	char *pub_field = NULL;
-	char *json = NULL;
-	MYSQL_RES *res = NULL;
-	char uid_sql[sizeof(hbc.storage_node_uid) * 2 + 1];
-	unsigned long uid_len = (unsigned long)strlen(machine_uid);
-
-	mysql_real_escape_string(sqldb.conn, uid_sql, machine_uid, uid_len);
-
-	char sql[512];
-	int written = snprintf(
-		sql, sizeof(sql),
-		"SELECT token FROM host_tokens "
-		"WHERE machine_uid='%s' AND t_type='node_join' "
-		"AND used=0 AND revoked=0 AND expired=0 "
-		"ORDER BY issued_at DESC LIMIT 1",
-		uid_sql);
-	if (written < 0 || (size_t)written >= sizeof(sql))
-		goto cleanup;
-	if (mysql_real_query(sqldb.conn, sql, (unsigned long)written) != 0) {
-		fprintf(stderr,
-			"bootstrap: failed to fetch node join token: %s\n",
-			mysql_error(sqldb.conn));
-		goto cleanup;
-	}
-	res = mysql_store_result(sqldb.conn);
-	if (!res) {
-		if (mysql_field_count(sqldb.conn) != 0)
-			fprintf(stderr,
-				"bootstrap: node token store_result failed: %s\n",
-				mysql_error(sqldb.conn));
-		goto cleanup;
-	}
-	MYSQL_ROW row = mysql_fetch_row(res);
-
-	if (row && row[0])
-		token = strdup(row[0]);
-	mysql_free_result(res);
-	res = NULL;
-	if (!token) {
-		fprintf(stderr,
-			"bootstrap: no valid join token found for machine %s\n",
-			machine_uid);
-		goto cleanup;
-	}
-
-	written = snprintf(
-		sql, sizeof(sql),
-		"SELECT pub_key_pem FROM host_auth "
-		"WHERE machine_uid='%s' AND status='approved' "
-		"ORDER BY issued_on DESC LIMIT 1",
-		uid_sql);
-	if (written < 0 || (size_t)written >= sizeof(sql))
-		goto cleanup;
-	if (mysql_real_query(sqldb.conn, sql, (unsigned long)written) != 0) {
-		fprintf(stderr,
-			"bootstrap: failed to fetch node public key: %s\n",
-			mysql_error(sqldb.conn));
-		goto cleanup;
-	}
-	res = mysql_store_result(sqldb.conn);
-	if (!res) {
-		if (mysql_field_count(sqldb.conn) != 0)
-			fprintf(stderr,
-				"bootstrap: node pubkey store_result failed: %s\n",
-				mysql_error(sqldb.conn));
-		goto cleanup;
-	}
-	row = mysql_fetch_row(res);
-	if (row && row[0])
-		pub_key = strdup(row[0]);
-	mysql_free_result(res);
-	res = NULL;
-	if (!pub_key) {
-		fprintf(stderr,
-			"bootstrap: no public key found for machine %s\n",
-			machine_uid);
-		goto cleanup;
-	}
-
-	size_t pub_buf_len = strlen(pub_key) * 2 + 3;
-	if (pub_buf_len < 64)
-		pub_buf_len = 64;
-	pub_field = malloc(pub_buf_len);
-	if (!pub_field)
-		goto cleanup;
-
-	char token_field[256];
-	char ts_field[128];
-	char config_status_field[64];
-	char config_progress_field[32];
-	char config_msg_field[128];
-	char node_id_buf[32];
-	char cluster_id_buf[32];
-	char cluster_state_buf[32];
-	char database_state_buf[32];
-	char kv_state_buf[32];
-	char cont1_state_buf[32];
-	char cont2_state_buf[32];
-
-	const char *node_id_json =
-		json_number_or_null(node_id_buf, sizeof(node_id_buf), node_id);
-	const char *cluster_id_json = json_number_or_null(
-		cluster_id_buf, sizeof(cluster_id_buf), cluster_id);
-	const char *token_json =
-		json_string_or_null(token, token_field, sizeof(token_field));
-	const char *pub_json =
-		json_string_or_null(pub_key, pub_field, pub_buf_len);
-	const char *first_boot_json = json_string_or_null(
-		hbc.first_boot_ts, ts_field, sizeof(ts_field));
-	const char *config_status_json = json_string_or_null(
-		g_config_state, config_status_field, sizeof(config_status_field));
-	char progress_pct[8];
-	unsigned int percent = g_status_percent;
-	if (percent > 100)
-		percent = 100;
-	snprintf(progress_pct, sizeof(progress_pct), "%u%%", percent);
-	const char *config_progress_json = json_string_or_null(
-		progress_pct, config_progress_field, sizeof(config_progress_field));
-	const char *config_msg_json = json_string_or_null(
-		g_status_message, config_msg_field, sizeof(config_msg_field));
-
-	const char *cluster_state =
-		hbc.cluster_state[0] ? hbc.cluster_state : "unconfigured";
-	const char *database_state =
-		hbc.database_state[0] ? hbc.database_state : "configured";
-	const char *kv_state =
-		hbc.kv_state[0] ? hbc.kv_state : "configured";
-	const char *cont1_state =
-		hbc.cont1_state[0] ? hbc.cont1_state : "configured";
-	const char *cont2_state =
-		hbc.cont2_state[0] ? hbc.cont2_state : "configured";
-
-	json_escape_string(cluster_state, cluster_state_buf,
-			   sizeof(cluster_state_buf));
-	json_escape_string(database_state, database_state_buf,
-			   sizeof(database_state_buf));
-	json_escape_string(kv_state, kv_state_buf, sizeof(kv_state_buf));
-	json_escape_string(cont1_state, cont1_state_buf,
-			   sizeof(cont1_state_buf));
-	json_escape_string(cont2_state, cont2_state_buf,
-			   sizeof(cont2_state_buf));
-
-	size_t json_cap = 1024 + strlen(pub_json) + strlen(token_json) +
-			  strlen(config_status_json) +
-			  strlen(config_progress_json) +
-			  strlen(config_msg_json);
-	json = malloc(json_cap);
-	if (!json)
-		goto cleanup;
-	int json_len = snprintf(
-		json, json_cap,
-		"{\"command\":\"join_sec\","
-		"\"node_id\":%s,"
-		"\"cluster_id\":%s,"
-		"\"cluster_state\":\"%s\","
-		"\"database_state\":\"%s\","
-		"\"kv_state\":\"%s\","
-		"\"cont1_state\":\"%s\","
-		"\"cont2_state\":\"%s\","
-		"\"min_nodes_req\":%llu,"
-		"\"bootstrap_token\":%s,"
-		"\"first_boot_ts\":%s,"
-		"\"config_status\":%s,"
-		"\"config_progress\":%s,"
-		"\"config_msg\":%s,"
-		"\"pub_key\":%s}\n",
-		node_id_json,
-		cluster_id_json,
-		cluster_state_buf,
-		database_state_buf,
-		kv_state_buf,
-		cont1_state_buf,
-		cont2_state_buf,
-		(unsigned long long)hbc.min_nodes_req,
-		token_json,
-		first_boot_json,
-		config_status_json,
-		config_progress_json,
-		config_msg_json,
-		pub_json);
-	if (json_len < 0 || (size_t)json_len >= json_cap)
-		goto cleanup;
-
-	int fd = socket(AF_UNIX, SOCK_STREAM, 0);
-	if (fd < 0)
-		goto cleanup;
-
-	struct sockaddr_un addr;
-	memset(&addr, 0, sizeof(addr));
-	addr.sun_family = AF_UNIX;
-	safe_copy(addr.sun_path, sizeof(addr.sun_path),
-		  HIVE_GUARD_CONTROL_SOCK_PATH);
-	if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
-		fprintf(stderr,
-			"bootstrap: failed to connect to hive_guard control socket %s: %s\n",
-			addr.sun_path, strerror(errno));
-		close(fd);
-		goto cleanup;
-	}
-
-	size_t remaining = (size_t)json_len;
-	const char *cursor = json;
-	while (remaining > 0) {
-		ssize_t wr = send(fd, cursor, remaining, 0);
-		if (wr < 0) {
-			if (errno == EINTR)
-				continue;
-			fprintf(stderr,
-				"bootstrap: failed to send join_sec payload: %s\n",
-				strerror(errno));
-			close(fd);
-			goto cleanup;
-		}
-		if (wr == 0) {
-			fprintf(stderr,
-				"bootstrap: hive_guard control socket closed during send\n");
-			close(fd);
-			goto cleanup;
-		}
-		cursor += wr;
-		remaining -= (size_t)wr;
-	}
-	close(fd);
-	rc = 0;
-
-cleanup:
-	if (res)
-		mysql_free_result(res);
-	free(json);
-	free(pub_field);
-	free(pub_key);
-	free(token);
-	return rc;
 }
 
 static uint64_t lookup_highest_node_id(void)
@@ -1152,6 +903,31 @@ int update_node_for_add(void)
 	add_node_join_token(hbc.storage_node_id, hbc.bootstrap_token);
 	add_node_mtls_token(hbc.storage_node_id, hbc.bootstrap_token);
 
+	unsigned int status_pct = g_status_percent;
+	if (status_pct > 100)
+		status_pct = 100;
+	char progress_pct[8];
+	snprintf(progress_pct, sizeof(progress_pct), "%u%%", status_pct);
+	char patch_level_str[8];
+	snprintf(patch_level_str, sizeof(patch_level_str), "%04d", patch);
+	struct hive_guard_join_context join_ctx = {
+		.cluster_id = hbc.cluster_id,
+		.node_id = hbc.storage_node_id,
+		.machine_uid = hbc.storage_node_uid,
+		.cluster_state = hbc.cluster_state,
+		.database_state = hbc.database_state,
+		.kv_state = hbc.kv_state,
+		.cont1_state = hbc.cont1_state,
+		.cont2_state = hbc.cont2_state,
+		.min_nodes_required = hbc.min_nodes_req,
+		.first_boot_ts = hbc.first_boot_ts,
+		.config_status = g_config_state,
+		.config_progress = progress_pct,
+		.config_message = g_status_message,
+		.hive_version = HIFS_VERSION,
+		.hive_patch_level = patch_level_str,
+	};
+
     if (node_id == 1) {
         fprintf(stdout,
             "bootstrap: first node (id=%u) added to cluster (id=%llu)\n",
@@ -1164,9 +940,9 @@ int update_node_for_add(void)
             (unsigned long long)hbc.cluster_id);
         fflush(stdout);
 
-        distribute_node_tokens_to_existing_nodes(hbc.cluster_id,
-                                        hbc.storage_node_id,
-                                        hbc.storage_node_uid);
+        if (hive_guard_distribute_node_tokens(&join_ctx) != 0)
+		fprintf(stderr,
+			"bootstrap: failed to distribute node tokens to existing nodes\n");
     }
 	return 0;
 }
@@ -1349,125 +1125,48 @@ static bool dispatch_bootstrap_request(const struct hive_bootstrap_request *req,
 	return false;
 }
 
-static void respond(int fd, const char *msg)
-{
-	size_t len;
-
-	if (fd < 0 || !msg)
-		return;
-	len = strlen(msg);
-	while (len > 0) {
-		ssize_t wr = write(fd, msg, len);
-		if (wr < 0) {
-			if (errno == EINTR)
-				continue;
-			break;
-		}
-		if (wr == 0)
-			break;
-		msg += wr;
-		len -= (size_t)wr;
-	}
-}
-
-static bool read_json_request(int fd, char *buf, size_t buf_sz)
-{
-	size_t total = 0;
-
-	if (!buf || buf_sz == 0)
-		return false;
-
-	while (total < buf_sz - 1) {
-		ssize_t rd = recv(fd, buf + total, buf_sz - 1 - total, 0);
-		if (rd < 0) {
-			if (errno == EINTR)
-				continue;
-			return false;
-		}
-		if (rd == 0)
-			break;
-		total += (size_t)rd;
-		if (memchr(buf + total - rd, '\n', (size_t)rd) ||
-		    memchr(buf + total - rd, '\r', (size_t)rd))
-			break;
-	}
-	if (total == 0)
-		return false;
-	buf[total] = '\0';
-	char *newline = strpbrk(buf, "\r\n");
-	if (newline)
-		*newline = '\0';
-	return true;
-}
-
 static bool process_client(int fd)
 {
 	char buf[HIVE_BOOTSTRAP_MSG_MAX];
 	struct hive_bootstrap_request req;
 	const char *ok_message = NULL;
 
-	if (!read_json_request(fd, buf, sizeof(buf))) {
-		respond(fd, "ERR invalid payload\n");
+	if (!hive_common_sock_read_json_request(fd, buf, sizeof(buf))) {
+		hive_common_sock_respond(fd, "ERR invalid payload\n");
 		return false;
 	}
 	fprintf(stdout, "bootstrap_request: %s\n", buf);
 	fflush(stdout);
 	if (!parse_bootstrap_request(buf, &req)) {
-		respond(fd, "ERR invalid JSON\n");
+		hive_common_sock_respond(fd, "ERR invalid JSON\n");
 		return false;
 	}
 	if (!dispatch_bootstrap_request(&req, &ok_message)) {
-		respond(fd, "ERR unknown command\n");
+		hive_common_sock_respond(fd, "ERR unknown command\n");
 		return false;
 	}
 
 	if (ok_message && *ok_message) {
-		respond(fd, "OK ");
-		respond(fd, ok_message);
-		respond(fd, "\n");
+		hive_common_sock_respond(fd, "OK ");
+		hive_common_sock_respond(fd, ok_message);
+		hive_common_sock_respond(fd, "\n");
 	} else {
-		respond(fd, "OK\n");
+		hive_common_sock_respond(fd, "OK\n");
 	}
 	return true;
 }
 
-static int create_listener(const char *path)
-{
-	struct sockaddr_un addr;
-	int fd;
-
-	fd = socket(AF_UNIX, SOCK_STREAM, 0);
-	if (fd < 0)
-		return -1;
-	if (!path || !*path)
-		path = HIVE_BOOTSTRAP_SOCK_PATH;
-	memset(&addr, 0, sizeof(addr));
-	addr.sun_family = AF_UNIX;
-	safe_copy(addr.sun_path, sizeof(addr.sun_path), path);
-	safe_copy(g_socket_path, sizeof(g_socket_path), addr.sun_path);
-	unlink(path);
-	if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
-		close(fd);
-		return -1;
-	}
-	if (chmod(path, 0666) != 0) {
-		close(fd);
-		unlink(path);
-		return -1;
-	}
-	if (listen(fd, HIVE_BOOTSTRAP_BACKLOG) != 0) {
-		close(fd);
-		unlink(path);
-		return -1;
-	}
-	return fd;
-}
-
 int hive_bootstrap_sock_run(const char *socket_path)
 {
-	const char *path = socket_path && *socket_path
-		? socket_path : HIVE_BOOTSTRAP_SOCK_PATH;
-	int listener = create_listener(path);
+	struct hive_common_sock_params params = {
+		.path = socket_path,
+		.default_path = HIVE_BOOTSTRAP_SOCK_PATH,
+		.backlog = HIVE_BOOTSTRAP_BACKLOG,
+		.mode = 0666,
+		.resolved_path = g_socket_path,
+		.resolved_path_len = sizeof(g_socket_path),
+	};
+	int listener = hive_common_sock_create_listener(&params);
 	if (listener < 0)
 		return -1;
 
@@ -1483,8 +1182,10 @@ int hive_bootstrap_sock_run(const char *socket_path)
 		close(client);
 	}
 
-	close(listener);
-	unlink(path);
+	hive_common_sock_destroy_listener(listener,
+					  g_socket_path[0]
+						  ? g_socket_path
+						  : HIVE_BOOTSTRAP_SOCK_PATH);
 	return -1;
 }
 
@@ -1502,6 +1203,9 @@ static const char *configure_status(void)
 	char ts_buf[128];
 	char cluster_id_buf[32];
 	char node_id_buf[32];
+	char hive_version_buf[32];
+	char hive_patch_buf[32];
+	char patch_str[8];
 	struct stat st;
 	const char *config_state = json_escape_string(g_config_state,
 						      state_buf,
@@ -1515,8 +1219,22 @@ static const char *configure_status(void)
 	const char *node_id_field;
 	const char *token_field;
 	const char *ts_field;
+	const char *hive_version_field;
+	const char *hive_patch_field;
+	const char *pub_key_field = "null";
 	const char *status_text = (config_state && *config_state)
 		? config_state : "IDLE";
+	int version = 0;
+	int patch = 0;
+
+	hifs_parse_version(&version, &patch);
+	snprintf(patch_str, sizeof(patch_str), "%04d", patch);
+	hive_version_field =
+		json_string_or_null(HIFS_VERSION,
+				    hive_version_buf, sizeof(hive_version_buf));
+	hive_patch_field =
+		json_string_or_null(patch_str,
+				    hive_patch_buf, sizeof(hive_patch_buf));
 
 	if (percent > 100)
 		percent = 100;
@@ -1549,7 +1267,13 @@ static const char *configure_status(void)
 			 "\"cluster_id\":null,"
 			 "\"min_nodes_req\":0,"
 			 "\"bootstrap_token\":null,"
-			 "\"first_boot_ts\":null}");
+			 "\"first_boot_ts\":null,"
+			 "\"hive_version\":%s,"
+			 "\"hive_patch_level\":%s,"
+			 "\"pub_key\":%s}",
+			 hive_version_field,
+			 hive_patch_field,
+			 pub_key_field);
 		return status_buf;
 	}
 
@@ -1569,7 +1293,10 @@ static const char *configure_status(void)
 		 "\"cont2_state\":\"%s\","
 		 "\"min_nodes_req\":%llu,"
 		 "\"bootstrap_token\":%s,"
-		 "\"first_boot_ts\":%s}",
+		 "\"first_boot_ts\":%s,"
+		 "\"hive_version\":%s,"
+		 "\"hive_patch_level\":%s,"
+		 "\"pub_key\":%s}",
 		 status_text,
 		 config_state,
 		 progress_text,
@@ -1583,7 +1310,10 @@ static const char *configure_status(void)
 		 state_or_unknown(hbc.cont2_state),
 		 (unsigned long long)hbc.min_nodes_req,
 		 token_field,
-		 ts_field);
+		 ts_field,
+		 hive_version_field,
+		 hive_patch_field,
+		 pub_key_field);
 	fprintf(stdout, "bootstrap_status: %s\n", status_buf);
 	fflush(stdout);
 	return status_buf;
