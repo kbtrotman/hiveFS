@@ -26,9 +26,12 @@ PAYLOAD_TEMPLATE = {
     "min_nodes_req": 4,
     "bootstrap_token": None,
     "first_boot_ts": "",
+    "hive_version": None,
+    "hive_patch_level": None,
     "config_status": "IDLE",
     "config_progress": "0%",
     "config_msg": "",
+    "pub_key": None,
     "command": "status",
     "ok": True,
 }

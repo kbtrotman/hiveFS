@@ -47,6 +47,17 @@
 
 /* SQL format strings are declared in hive/common/hive_common_sql.h */
 
+#define SQL_HOST_TOKEN_SELECT_NODE_JOIN_LATEST \
+	"SELECT token FROM host_tokens " \
+	"WHERE machine_uid='%s' AND t_type='node_join' " \
+	"AND used=0 AND revoked=0 AND expired=0 " \
+	"ORDER BY issued_at DESC LIMIT 1"
+
+#define SQL_HOST_AUTH_SELECT_APPROVED_PUBKEY \
+	"SELECT pub_key_pem FROM host_auth " \
+	"WHERE machine_uid='%s' AND status='approved' " \
+	"ORDER BY issued_on DESC LIMIT 1"
+
 #define SQL_STORAGE_NODE_STATS_TRIM_TO_5_MINUTES \
 	"DELETE FROM storage_node_stats " \
 	"WHERE node_id=%llu AND s_ts < NOW() - INTERVAL 20 MINUTE " \
