@@ -179,9 +179,11 @@ static int stream_file_over_tcp(int sock_fd, int file_fd, off_t file_size)
 #if defined(__linux__)
 	off_t offset = 0;
 	while (offset < file_size) {
-		size_t chunk = (size_t)((file_size - offset) > (1UL << 30) ?
-					(1UL << 30) :
-					(file_size - offset));
+		off_t remaining = file_size - offset;
+		if (remaining <= 0)
+			break;
+		const off_t max_chunk = (off_t)(1UL << 30);
+		size_t chunk = (size_t)((remaining > max_chunk) ? max_chunk : remaining);
 		ssize_t sent = sendfile(sock_fd, file_fd, &offset, chunk);
 		if (sent < 0) {
 			if (errno == EINTR || errno == EAGAIN)

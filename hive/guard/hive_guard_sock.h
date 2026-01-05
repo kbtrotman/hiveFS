@@ -10,7 +10,7 @@
 
 #include <stdint.h>
 
-struct hive_storage_node;
+#include "hive_guard.h"
 
 #define HIVE_GUARD_SOCK_PATH "/run/hive_guard.sock"
 #define HIVE_GUARD_SOCK_MSG_MAX 4096

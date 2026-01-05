@@ -34,6 +34,8 @@
 
 #include "../../hicomm/hi_command.h"
 #include "../../hifs_shared_defs.h"
+#include "hive_guard.h"
+#include "hive_guard_sock.h"
 
 
 /* hive_guard_raft.h */
@@ -126,11 +128,6 @@ struct RaftCmd {
         struct hive_guard_storage_update_cmd storage_update;
     } u;
 };
-
-
-static pthread_mutex_t g_snap_mu = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t  g_snap_cv = PTHREAD_COND_INITIALIZER;
-
 struct hg_local_snapshot_info {
     uint64_t snap_id;
     uint64_t raft_index;
@@ -138,10 +135,6 @@ struct hg_local_snapshot_info {
     char     path[PATH_MAX];  // local snapshot file path
     uint64_t size_bytes;
     // optionally checksum string
-};
-
-static struct hg_local_snapshot_info g_last_snap = {
-    .status = 1
 };
 
 // source of a snapshot file transfer over TCP, multiple nodes may have it
