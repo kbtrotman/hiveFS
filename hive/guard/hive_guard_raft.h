@@ -166,5 +166,9 @@ int hifs_raft_submit_put_dirent(const struct RaftPutDirent *cmd);
 int hifs_raft_submit_join_sec(const struct hive_guard_join_context *ctx);
 int hifs_raft_submit_storage_update(const struct hive_guard_storage_update_cmd *cmd);
 int hifs_raft_submit_snapshot_mark(uint64_t snap_id);
+int hg_prepare_snapshot_for_new_node(const struct hg_raft_config *cfg,
+                                     uint64_t snap_id,
+                                     const char *new_node_addr,
+                                     struct hg_snapshot_source *out_src);
 
 #endif /* HIVE_GUARD_RAFT_H */
