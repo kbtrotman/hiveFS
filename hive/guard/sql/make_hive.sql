@@ -379,12 +379,43 @@ CREATE TABLE IF NOT EXISTS volume_stats (
     REFERENCES volume_superblocks(volume_id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
+CREATE TABLE IF NOT EXISTS meta_snapshots (
+  snapshot_id           BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+  snapshot_name         VARCHAR(128) DEFAULT NULL,
+  snapshot_description  TEXT DEFAULT NULL,
+  created_at            TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  updated_at            TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
+                               ON UPDATE CURRENT_TIMESTAMP(6),
+  created_by            VARCHAR(128) NOT NULL DEFAULT 'system',
+  container             VARCHAR(64) NOT NULL DEFAULT 'meta',
+  container_ref         VARCHAR(128) DEFAULT NULL,
+  raft_index_at_snap    BIGINT UNSIGNED NOT NULL,
+  cluster_version       VARCHAR(32) DEFAULT NULL,
+  cluster_wide          BOOLEAN NOT NULL DEFAULT 1,
+  scope_node_id         INT UNSIGNED DEFAULT NULL,
+  owner                 VARCHAR(128) DEFAULT NULL,
+  owner_group           VARCHAR(128) DEFAULT NULL,
+  permissions           VARCHAR(16) DEFAULT NULL,
+  retention_hours       INT UNSIGNED DEFAULT NULL,
+  retention_days        INT UNSIGNED DEFAULT NULL,
+  logical_size_bytes    BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  physical_size_bytes   BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  is_mutable            BOOLEAN NOT NULL DEFAULT 0,
+  auto_delete           BOOLEAN NOT NULL DEFAULT 0,
+  auto_delete_at        TIMESTAMP(6) NULL DEFAULT NULL,
+  tags                  JSON DEFAULT NULL,
+  KEY idx_meta_snapshots_created (created_at),
+  KEY idx_meta_snapshots_container (container, container_ref),
+  KEY idx_meta_snapshots_scope (cluster_wide, scope_node_id)
+) ENGINE=InnoDB;
+
 
 -- =========================
 -- API SCHEMA (hive_api)
 -- =========================
 USE hive_api;
 
+CREATE OR REPLACE VIEW v_meta_snapshots AS SELECT * FROM hive_meta.meta_snapshots;
 CREATE OR REPLACE VIEW v_dentries AS SELECT * FROM hive_meta.volume_dentries;
 CREATE OR REPLACE VIEW v_inodes   AS SELECT * FROM hive_meta.volume_inodes;
 CREATE OR REPLACE VIEW v_roots    AS SELECT * FROM hive_meta.volume_root_dentries;

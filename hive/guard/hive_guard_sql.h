@@ -45,7 +45,23 @@
 #define MAX_QUERY_SIZE 4096
 #define MAX_INSERT_SIZE 512
 
-/* SQL format strings are declared in hive/common/hive_common_sql.h */
+/* SQL Connect */
+
+struct SQLDB {
+	MYSQL *conn;
+	MYSQL_RES *last_query;
+	unsigned long long last_affected;
+	unsigned long long last_insert_id;
+	int rec_count;
+	int rows;
+	int cols;
+	bool sql_init;
+	struct machine host;
+	struct superblock sb[50];
+};
+extern struct SQLDB sqldb;
+
+/* SQL format strings are generally declared in hive/common/hive_common_sql.h */
 
 #define SQL_HOST_TOKEN_SELECT_NODE_JOIN_LATEST \
 	"SELECT token FROM host_tokens " \
@@ -67,6 +83,48 @@
 	"DELETE FROM storage_node_stats " \
 	"WHERE node_id=%llu AND s_ts < NOW() - INTERVAL 2 WEEK " \
 	"AND (UNIX_TIMESTAMP(s_ts) %% 1200) != 0"
+
+#define SQL_RAFT_SNAPSHOT_TABLE_DDL \
+	"CREATE TABLE IF NOT EXISTS meta_snapshots (" \
+	"snapshot_id BIGINT UNSIGNED NOT NULL PRIMARY KEY," \
+	"snapshot_name VARCHAR(128) DEFAULT NULL," \
+	"snapshot_description TEXT DEFAULT NULL," \
+	"created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)," \
+	"updated_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) " \
+	"ON UPDATE CURRENT_TIMESTAMP(6)," \
+	"created_by VARCHAR(128) NOT NULL DEFAULT 'system'," \
+	"container VARCHAR(64) NOT NULL DEFAULT 'meta'," \
+	"container_ref VARCHAR(128) DEFAULT NULL," \
+	"raft_index_at_snap BIGINT UNSIGNED NOT NULL," \
+	"cluster_version VARCHAR(32) DEFAULT NULL," \
+	"cluster_wide BOOLEAN NOT NULL DEFAULT 1," \
+	"scope_node_id INT UNSIGNED DEFAULT NULL," \
+	"owner VARCHAR(128) DEFAULT NULL," \
+	"owner_group VARCHAR(128) DEFAULT NULL," \
+	"permissions VARCHAR(16) DEFAULT NULL," \
+	"retention_hours INT UNSIGNED DEFAULT NULL," \
+	"retention_days INT UNSIGNED DEFAULT NULL," \
+	"logical_size_bytes BIGINT UNSIGNED NOT NULL DEFAULT 0," \
+	"physical_size_bytes BIGINT UNSIGNED NOT NULL DEFAULT 0," \
+	"is_mutable BOOLEAN NOT NULL DEFAULT 0," \
+	"auto_delete BOOLEAN NOT NULL DEFAULT 0," \
+	"auto_delete_at TIMESTAMP(6) NULL DEFAULT NULL," \
+	"tags JSON DEFAULT NULL," \
+	"KEY idx_meta_snapshots_created (created_at)," \
+	"KEY idx_meta_snapshots_container (container, container_ref)," \
+	"KEY idx_meta_snapshots_scope (cluster_wide, scope_node_id)" \
+	") ENGINE=InnoDB"
+#define SQL_RAFT_SNAPSHOT_ISOLATION_REPEATABLE_READ \
+	"SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ"
+
+#define SQL_RAFT_SNAPSHOT_START_CONSISTENT \
+	"START TRANSACTION WITH CONSISTENT SNAPSHOT"
+
+#define SQL_RAFT_SNAPSHOT_INSERT_OR_UPDATE \
+	"INSERT INTO meta_snapshots (snapshot_id, raft_index_at_snap, created_at, updated_at) " \
+	"VALUES (%llu, %llu, NOW(6), NOW(6)) " \
+	"ON DUPLICATE KEY UPDATE raft_index_at_snap=VALUES(raft_index_at_snap), " \
+	"updated_at=VALUES(updated_at)"
 
 
 /* Prototypes */
@@ -120,20 +178,14 @@ bool hifs_store_block_to_stripe_locations(uint64_t volume_id,
                                           const uint8_t hash[HIFS_BLOCK_HASH_SIZE],
                                           const struct stripe_location *locations,
                                           size_t count);
+int hg_sql_snapshot_take(MYSQL *db, uint64_t snap_id, uint64_t snap_index);
 
-/* SQL Connect */
+int hg_sql_snapshot_create_artifact(const char *snapshot_dir,
+                                   const char *mysqldump_path,
+                                   const char *mysql_defaults_file,
+                                   const char *db_name,
+                                   uint64_t snap_id,
+                                   uint64_t snap_index,
+                                   char *out_path,
+                                   size_t out_path_sz);
 
-
-struct SQLDB {
-	MYSQL *conn;
-	MYSQL_RES *last_query;
-	unsigned long long last_affected;
-	unsigned long long last_insert_id;
-	int rec_count;
-	int rows;
-	int cols;
-	bool sql_init;
-	struct machine host;
-	struct superblock sb[50];
-};
-extern struct SQLDB sqldb;

@@ -6,24 +6,29 @@
  * License: GNU GPL as of 2023
  *
  */
-
+#pragma once
+#include <stdint.h>
+#include <string.h>
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <stdbool.h>
-#include <stdint.h>
 #include <sys/epoll.h>
 #include <sys/time.h>
 #include <sys/types.h>
+#include <sys/wait.h>
+#include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
 #include <ctype.h>
 #include <sys/uio.h>
 #include <sys/stat.h>
- 
+#include <limits.h>
+#include <errno.h>
+
 #include <mysql.h>   // libmariadbclient or libmysqlclient
 
+#include <uv.h>
 #include <raft.h>      // core algorithm state
 #include <raft/uv.h>   // libuv-based I/O driver
 
@@ -63,6 +68,9 @@ enum hg_op_type {
     HG_OP_PUT_BLOCK = 1,
     HG_OP_PUT_INODE = 2,
     HG_OP_PUT_DIRENT = 3,
+    HG_OP_SNAPSHOT_MARK = 50,
+    HG_OP_PUT_JOIN_SEC = 60,
+    HG_OP_STORAGE_NODE_UPDATE = 61,
     /* later: other read/write routines, etc. */
 };
 
@@ -94,6 +102,18 @@ struct RaftPutDirent {
     uint16_t  reserved;
 };
 
+#define SNAPSHOT_MAGIC 0x534E4150u  // 'SNAP'
+
+struct RaftSnapshotMeta {
+    uint32_t magic;     // SNAPSHOT_MAGIC
+    uint16_t opcode;    // meta_opcode
+    uint16_t reserved;
+    uint64_t snap_id;   // caller-chosen ID (monotonic)
+    uint64_t ss_time;   // snapshot creation time (unix ns)
+    uint64_t type;      // snapshot type (manual/auto/etc)
+    uint64_t last_index_idx; // last included Raft log index
+};
+
 struct RaftCmd {
     uint8_t op_type;
     uint8_t reserved[3];
@@ -101,7 +121,35 @@ struct RaftCmd {
         struct RaftPutBlock block;   // current fields
         struct RaftPutInode inode;   // e.g., hifs_inode_wire + fp_index info
         struct RaftPutDirent dirent; // hifs_dir_entry
+        struct RaftSnapshotMeta snapshot;
+        struct hive_guard_join_context join_sec;
+        struct hive_guard_storage_update_cmd storage_update;
     } u;
+};
+
+
+static pthread_mutex_t g_snap_mu = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t  g_snap_cv = PTHREAD_COND_INITIALIZER;
+
+struct hg_local_snapshot_info {
+    uint64_t snap_id;
+    uint64_t raft_index;
+    int      status;          // 0=ready, <0=error, 1=creating/unknown
+    char     path[PATH_MAX];  // local snapshot file path
+    uint64_t size_bytes;
+    // optionally checksum string
+};
+
+static struct hg_local_snapshot_info g_last_snap = {
+    .status = 1
+};
+
+// source of a snapshot file transfer over TCP, multiple nodes may have it
+struct hg_snapshot_source {
+    uint64_t snap_id;
+    uint64_t raft_index;
+    char     source_addr[256];   // "ip:port" of node serving file
+    char     local_path[PATH_MAX]; // local path on source node
 };
 
 
@@ -115,5 +163,8 @@ void hg_raft_shutdown(void);
 bool hg_guard_local_can_write(void);
 int hifs_raft_submit_put_block(const struct RaftPutBlock *cmd);
 int hifs_raft_submit_put_dirent(const struct RaftPutDirent *cmd);
+int hifs_raft_submit_join_sec(const struct hive_guard_join_context *ctx);
+int hifs_raft_submit_storage_update(const struct hive_guard_storage_update_cmd *cmd);
+int hifs_raft_submit_snapshot_mark(uint64_t snap_id);
 
 #endif /* HIVE_GUARD_RAFT_H */

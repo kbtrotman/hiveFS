@@ -18,7 +18,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <uv.h>
+
 
 #include "../../hifs_shared_defs.h"
 #include "hive_guard_erasure_code.h"
@@ -43,6 +43,11 @@ static pthread_mutex_t      g_state_mu = PTHREAD_MUTEX_INITIALIZER;
 static int                  g_is_leader = 0;
 static int                  g_should_stop = 0;
 static pthread_mutex_t      g_log_mu = PTHREAD_MUTEX_INITIALIZER;
+#if defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 201112L)
+static _Thread_local uint64_t g_thread_committed_index;
+#else
+static __thread uint64_t g_thread_committed_index;
+#endif
 
 struct raft_log_state {
     struct RaftCmd *entries;
@@ -62,6 +67,13 @@ static struct raft_log_state g_raft_log = {
     .committed_index = 0,
 };
 
+extern MYSQL *hg_sql_get_db(void);
+
+// Also provide these from config somewhere:
+extern const char *g_snapshot_dir;         // e.g. "/var/lib/hivefs/snapshots"
+extern const char *g_mysqldump_path;       // e.g. "/usr/bin/mysqldump"
+extern const char *g_mysql_defaults_file;  // e.g. "/etc/hivefs/mysql-backup.cnf"
+extern const char *g_mysql_db_name;        // e.g. "hive_meta"
 
 /* Convert binary to hex string; out must be at least 2*len + 1 bytes. */
 /* This helper function seems tyo be going everywhere since we sending */
@@ -335,6 +347,60 @@ commitCb(struct uv_raft *raft,
             return -EIO;
         return 0;
     }
+    case HG_OP_SNAPSHOT_MARK: {
+        MYSQL *db = hg_sql_get_db();
+        if (!db) return -EIO;
+
+        const uint64_t snap_id = cmd.u.snapshot.snap_id;
+
+        /* Commit loop copies the index into a thread-local so each callback sees
+         * the entry it is applying even when multiple threads are advancing the
+         * log concurrently. */
+        const uint64_t snap_index = g_thread_committed_index;
+
+        // 1) Persist marker row (your existing bookkeeping function)
+        int rc = hg_sql_snapshot_take(db, snap_id, snap_index);
+        if (rc != 0) goto publish_fail;
+
+        // 2) Create the actual artifact file
+        char path[PATH_MAX];
+        rc = hg_sql_snapshot_create_artifact(g_snapshot_dir,
+                                            g_mysqldump_path,
+                                            g_mysql_defaults_file,
+                                            g_mysql_db_name,
+                                            snap_id,
+                                            snap_index,
+                                            path,
+                                            sizeof(path));
+        if (rc != 0) goto publish_fail;
+
+        // 3) Publish readiness so join orchestration can pick a source + transfer file to new node
+        pthread_mutex_lock(&g_snap_mu);
+        g_last_snap.snap_id = snap_id;
+        g_last_snap.raft_index = snap_index;
+        g_last_snap.status = 0;
+        strncpy(g_last_snap.path, path, sizeof(g_last_snap.path)-1);
+        g_last_snap.path[sizeof(g_last_snap.path)-1] = '\0';
+        g_last_snap.size_bytes = 0; 
+        // (optional: stat() the file and store size)
+        pthread_cond_broadcast(&g_snap_cv);
+        pthread_mutex_unlock(&g_snap_mu);
+
+        return 0;
+
+    publish_fail:
+        pthread_mutex_lock(&g_snap_mu);
+        g_last_snap.snap_id = snap_id;
+        g_last_snap.raft_index = snap_index;
+        g_last_snap.status = rc;
+        g_last_snap.path[0] = '\0';
+        g_last_snap.size_bytes = 0;
+        pthread_cond_broadcast(&g_snap_cv);
+        pthread_mutex_unlock(&g_snap_mu);
+        return rc;
+    }
+
+
     default:
         break;
     }
@@ -409,6 +475,7 @@ static int raft_log_commit_up_to(uint64_t idx)
     if (idx == 0)
         return -EINVAL;
 
+    uint64_t committed_idx = 0;
     for (;;) {
         struct RaftCmd entry;
 
@@ -431,10 +498,12 @@ static int raft_log_commit_up_to(uint64_t idx)
         g_raft_log.head++;
         g_raft_log.size--;
         g_raft_log.committed_index++;
+        committed_idx = g_raft_log.committed_index;
         if (g_raft_log.size == 0)
             g_raft_log.head = 0;
         pthread_mutex_unlock(&g_log_mu);
 
+        g_thread_committed_index = committed_idx;
         uv_buf_t buf = {
             .base = (char *)&entry,
             .len = sizeof(entry),
@@ -484,4 +553,112 @@ int hifs_raft_submit_put_dirent(const struct RaftPutDirent *cmd)
     if (rc != 0)
         return rc;
     return raft_log_commit_up_to(idx);
+}
+
+// raft snapshot instance:
+int hifs_raft_submit_snapshot_mark(uint64_t snap_id)
+{
+    if (!hg_guard_local_can_write())
+        return -EAGAIN;
+
+    struct RaftCmd entry = {0};
+    entry.op_type = HG_OP_SNAPSHOT_MARK;
+    entry.u.snapshot.snap_id = snap_id;
+
+    uint64_t idx = 0;
+    int rc = raft_log_append_entry(&entry, &idx);
+    if (rc != 0)
+        return rc;
+
+    return raft_log_commit_up_to(idx);
+}
+
+static int hg_wait_local_snapshot_ready(uint64_t snap_id,
+                                        uint64_t min_index,
+                                        struct hg_local_snapshot_info *out,
+                                        int timeout_ms)
+{
+    if (!out) return -EINVAL;
+
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    ts.tv_sec += timeout_ms / 1000;
+    ts.tv_nsec += (timeout_ms % 1000) * 1000000L;
+    if (ts.tv_nsec >= 1000000000L) { ts.tv_sec++; ts.tv_nsec -= 1000000000L; }
+
+    pthread_mutex_lock(&g_snap_mu);
+    for (;;) {
+        if (g_last_snap.snap_id == snap_id &&
+            g_last_snap.raft_index >= min_index &&
+            g_last_snap.status == 0)
+        {
+            *out = g_last_snap;
+            pthread_mutex_unlock(&g_snap_mu);
+            return 0;
+        }
+        if (g_last_snap.snap_id == snap_id && g_last_snap.status < 0) {
+            int err = g_last_snap.status;
+            pthread_mutex_unlock(&g_snap_mu);
+            return err;
+        }
+
+        int rc = pthread_cond_timedwait(&g_snap_cv, &g_snap_mu, &ts);
+        if (rc == ETIMEDOUT) {
+            pthread_mutex_unlock(&g_snap_mu);
+            return -ETIMEDOUT;
+        }
+    }
+}
+
+int hg_prepare_snapshot_for_new_node(const struct hg_raft_config *cfg,
+                                    uint64_t snap_id,
+                                    struct hg_snapshot_source *out_src)
+{
+    if (!cfg || !out_src) return -EINVAL;
+    memset(out_src, 0, sizeof(*out_src));
+
+    if (!hg_guard_local_can_write()) {
+        // Only the leader should coordinate this
+        return -EAGAIN;
+    }
+
+    // 1) Replicate snapshot marker to Raft log
+    int rc = hifs_raft_submit_snapshot_mark(snap_id);
+    if (rc != 0) {
+        return rc;
+    }
+
+    struct hg_local_snapshot_info local = {0};
+    rc = hg_wait_local_snapshot_ready(snap_id,
+                                      0 /* any index >= the mark */,
+                                      &local,
+                                      60000);
+    if (rc != 0)
+        return rc;
+
+    // 3) Pick a source node
+    // This will always be the leader, unless leader changes during the process.
+    out_src->snap_id = local.snap_id;
+    out_src->raft_index = local.raft_index;
+    strncpy(out_src->local_path, local.path, sizeof(out_src->local_path)-1);
+    out_src->local_path[sizeof(out_src->local_path)-1] = '\0';
+    strncpy(out_src->source_addr, cfg->self_address, sizeof(out_src->source_addr)-1);
+    out_src->source_addr[sizeof(out_src->source_addr)-1] = '\0';
+
+    // 4) Ready to transfer:
+    
+    //    TODO: tcp_send_file_to_new_node(out_src->source_addr, out_src->local_path, new_node_addr);
+    // Implement the function above in hive_guard_sn_tcp.c to transfer the snapshot file just created
+    // above to the new node using your existing TCP file transfer code. Since all nodes have the
+    // same raft implementation, we can code it as though we're transferring to/from any node using
+    // this same code (they all run hive_guard_sn_tcp.c).
+    return 0;
+}
+
+
+static int ensure_dir(const char *path, mode_t mode)
+{
+    if (mkdir(path, mode) == 0) return 0;
+    if (errno == EEXIST) return 0;
+    return -errno;
 }

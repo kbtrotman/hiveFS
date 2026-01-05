@@ -11,7 +11,12 @@
 #include <stdlib.h>
 #include <endian.h>
 #include <netdb.h>
+#include <unistd.h>
+#include <errno.h>
 #include <limits.h>
+#include <stdio.h>
+#include <string.h>
+#include <sys/wait.h>
 #include <sys/utsname.h>
 #include <openssl/sha.h>
 
@@ -1732,6 +1737,57 @@ bool hifs_store_block_to_stripe_locations(uint64_t volume_id, uint64_t block_no,
 	return ok;
 }
 
+int hg_sql_snapshot_take(MYSQL *db, uint64_t snap_id, uint64_t snap_index)
+{
+	if (!db) {
+		hifs_warning("hg_sql_snapshot_take: missing database handle");
+		return -EINVAL;
+	}
+
+	if (mysql_query(db, SQL_RAFT_SNAPSHOT_TABLE_DDL) != 0) {
+		hifs_warning("hg_sql_snapshot_take: unable to ensure snapshot table: %s",
+			     mysql_error(db));
+		return -EIO;
+	}
+
+	if (mysql_query(db, SQL_RAFT_SNAPSHOT_ISOLATION_REPEATABLE_READ) != 0) {
+		hifs_warning("hg_sql_snapshot_take: failed to set isolation level: %s",
+			     mysql_error(db));
+		return -EIO;
+	}
+
+	if (mysql_query(db, SQL_RAFT_SNAPSHOT_START_CONSISTENT) != 0) {
+		hifs_warning("hg_sql_snapshot_take: failed to start snapshot transaction: %s",
+			     mysql_error(db));
+		return -EIO;
+	}
+
+	char insert_sql[256];
+	(void)snprintf(insert_sql,
+		       sizeof(insert_sql),
+		       SQL_RAFT_SNAPSHOT_INSERT_OR_UPDATE,
+		       (unsigned long long)snap_id,
+		       (unsigned long long)snap_index);
+
+	if (mysql_query(db, insert_sql) != 0) {
+		hifs_warning("hg_sql_snapshot_take: failed to persist snapshot marker: %s",
+			     mysql_error(db));
+		mysql_rollback(db);
+		return -EIO;
+	}
+
+	if (mysql_commit(db) != 0) {
+		hifs_warning("hg_sql_snapshot_take: commit failed: %s", mysql_error(db));
+		mysql_rollback(db);
+		return -EIO;
+	}
+
+	hifs_debug("hg_sql_snapshot_take: snap_id=%llu index=%llu",
+		   (unsigned long long)snap_id,
+		   (unsigned long long)snap_index);
+	return 0;
+}
+
 static struct stripe_locations hifs_read_block_to_stripe_locations(uint64_t volume_id, uint64_t block_no,
 						      const uint8_t hash[HIFS_BLOCK_HASH_SIZE],
 						      size_t count)
@@ -1793,4 +1849,86 @@ static struct stripe_locations hifs_read_block_to_stripe_locations(uint64_t volu
 			    limit);
 	}
 	return out;
+}
+
+static int hg_run_cmd(char *const argv[])
+{
+    pid_t pid = fork();
+    if (pid < 0) return -errno;
+    if (pid == 0) {
+        execvp(argv[0], argv);
+        _exit(127);
+    }
+    int status = 0;
+    if (waitpid(pid, &status, 0) < 0) return -errno;
+    if (WIFEXITED(status) && WEXITSTATUS(status) == 0) return 0;
+    return -EIO;
+}
+
+/*
+ * Create a consistent logical snapshot artifact using mysqldump.
+ *
+ * Requires a defaults file (recommended) so you do NOT put passwords on argv.
+ * When going to prod, this should be placed in my.cnf and secured (0600).
+ * Example defaults file (0600):
+ *   [client]
+ *   user=backupuser
+ *   password=...
+ *   host=127.0.0.1
+ *   port=3306
+ */
+int hg_sql_snapshot_create_artifact(const char *snapshot_dir,
+                                   const char *mysqldump_path,
+                                   const char *mysql_defaults_file,
+                                   const char *db_name,
+                                   uint64_t snap_id,
+                                   uint64_t snap_index,
+                                   char *out_path,
+                                   size_t out_path_sz)
+{
+    if (!snapshot_dir || !mysqldump_path || !mysql_defaults_file || !db_name || !out_path)
+        return -EINVAL;
+
+    // File name includes both snap_id and raft index so it is self-describing.
+    char dump_path[PATH_MAX];
+    snprintf(dump_path, sizeof(dump_path),
+             "%s/meta-snap-%llu-idx-%llu.sql",
+             snapshot_dir,
+             (unsigned long long)snap_id,
+             (unsigned long long)snap_index);
+
+    // mysqldump arguments
+    // --single-transaction: consistent snapshot for InnoDB without locking tables (typical)
+    // --routines/--triggers: if you need them
+    // --set-gtid-purged=OFF: avoids GTID issues if present
+    char defaults_arg[PATH_MAX + 32];
+    snprintf(defaults_arg, sizeof(defaults_arg),
+             "--defaults-extra-file=%s", mysql_defaults_file);
+
+    char result_arg[PATH_MAX + 32];
+    snprintf(result_arg, sizeof(result_arg),
+             "--result-file=%s", dump_path);
+
+    char *argv[] = {
+        (char *)mysqldump_path,
+        defaults_arg,
+        "--single-transaction",
+        "--quick",
+        "--routines",
+        "--triggers",
+        "--set-gtid-purged=OFF",
+        result_arg,
+        (char *)db_name,
+        NULL
+    };
+
+    int rc = hg_run_cmd(argv);
+    if (rc != 0) {
+        hifs_warning("hg_sql_snapshot_create_artifact: mysqldump failed rc=%d", rc);
+        return rc;
+    }
+
+    strncpy(out_path, dump_path, out_path_sz - 1);
+    out_path[out_path_sz - 1] = '\0';
+    return 0;
 }
