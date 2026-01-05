@@ -23,6 +23,7 @@
 #include <unistd.h>
 
 #include "hive_guard_sql.h"
+#include "hive_guard_raft.h"
 #include "../common/hive_common_sock.h"
 
 static pthread_t g_guard_sock_thread;
@@ -31,7 +32,6 @@ static bool g_guard_sock_thread_running = false;
 static int g_guard_sock_listener = -1;
 static char g_guard_sock_path[sizeof(((struct sockaddr_un *)0)->sun_path)] =
 	HIVE_GUARD_SOCK_PATH;
-#include "../common/hive_common_sock.h"
 
 static const char *json_escape_string(const char *src, char *dst, size_t dst_sz)
 {
