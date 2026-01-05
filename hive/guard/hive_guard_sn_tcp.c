@@ -9,15 +9,15 @@
 
 /**
  * Lightweight TCP helper for sending/receiving EC stripes between nodes.
- * This is intentionally simple and synchronous for now; it can evolve into
- * a fully-fledged inter-cluster communication as encryption and security is
- * added later.
+ * This is evolving intoa fully-fledged inter-cluster communication as 
+ * data transfers, encryption, and security is slowly added.
  */
 
 #include "hive_guard_sn_tcp.h"
 #include "hive_guard_kv.h"
 
 #include <arpa/inet.h>
+#include <ctype.h>
 #include <errno.h>
 #include <netdb.h>
 #include <pthread.h>
@@ -26,6 +26,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/sendfile.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
 
@@ -90,6 +92,130 @@ static ssize_t read_full(int fd, void *buf, size_t len)
 		total += (size_t)n;
 	}
 	return (ssize_t)total;
+}
+
+#define SNAPSHOT_XFER_MAGIC 0x53584652u
+
+struct snapshot_xfer_header {
+	uint32_t magic;
+	uint16_t version;
+	uint16_t reserved;
+	uint32_t source_len;
+	uint32_t path_len;
+	uint64_t file_size;
+} __attribute__((packed));
+
+static int parse_host_port_string(const char *addr,
+				  char *host_out,
+				  size_t host_len,
+				  uint16_t *port_out)
+{
+	if (!addr || !host_out || host_len == 0 || !port_out)
+		return -EINVAL;
+
+	while (isspace((unsigned char)*addr))
+		++addr;
+	if (*addr == '\0')
+		return -EINVAL;
+
+	uint16_t port = HIFS_STRIPE_TCP_DEFAULT_PORT;
+	size_t host_copy = 0;
+
+	if (*addr == '[') {
+		const char *end = strchr(addr, ']');
+		if (!end || end == addr + 1)
+			return -EINVAL;
+		host_copy = (size_t)(end - addr - 1);
+		if (host_copy >= host_len)
+			host_copy = host_len - 1;
+		memcpy(host_out, addr + 1, host_copy);
+		host_out[host_copy] = '\0';
+		if (end[1] == ':' && end[2]) {
+			char *endptr = NULL;
+			unsigned long val = strtoul(end + 2, &endptr, 10);
+			if (!endptr || *endptr != '\0' || val == 0 || val > 0xFFFF)
+				return -EINVAL;
+			port = (uint16_t)val;
+		}
+	} else {
+		const char *last_colon = strrchr(addr, ':');
+		bool has_port = false;
+		if (last_colon && last_colon[1]) {
+			has_port = true;
+			for (const char *p = last_colon + 1; *p; ++p) {
+				if (!isdigit((unsigned char)*p)) {
+					has_port = false;
+					break;
+				}
+			}
+		}
+		if (has_port) {
+			char *endptr = NULL;
+			unsigned long val = strtoul(last_colon + 1, &endptr, 10);
+			if (!endptr || *endptr != '\0' || val == 0 || val > 0xFFFF)
+				return -EINVAL;
+			port = (uint16_t)val;
+			host_copy = (size_t)(last_colon - addr);
+		} else {
+			host_copy = strlen(addr);
+		}
+		if (host_copy == 0)
+			return -EINVAL;
+		if (host_copy >= host_len)
+			host_copy = host_len - 1;
+		memcpy(host_out, addr, host_copy);
+		host_out[host_copy] = '\0';
+	}
+
+	*port_out = port;
+	return 0;
+}
+
+static int stream_file_over_tcp(int sock_fd, int file_fd, off_t file_size)
+{
+	if (file_size <= 0)
+		return 0;
+
+#if defined(__linux__)
+	off_t offset = 0;
+	while (offset < file_size) {
+		size_t chunk = (size_t)((file_size - offset) > (1UL << 30) ?
+					(1UL << 30) :
+					(file_size - offset));
+		ssize_t sent = sendfile(sock_fd, file_fd, &offset, chunk);
+		if (sent < 0) {
+			if (errno == EINTR || errno == EAGAIN)
+				continue;
+			return -errno;
+		}
+		if (sent == 0)
+			return -EIO;
+	}
+	return 0;
+#else
+	uint8_t buf[64 * 1024];
+	while (1) {
+		ssize_t r = read(file_fd, buf, sizeof(buf));
+		if (r < 0) {
+			if (errno == EINTR)
+				continue;
+			return -errno;
+		}
+		if (r == 0)
+			break;
+		ssize_t off = 0;
+		while (off < r) {
+			ssize_t w = write(sock_fd, buf + off, r - off);
+			if (w < 0) {
+				if (errno == EINTR)
+					continue;
+				return -errno;
+			}
+			off += w;
+		}
+	}
+	return 0;
+#endif
 }
 
 static int connect_to_host_port(const char *host, uint16_t port)
@@ -407,4 +533,79 @@ int hifs_sn_tcp_fetch(uint32_t storage_node_id,
 	*out_data = buf;
 	*out_len = payload_len;
 	return 0;
+}
+
+int tcp_send_file_to_new_node(const char *source_addr,
+			      const char *local_path,
+			      const char *new_node_addr)
+{
+	if (!local_path || !*local_path || !new_node_addr || !*new_node_addr)
+		return -EINVAL;
+
+	struct stat st;
+	if (stat(local_path, &st) != 0)
+		return -errno;
+	if (!S_ISREG(st.st_mode))
+		return -EINVAL;
+
+	int file_fd = open(local_path, O_RDONLY);
+	if (file_fd < 0)
+		return -errno;
+
+	char host[256];
+	uint16_t port = 0;
+	int rc = parse_host_port_string(new_node_addr, host, sizeof(host), &port);
+	if (rc != 0) {
+		close(file_fd);
+		return rc;
+	}
+
+	int sock = connect_to_host_port(host, port);
+	if (sock < 0) {
+		int err = errno ? -errno : -ECONNREFUSED;
+		close(file_fd);
+		return err;
+	}
+
+	const char *src = (source_addr && *source_addr) ? source_addr : "";
+	size_t src_len = strlen(src);
+	size_t path_len = strlen(local_path);
+	if (src_len > UINT32_MAX || path_len > UINT32_MAX) {
+		close(sock);
+		close(file_fd);
+		return -EOVERFLOW;
+	}
+
+	struct snapshot_xfer_header hdr = {
+		.magic = htonl(SNAPSHOT_XFER_MAGIC),
+		.version = htons(1),
+		.reserved = 0,
+		.source_len = htonl((uint32_t)src_len),
+		.path_len = htonl((uint32_t)path_len),
+		.file_size = htonll((uint64_t)st.st_size),
+	};
+
+	if (write_full(sock, &hdr, sizeof(hdr)) != (ssize_t)sizeof(hdr)) {
+		rc = -EIO;
+		goto done;
+	}
+
+	if (src_len &&
+	    write_full(sock, src, src_len) != (ssize_t)src_len) {
+		rc = -EIO;
+		goto done;
+	}
+
+	if (path_len &&
+	    write_full(sock, local_path, path_len) != (ssize_t)path_len) {
+		rc = -EIO;
+		goto done;
+	}
+
+	rc = stream_file_over_tcp(sock, file_fd, st.st_size);
+
+done:
+	close(sock);
+	close(file_fd);
+	return rc;
 }

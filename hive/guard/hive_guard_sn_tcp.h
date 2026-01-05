@@ -42,6 +42,9 @@ int hifs_sn_tcp_fetch(uint32_t storage_node_id,
                       uint64_t estripe_id,
                       uint8_t **out_data,
                       size_t *out_len);
+int tcp_send_file_to_new_node(const char *source_addr,
+                              const char *local_path,
+                              const char *new_node_addr);
 
 #include <stdlib.h>
 

@@ -26,6 +26,7 @@
 #include "hive_guard_sql.h"
 #include "hive_guard_kv.h"
 #include "hive_guard.h"
+#include "hive_guard_sn_tcp.h"
 
 struct uv_raft;
 
@@ -612,9 +613,10 @@ static int hg_wait_local_snapshot_ready(uint64_t snap_id,
 
 int hg_prepare_snapshot_for_new_node(const struct hg_raft_config *cfg,
                                     uint64_t snap_id,
+                                    const char *new_node_addr,
                                     struct hg_snapshot_source *out_src)
 {
-    if (!cfg || !out_src) return -EINVAL;
+    if (!cfg || !out_src || !new_node_addr || !*new_node_addr) return -EINVAL;
     memset(out_src, 0, sizeof(*out_src));
 
     if (!hg_guard_local_can_write()) {
@@ -646,13 +648,9 @@ int hg_prepare_snapshot_for_new_node(const struct hg_raft_config *cfg,
     out_src->source_addr[sizeof(out_src->source_addr)-1] = '\0';
 
     // 4) Ready to transfer:
-    
-    //    TODO: tcp_send_file_to_new_node(out_src->source_addr, out_src->local_path, new_node_addr);
-    // Implement the function above in hive_guard_sn_tcp.c to transfer the snapshot file just created
-    // above to the new node using your existing TCP file transfer code. Since all nodes have the
-    // same raft implementation, we can code it as though we're transferring to/from any node using
-    // this same code (they all run hive_guard_sn_tcp.c).
-    return 0;
+    return tcp_send_file_to_new_node(out_src->source_addr,
+                                     out_src->local_path,
+                                     new_node_addr);
 }
 
 
