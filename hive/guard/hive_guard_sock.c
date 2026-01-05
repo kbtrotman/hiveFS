@@ -364,32 +364,6 @@ cleanup:
 	return rc;
 }
 
-#define GUARD_SOCK_STATE_LEN 32
-#define GUARD_SOCK_STATUS_LEN 64
-#define GUARD_SOCK_MSG_LEN 256
-#define GUARD_SOCK_TOKEN_LEN 256
-#define GUARD_SOCK_TS_LEN 128
-#define GUARD_SOCK_PUBKEY_LEN 4096
-
-struct hive_guard_sock_join_sec {
-	uint64_t cluster_id;
-	uint64_t node_id;
-	uint64_t min_nodes_req;
-	char cluster_state[GUARD_SOCK_STATE_LEN];
-	char database_state[GUARD_SOCK_STATE_LEN];
-	char kv_state[GUARD_SOCK_STATE_LEN];
-	char cont1_state[GUARD_SOCK_STATE_LEN];
-	char cont2_state[GUARD_SOCK_STATE_LEN];
-	char bootstrap_token[GUARD_SOCK_TOKEN_LEN];
-	char first_boot_ts[GUARD_SOCK_TS_LEN];
-	char config_status[GUARD_SOCK_STATUS_LEN];
-	char config_progress[GUARD_SOCK_STATUS_LEN];
-	char config_msg[GUARD_SOCK_MSG_LEN];
-	char hive_version[GUARD_SOCK_STATUS_LEN];
-	char hive_patch_level[GUARD_SOCK_STATUS_LEN];
-	char pub_key[GUARD_SOCK_PUBKEY_LEN];
-};
-
 static inline const char *guard_sock_skip_ws(const char *p)
 {
 	while (p && *p && isspace((unsigned char)*p))

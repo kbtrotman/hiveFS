@@ -10,10 +10,10 @@
 
 /**
  * Thin wrapper so the build keeps the historical entry point while the
- * implementation lives in hive_guard_raft.c & hive_guard_tcp_coms.c, two
- * independantly started threads.
+ * implementation lives in hive_guard_raft.c & hive_guard_tcp.c, two
+ * independantly started threads (yeah, now there's like 4 or 5 threads 
+ * at least).
  */
-
 
 #include <errno.h>
 #include <stdio.h>
@@ -31,8 +31,29 @@
 #include "hive_guard_sql.h"
 #include "hive_guard_kv.h"
 #include "hive_guard_sock.h"
+#include "hive_guard_leasing.h"
+
+const char *g_snapshot_dir = HIVE_GUARD_STATE_ROOT "/snapshots";
+const char *g_mysqldump_path = "/usr/bin/mysqldump";
+const char *g_mysql_defaults_file = "/etc/hivefs/mysql-backup.cnf";
+const char *g_mysql_db_name = "hive_meta";
 
 
+/* Check if we need to run bootstrap (unconfigured or pending state).
+ * Node ISOs install with an /etc/hivefs/node.json.conf file with
+ * several variables set to unconfigured. As they are configured,
+ * that file is updated and they are set to pending (resumable if
+ * interrupted) and "cpnfigured" when done. This is how we control
+ * whether to run the bootstrap process on first launch and what to
+ * configure/setup, to automate everything.
+ * 
+ * NOTE: Everything will try 3 times to configure, and will hard fail
+ * after 3 attempts and require manual intervention. If the filesystems
+ * are setup right by the user choices and install process, however,
+ * this should never happen.
+ * 
+ * Returns true if we need to run bootstrap, false otherwise.
+ */
 static bool needs_bootstrap(void)
 {
 	struct stat st;
@@ -229,6 +250,7 @@ int main(void)
 		return 1;
 	}
 
+	// Make sure our keystore is there & ok.
 	if (hg_kv_init(HIVE_GUARD_KV_DIR) != 0) {
 		fprintf(stderr, "main: failed to initialize RocksDB at %s\n",
 			HIVE_GUARD_KV_DIR);
@@ -254,6 +276,7 @@ int main(void)
 	fprintf(stderr, "main: starting\n");
 	fflush(stderr);
 
+	// Init raft protocol.
 	if (hg_raft_init(&rcfg) != 0) {
 		fprintf(stderr, "main: hg_raft_init failed, exiting without Raft\n");
 		hg_kv_shutdown();
@@ -262,6 +285,11 @@ int main(void)
 	if (dynamic_peers)
 		free_peer_buffers(dynamic_peers, peer_addr_bufs, peer_count);
 
+
+	// Start the data listener for inter-node EC stripe transfers.
+	// This tcp thread could also be called our inter-node cluster
+	// heartbeat thread, although raft is our heartbeat and this
+	// actually just handles general data transfer to/from nodes.
 	if (hifs_sn_tcp_start(0, hifs_recv_stripe_from_node) != 0) {
 		fprintf(stderr, "main: failed to start data listener\n");
 	}
@@ -271,14 +299,37 @@ int main(void)
 			strerror(errno));
 	}
 
+	// Start periodic stats flush to the HiveFS meta-database stats.
+	// table(s). Uses storage_node_id from above if available as key
 	if (storage_node_id == 0)
 		storage_node_id = (unsigned int)self_id;
 	hg_stats_flush_periodic_start((int)storage_node_id, NULL);
 
+	/* Now start the leasing service for file locking and leasing
+	 * in its own outside thread.
+	 */
+	hg_leasing_config_t lcfg = {0};
+	hg_leasing_hooks_t hooks = {0};
+
+	/* Optional: wire to raft later
+	hooks.is_leader = my_is_leader_fn;
+	hooks.leader_addr = my_leader_addr_fn;
+	hooks.submit_grant = my_submit_grant_fn;
+	hooks.ctx = ...;
+	*/
+
+	hg_leasing_start(&lcfg, &hooks);
+
 	/* Now start the existing epoll-based TCP server.
-	 * Raft is running in its own thread; both will make progress.
+	 * Raft is running in its own thread; this sends/recieves data
+	 * to/from clients and is the only exposed port to the outside.
+	 * It also serves as our main loop since we've spawned threads
+	 * for the other things going on.
 	 */
 	ret = hive_guard_server_main();
+
+	// If we recieve a signal, then flush and shutdown cleanly.
+	hg_leasing_stop();
 	hive_guard_sock_stop();
 	hg_stats_flush_periodic_stop();
 	hg_kv_shutdown();

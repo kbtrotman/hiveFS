@@ -132,6 +132,7 @@ void init_hive_link(void);
 void close_hive_link(void);
 int get_hive_vers(void);
 MYSQL_RES *hifs_get_hive_host_data(char *machine_id);
+MYSQL *hg_sql_get_db(void);
 int get_host_info(void);
 char *hifs_get_quoted_value(const char *in_str);
 char *hifs_get_unquoted_value(const char *in_str);
@@ -188,4 +189,3 @@ int hg_sql_snapshot_create_artifact(const char *snapshot_dir,
                                    uint64_t snap_index,
                                    char *out_path,
                                    size_t out_path_sz);
-

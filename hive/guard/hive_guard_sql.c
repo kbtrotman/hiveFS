@@ -31,6 +31,11 @@
 static bool hifs_sql_node_data_up_to_date(struct hive_storage_node *local);
 
 struct SQLDB sqldb;
+
+MYSQL *hg_sql_get_db(void)
+{
+	return sqldb.conn;
+}
 unsigned int storage_node_id;
 char storage_node_name[50];
 char storage_node_address[64];

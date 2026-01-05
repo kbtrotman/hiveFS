@@ -68,6 +68,12 @@ static struct raft_log_state g_raft_log = {
     .committed_index = 0,
 };
 
+static pthread_mutex_t g_snap_mu = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t  g_snap_cv = PTHREAD_COND_INITIALIZER;
+static struct hg_local_snapshot_info g_last_snap = {
+    .status = 1
+};
+
 extern MYSQL *hg_sql_get_db(void);
 
 // Also provide these from config somewhere:
@@ -651,12 +657,4 @@ int hg_prepare_snapshot_for_new_node(const struct hg_raft_config *cfg,
     return tcp_send_file_to_new_node(out_src->source_addr,
                                      out_src->local_path,
                                      new_node_addr);
-}
-
-
-static int ensure_dir(const char *path, mode_t mode)
-{
-    if (mkdir(path, mode) == 0) return 0;
-    if (errno == EEXIST) return 0;
-    return -errno;
 }

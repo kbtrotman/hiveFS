@@ -1,7 +1,11 @@
-
-
-
-
+/**
+ * HiveFS
+ *
+ * Hive Mind Filesystem
+ * By K. B. Trotman
+ * License: GNU GPL as of 2023
+ *
+ */
 
 /**
  * HiveFS - hive_guard_leasing
@@ -14,7 +18,6 @@
  */
 
 #include "hive_guard_leasing.h"
-
 
 
 /* -------------------------------------------------------------------------- */
@@ -64,7 +67,6 @@ static void jfree(JVal *v);
 
 static const char *jstr(const JVal *v) { return (v && v->t == JT_STR) ? v->str : NULL; }
 static long jnum_i(const JVal *v, long def) { return (v && v->t == JT_NUM) ? (long)v->num : def; }
-static bool jbool(const JVal *v, bool def) { return (v && v->t == JT_BOOL) ? (v->boolean != 0) : def; }
 
 static const JVal *jobj_get(const JVal *o, const char *k)
 {
