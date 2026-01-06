@@ -364,6 +364,19 @@ cleanup:
 	return rc;
 }
 
+int hive_guard_apply_storage_node_update(const struct hive_guard_storage_update_cmd *cmd)
+{
+	if (!cmd)
+		return -EINVAL;
+
+	hifs_notice("hive_guard_sock: storage node update cluster=%llu node=%llu",
+		    (unsigned long long)cmd->cluster_id,
+		    (unsigned long long)cmd->node_id);
+	if (!hifs_load_storage_nodes())
+		hifs_warning("hive_guard_sock: unable to refresh storage nodes");
+	return 0;
+}
+
 static inline const char *guard_sock_skip_ws(const char *p)
 {
 	while (p && *p && isspace((unsigned char)*p))

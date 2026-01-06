@@ -141,7 +141,7 @@ bool hifs_insert_data(const char *q_string);
 int hifs_get_hive_host_sbs(void);
 int save_binary_data(char *data_block, char *hash);
 
-/* Remote superblock helpers */
+/* Remote metadata/SQL helpers */
 bool hifs_volume_super_get(uint64_t volume_id, struct hifs_volume_superblock *out);
 bool hifs_volume_super_set(uint64_t volume_id, const struct hifs_volume_superblock *vsb);
 bool hifs_root_dentry_load(uint64_t volume_id, struct hifs_volume_root_dentry *out);
@@ -182,6 +182,15 @@ bool hifs_store_block_to_stripe_locations(uint64_t volume_id,
 int hg_sql_snapshot_take(MYSQL *db, uint64_t snap_id, uint64_t snap_index);
 
 int hg_sql_snapshot_create_artifact(const char *snapshot_dir,
+                                   const char *mysqldump_path,
+                                   const char *mysql_defaults_file,
+                                   const char *db_name,
+                                   uint64_t snap_id,
+                                   uint64_t snap_index,
+                                   char *out_path,
+                                   size_t out_path_sz);
+
+int hg_sql_snapshot_restore_artifact(const char *snapshot_dir,
                                    const char *mysqldump_path,
                                    const char *mysql_defaults_file,
                                    const char *db_name,

@@ -33,7 +33,7 @@
 #include "hive_guard_sock.h"
 #include "hive_guard_leasing.h"
 
-const char *g_snapshot_dir = HIVE_GUARD_STATE_ROOT "/snapshots";
+const char *g_snapshot_dir = HIVE_GUARD_SNAPSHOT_BASE_DIR;
 const char *g_mysqldump_path = "/usr/bin/mysqldump";
 const char *g_mysql_defaults_file = "/etc/hivefs/mysql-backup.cnf";
 const char *g_mysql_db_name = "hive_meta";
