@@ -407,6 +407,12 @@ commitCb(struct uv_raft *raft,
         return rc;
     }
 
+    case HG_OP_STORAGE_NODE_UPDATE: {
+        const struct hive_guard_storage_update_cmd *su =
+            &cmd.u.storage_update;
+        hive_guard_apply_storage_node_update(su);
+        return 0;
+    }
 
     default:
         break;
@@ -571,6 +577,25 @@ int hifs_raft_submit_snapshot_mark(uint64_t snap_id)
     struct RaftCmd entry = {0};
     entry.op_type = HG_OP_SNAPSHOT_MARK;
     entry.u.snapshot.snap_id = snap_id;
+
+    uint64_t idx = 0;
+    int rc = raft_log_append_entry(&entry, &idx);
+    if (rc != 0)
+        return rc;
+
+    return raft_log_commit_up_to(idx);
+}
+
+int hifs_raft_submit_storage_update(const struct hive_guard_storage_update_cmd *cmd)
+{
+    if (!cmd)
+        return -EINVAL;
+    if (!hg_guard_local_can_write())
+        return -EAGAIN;
+
+    struct RaftCmd entry = {0};
+    entry.op_type = HG_OP_STORAGE_NODE_UPDATE;
+    entry.u.storage_update = *cmd;
 
     uint64_t idx = 0;
     int rc = raft_log_append_entry(&entry, &idx);

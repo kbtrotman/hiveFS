@@ -35,9 +35,12 @@
 
 #include "../../hicomm/hi_command.h"
 
-#define HIVE_GUARD_STATE_ROOT "/var/lib/hivefs"
-#define HIVE_GUARD_RAFT_DIR   HIVE_GUARD_STATE_ROOT "/hive_guard_raft"
-#define HIVE_GUARD_KV_DIR     HIVE_GUARD_STATE_ROOT "/hive_guard_kv"
+#define HIVE_GUARD_STATE_ROOT        "/var/lib/hivefs"
+#define HIVE_GUARD_SNAPSHOT_BASE_DIR HIVE_GUARD_STATE_ROOT "/snapshots"
+#define HIVE_GUARD_SNAPSHOT_DIR_FMT  "snap-%llu-idx-%llu"
+#define HIVE_GUARD_SNAPSHOT_FILE_FMT "meta-snap-%llu-idx-%llu.sql"
+#define HIVE_GUARD_RAFT_DIR          HIVE_GUARD_STATE_ROOT "/hive_guard_raft"
+#define HIVE_GUARD_KV_DIR            HIVE_GUARD_STATE_ROOT "/hive_guard_kv"
 #define HIVE_NODE_CONF_PATH   "/etc/hivefs/node.json.conf"
 #define HIVE_BOOTSTRAP_BIN    "hive_bootstrap"
 

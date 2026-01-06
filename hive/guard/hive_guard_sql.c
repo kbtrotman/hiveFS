@@ -16,6 +16,7 @@
 #include <limits.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <sys/utsname.h>
 #include <openssl/sha.h>
@@ -1882,6 +1883,58 @@ static int hg_run_cmd(char *const argv[])
  *   host=127.0.0.1
  *   port=3306
  */
+static const char *hg_snapshot_base_dir(const char *snapshot_dir)
+{
+    if (snapshot_dir && *snapshot_dir)
+        return snapshot_dir;
+    return HIVE_GUARD_SNAPSHOT_BASE_DIR;
+}
+
+static int hg_snapshot_format_dir(const char *base_dir,
+                                  uint64_t snap_id,
+                                  uint64_t snap_index,
+                                  char *dir_buf,
+                                  size_t dir_sz)
+{
+    int written = snprintf(dir_buf,
+                           dir_sz,
+                           "%s/" HIVE_GUARD_SNAPSHOT_DIR_FMT,
+                           base_dir,
+                           (unsigned long long)snap_id,
+                           (unsigned long long)snap_index);
+    if (written < 0 || (size_t)written >= dir_sz)
+        return -ENAMETOOLONG;
+    return 0;
+}
+
+static int hg_snapshot_format_file(const char *dir_path,
+                                   uint64_t snap_id,
+                                   uint64_t snap_index,
+                                   char *out_path,
+                                   size_t out_path_sz)
+{
+    int written = snprintf(out_path,
+                           out_path_sz,
+                           "%s/" HIVE_GUARD_SNAPSHOT_FILE_FMT,
+                           dir_path,
+                           (unsigned long long)snap_id,
+                           (unsigned long long)snap_index);
+    if (written < 0 || (size_t)written >= out_path_sz)
+        return -ENAMETOOLONG;
+    return 0;
+}
+
+static int hg_snapshot_ensure_dir(const char *path, mode_t mode, bool require_new)
+{
+    if (mkdir(path, mode) == 0)
+        return 0;
+    if (!require_new && errno == EEXIST)
+        return 0;
+    if (errno == EEXIST && require_new)
+        return -EEXIST;
+    return -errno;
+}
+
 int hg_sql_snapshot_create_artifact(const char *snapshot_dir,
                                    const char *mysqldump_path,
                                    const char *mysql_defaults_file,
@@ -1891,28 +1944,53 @@ int hg_sql_snapshot_create_artifact(const char *snapshot_dir,
                                    char *out_path,
                                    size_t out_path_sz)
 {
-    if (!snapshot_dir || !mysqldump_path || !mysql_defaults_file || !db_name || !out_path)
+    if (!mysqldump_path || !mysql_defaults_file || !db_name || !out_path)
         return -EINVAL;
 
-    // File name includes both snap_id and raft index so it is self-describing.
-    char dump_path[PATH_MAX];
-    snprintf(dump_path, sizeof(dump_path),
-             "%s/meta-snap-%llu-idx-%llu.sql",
-             snapshot_dir,
-             (unsigned long long)snap_id,
-             (unsigned long long)snap_index);
+    const char *base_dir = hg_snapshot_base_dir(snapshot_dir);
+    int rc = hg_snapshot_ensure_dir(base_dir, 0755, false);
+    if (rc != 0) {
+        hifs_warning("hg_sql_snapshot_create_artifact: base_dir=%s ensure failed rc=%d",
+                     base_dir,
+                     rc);
+        return rc;
+    }
 
-    // mysqldump arguments
-    // --single-transaction: consistent snapshot for InnoDB without locking tables (typical)
-    // --routines/--triggers: if you need them
-    // --set-gtid-purged=OFF: avoids GTID issues if present
+    char snap_dir[PATH_MAX];
+    rc = hg_snapshot_format_dir(base_dir, snap_id, snap_index, snap_dir, sizeof(snap_dir));
+    if (rc != 0)
+        return rc;
+
+    rc = hg_snapshot_ensure_dir(snap_dir, 0700, true);
+    if (rc != 0) {
+        hifs_warning("hg_sql_snapshot_create_artifact: snap_dir=%s ensure failed rc=%d",
+                     snap_dir,
+                     rc);
+        return rc;
+    }
+
+    char dump_path[PATH_MAX];
+    rc = hg_snapshot_format_file(snap_dir, snap_id, snap_index, dump_path, sizeof(dump_path));
+    if (rc != 0) {
+        rmdir(snap_dir);
+        return rc;
+    }
+
     char defaults_arg[PATH_MAX + 32];
-    snprintf(defaults_arg, sizeof(defaults_arg),
-             "--defaults-extra-file=%s", mysql_defaults_file);
+    int written = snprintf(defaults_arg, sizeof(defaults_arg),
+                           "--defaults-extra-file=%s", mysql_defaults_file);
+    if (written < 0 || (size_t)written >= sizeof(defaults_arg)) {
+        rmdir(snap_dir);
+        return -ENAMETOOLONG;
+    }
 
     char result_arg[PATH_MAX + 32];
-    snprintf(result_arg, sizeof(result_arg),
-             "--result-file=%s", dump_path);
+    written = snprintf(result_arg, sizeof(result_arg),
+                       "--result-file=%s", dump_path);
+    if (written < 0 || (size_t)written >= sizeof(result_arg)) {
+        rmdir(snap_dir);
+        return -ENAMETOOLONG;
+    }
 
     char *argv[] = {
         (char *)mysqldump_path,
@@ -1927,11 +2005,110 @@ int hg_sql_snapshot_create_artifact(const char *snapshot_dir,
         NULL
     };
 
-    int rc = hg_run_cmd(argv);
+    rc = hg_run_cmd(argv);
     if (rc != 0) {
+        unlink(dump_path);
+        rmdir(snap_dir);
         hifs_warning("hg_sql_snapshot_create_artifact: mysqldump failed rc=%d", rc);
         return rc;
     }
+
+    hifs_notice("hg_sql_snapshot_create_artifact: snap_id=%llu index=%llu dir=%s file=%s",
+                (unsigned long long)snap_id,
+                (unsigned long long)snap_index,
+                snap_dir,
+                dump_path);
+
+    strncpy(out_path, dump_path, out_path_sz - 1);
+    out_path[out_path_sz - 1] = '\0';
+    return 0;
+}
+
+int hg_sql_snapshot_restore_artifact(const char *snapshot_dir,
+                                   const char *mysqldump_path,
+                                   const char *mysql_defaults_file,
+                                   const char *db_name,
+                                   uint64_t snap_id,
+                                   uint64_t snap_index,
+                                   char *out_path,
+                                   size_t out_path_sz)
+{
+    if (!mysqldump_path || !mysql_defaults_file || !db_name || !out_path)
+        return -EINVAL;
+
+    const char *base_dir = hg_snapshot_base_dir(snapshot_dir);
+    int rc = hg_snapshot_ensure_dir(base_dir, 0755, false);
+    if (rc != 0) {
+        hifs_warning("hg_sql_snapshot_restore_artifact: base_dir=%s ensure failed rc=%d",
+                     base_dir,
+                     rc);
+        return rc;
+    }
+
+    char snap_dir[PATH_MAX];
+    rc = hg_snapshot_format_dir(base_dir, snap_id, snap_index, snap_dir, sizeof(snap_dir));
+    if (rc != 0)
+        return rc;
+
+    rc = hg_snapshot_ensure_dir(snap_dir, 0700, false);
+    if (rc != 0) {
+        hifs_warning("hg_sql_snapshot_restore_artifact: snap_dir=%s ensure failed rc=%d",
+                     snap_dir,
+                     rc);
+        return rc;
+    }
+
+    char dump_path[PATH_MAX];
+    rc = hg_snapshot_format_file(snap_dir, snap_id, snap_index, dump_path, sizeof(dump_path));
+    if (rc != 0)
+        return rc;
+
+    struct stat st;
+    if (stat(dump_path, &st) != 0 || !S_ISREG(st.st_mode)) {
+        rc = (errno != 0) ? -errno : -ENOENT;
+        hifs_warning("hg_sql_snapshot_restore_artifact: missing file %s rc=%d",
+                     dump_path,
+                     rc);
+        return rc;
+    }
+
+    char defaults_arg[PATH_MAX + 32];
+    int written = snprintf(defaults_arg, sizeof(defaults_arg),
+                           "--defaults-extra-file=%s", mysql_defaults_file);
+    if (written < 0 || (size_t)written >= sizeof(defaults_arg))
+        return -ENAMETOOLONG;
+
+    char db_arg[NAME_MAX + 32];
+    written = snprintf(db_arg, sizeof(db_arg),
+                       "--database=%s", db_name);
+    if (written < 0 || (size_t)written >= sizeof(db_arg))
+        return -ENAMETOOLONG;
+
+    char source_cmd[PATH_MAX + 16];
+    written = snprintf(source_cmd, sizeof(source_cmd),
+                       "SOURCE %s", dump_path);
+    if (written < 0 || (size_t)written >= sizeof(source_cmd))
+        return -ENAMETOOLONG;
+
+    char *argv[] = {
+        (char *)mysqldump_path,
+        defaults_arg,
+        db_arg,
+        "-e",
+        source_cmd,
+        NULL
+    };
+
+    rc = hg_run_cmd(argv);
+    if (rc != 0) {
+        hifs_warning("hg_sql_snapshot_restore_artifact: mysql restore failed rc=%d", rc);
+        return rc;
+    }
+
+    hifs_notice("hg_sql_snapshot_restore_artifact: restored snap_id=%llu index=%llu path=%s",
+                (unsigned long long)snap_id,
+                (unsigned long long)snap_index,
+                dump_path);
 
     strncpy(out_path, dump_path, out_path_sz - 1);
     out_path[out_path_sz - 1] = '\0';
