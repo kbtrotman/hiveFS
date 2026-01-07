@@ -34,26 +34,7 @@
 #include <mysql.h>   // libmariadbclient or libmysqlclient
 
 #include "../../hicomm/hi_command.h"
-
-#define HIVE_GUARD_STATE_ROOT        "/var/lib/hivefs"
-#define HIVE_GUARD_SNAPSHOT_BASE_DIR HIVE_GUARD_STATE_ROOT "/snapshots"
-#define HIVE_GUARD_SNAPSHOT_DIR_FMT  "snap-%llu-idx-%llu"
-#define HIVE_GUARD_SNAPSHOT_FILE_FMT "meta-snap-%llu-idx-%llu.sql"
-#define HIVE_GUARD_RAFT_DIR          HIVE_GUARD_STATE_ROOT "/hive_guard_raft"
-#define HIVE_GUARD_KV_DIR            HIVE_GUARD_STATE_ROOT "/hive_guard_kv"
-#define HIVE_NODE_CONF_PATH   "/etc/hivefs/node.json.conf"
-#define HIVE_BOOTSTRAP_BIN    "hive_bootstrap"
-
-
-#define ENV_LISTEN_ADDR  "WRAP_LISTEN_ADDR"
-#define ENV_LISTEN_PORT  "WRAP_LISTEN_PORT"
-#define ENV_IDLE_MS      "WRAP_IDLE_TIMEOUT_MS"
-#define CLIENT_TCP_IDLE_TIMEOUT_PATH "/sys/class/hivefs/CLIENT_TCP_IDLE_TIMEOUT"
-#define ENV_MDB_HOST     "WRAP_MARIADB_HOST"
-#define ENV_MDB_PORT     "WRAP_MARIADB_PORT"
-#define ENV_MDB_USER     "WRAP_MARIADB_USER"
-#define ENV_MDB_PASS     "WRAP_MARIADB_PASS"
-#define ENV_MDB_DB       "WRAP_MARIADB_DB"
+#include "../common/hive_common.h"
 
 #define MAXC 1024
 

@@ -28,12 +28,7 @@
 #include "../guard/hive_guard_kv.h"
 #include <syslog.h>
 
-#define HIVE_GUARD_STATE_ROOT "/var/lib/hivefs"
-#define HIVE_GUARD_RAFT_DIR   HIVE_GUARD_STATE_ROOT "/hive_guard_raft"
-#define HIVE_GUARD_KV_DIR     HIVE_GUARD_STATE_ROOT "/hive_guard_kv"
-#define HIVE_UI_BACKEND_ROOT  "/opt/backend"
-#define HIVE_UI_FRONTEND_ROOT "/opt/frontend"
-#define HIVE_UI_SYSTEMD_DIR   "/etc/systemd/system"
+
 #ifndef ARRAY_SIZE
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 #endif
@@ -544,7 +539,7 @@ int db_config (void)
 {
 
 	// Make all the directories needed for the Node if they don't exist in the distro.
-	if (!ensure_directory(HIVE_GUARD_STATE_ROOT) ||
+	if (!ensure_directory(HIVE_DATA_DIR) ||
 	    !ensure_directory(HIVE_GUARD_RAFT_DIR) ||
 	    !ensure_directory(HIVE_GUARD_KV_DIR)) {
 		fprintf(stderr, "main: failed to prepare state directories\n");
