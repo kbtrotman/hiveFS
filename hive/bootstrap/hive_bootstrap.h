@@ -33,18 +33,7 @@
  
 #include <mysql.h>   // libmariadbclient or libmysqlclient
 #include "../../hicomm/hi_command.h"
-
-
-#define ENV_LISTEN_ADDR  "WRAP_LISTEN_ADDR"
-#define ENV_LISTEN_PORT  "WRAP_LISTEN_PORT"
-#define ENV_IDLE_MS      "WRAP_IDLE_TIMEOUT_MS"
-#define CLIENT_TCP_IDLE_TIMEOUT_PATH "/sys/class/hivefs/CLIENT_TCP_IDLE_TIMEOUT"
-#define ENV_MDB_HOST     "WRAP_MARIADB_HOST"
-#define ENV_MDB_PORT     "WRAP_MARIADB_PORT"
-#define ENV_MDB_USER     "WRAP_MARIADB_USER"
-#define ENV_MDB_PASS     "WRAP_MARIADB_PASS"
-#define ENV_MDB_DB       "WRAP_MARIADB_DB"
-
+#include "../common/hive_common.h"
 
 struct hive_bootstrap_config {
 	uint64_t cluster_id;
