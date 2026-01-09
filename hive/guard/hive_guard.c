@@ -243,7 +243,7 @@ int main(void)
 
 	maybe_run_bootstrap();
 
-	if (!ensure_directory(HIVE_GUARD_STATE_ROOT) ||
+	if (!ensure_directory(HIVE_DATA_DIR) ||
 	    !ensure_directory(HIVE_GUARD_RAFT_DIR) ||
 	    !ensure_directory(HIVE_GUARD_KV_DIR)) {
 		fprintf(stderr, "main: failed to prepare state directories\n");

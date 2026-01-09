@@ -18,6 +18,14 @@
  */
 
 #include "hive_guard_leasing.h"
+#include "hive_guard.h"
+
+#include <netdb.h>
+
+extern const struct hive_storage_node *hifs_get_storage_nodes(size_t *count);
+
+static int get_env_int(const char *k, int def);
+static const char *get_env_str(const char *k, const char *def);
 
 
 /* -------------------------------------------------------------------------- */
@@ -67,6 +75,12 @@ static void jfree(JVal *v);
 
 static const char *jstr(const JVal *v) { return (v && v->t == JT_STR) ? v->str : NULL; }
 static long jnum_i(const JVal *v, long def) { return (v && v->t == JT_NUM) ? (long)v->num : def; }
+static bool jbool(const JVal *v, bool def) {
+    if (!v) return def;
+    if (v->t == JT_BOOL) return v->boolean != 0;
+    if (v->t == JT_NUM) return v->num != 0;
+    return def;
+}
 
 static const JVal *jobj_get(const JVal *o, const char *k)
 {
@@ -283,6 +297,204 @@ static int send_frame_json(int fd, const char *json)
     return (rc < 0) ? rc : 0;
 }
 
+#define HG_LEASE_FORWARD_TIMEOUT_MS 3000
+#define HG_LEASE_FORWARD_RESP_MAX   (1024 * 1024)
+
+static const struct hive_storage_node *lease_find_owner_node(uint32_t node_id)
+{
+    if (node_id == 0) return NULL;
+    size_t count = 0;
+    const struct hive_storage_node *nodes = hifs_get_storage_nodes(&count);
+    if (!nodes) return NULL;
+    for (size_t i = 0; i < count; ++i) {
+        if (nodes[i].id == node_id) return &nodes[i];
+    }
+    return NULL;
+}
+
+static void lease_resolve_host_port(const struct hive_storage_node *node,
+                                    char *host,
+                                    size_t host_sz,
+                                    int *port_out)
+{
+    if (!host || host_sz == 0) return;
+    host[0] = '\0';
+    int port = get_env_int("HIVE_LEASE_LISTEN_PORT", 7400);
+
+    if (node && node->address[0]) {
+        const char *addr = node->address;
+        const char *colon = strrchr(addr, ':');
+        if (colon) {
+            size_t len = (size_t)(colon - addr);
+            if (len >= host_sz) len = host_sz - 1;
+            memcpy(host, addr, len);
+            host[len] = '\0';
+            int parsed = atoi(colon + 1);
+            if (parsed > 0 && parsed < 65536) port = parsed;
+        } else {
+            snprintf(host, host_sz, "%s", addr);
+        }
+    }
+
+    if (host[0] == '\0') {
+        snprintf(host, host_sz, "%s", get_env_str("HIVE_LEASE_FORWARD_FALLBACK_HOST", "127.0.0.1"));
+    }
+
+    if (node && port == 0 && node->guard_port) {
+        port = node->guard_port;
+    }
+
+    if (port_out) *port_out = port;
+}
+
+static int lease_connect_peer(const char *host, int port)
+{
+    if (!host || !*host || port <= 0) return -EINVAL;
+
+    char portbuf[16];
+    snprintf(portbuf, sizeof(portbuf), "%d", port);
+
+    struct addrinfo hints;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+
+    struct addrinfo *res = NULL;
+    int rc = getaddrinfo(host, portbuf, &hints, &res);
+    if (rc != 0) {
+        lease_log("WARN", "getaddrinfo host=%s port=%d rc=%d", host, port, rc);
+        return -EHOSTUNREACH;
+    }
+
+    int sock = -1;
+    for (struct addrinfo *ai = res; ai; ai = ai->ai_next) {
+        sock = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
+        if (sock < 0) continue;
+        if (connect(sock, ai->ai_addr, ai->ai_addrlen) == 0) break;
+        close(sock);
+        sock = -1;
+    }
+    freeaddrinfo(res);
+    if (sock < 0) return -EHOSTUNREACH;
+
+    struct timeval tv;
+    tv.tv_sec = HG_LEASE_FORWARD_TIMEOUT_MS / 1000;
+    tv.tv_usec = (HG_LEASE_FORWARD_TIMEOUT_MS % 1000) * 1000;
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+    return sock;
+}
+
+static int forward_lease_renew_remote(int client_fd,
+                                      const char *key,
+                                      uint64_t token,
+                                      uint64_t ttl_ms,
+                                      uint32_t owner_node_id,
+                                      uint32_t self_node_id)
+{
+    const struct hive_storage_node *node = lease_find_owner_node(owner_node_id);
+    if (!node) {
+        char out[512];
+        snprintf(out, sizeof(out),
+                 "{\"ok\":false,\"op\":\"LEASE_RENEW\",\"key\":\"%s\","
+                 "\"error\":\"owner_unknown\",\"owner\":%u}",
+                 key, (unsigned)owner_node_id);
+        return send_frame_json(client_fd, out);
+    }
+
+    char host[128];
+    int port = 0;
+    lease_resolve_host_port(node, host, sizeof(host), &port);
+    if (port <= 0) {
+        char out[512];
+        snprintf(out, sizeof(out),
+                 "{\"ok\":false,\"op\":\"LEASE_RENEW\",\"key\":\"%s\","
+                 "\"error\":\"owner_addr_invalid\",\"owner\":%u}",
+                 key, (unsigned)owner_node_id);
+        return send_frame_json(client_fd, out);
+    }
+
+    int sock = lease_connect_peer(host, port);
+    if (sock < 0) {
+        lease_log("WARN", "forward connect owner=%u host=%s port=%d failed",
+                  (unsigned)owner_node_id, host, port);
+        char out[512];
+        snprintf(out, sizeof(out),
+                 "{\"ok\":false,\"op\":\"LEASE_RENEW\",\"key\":\"%s\","
+                 "\"error\":\"owner_unreachable\",\"owner\":%u}",
+                 key, (unsigned)owner_node_id);
+        return send_frame_json(client_fd, out);
+    }
+
+    char req[640];
+    snprintf(req, sizeof(req),
+             "{\"op\":\"LEASE_RENEW\",\"key\":\"%s\",\"token\":%llu,"
+             "\"ttl_ms\":%llu,\"forwarded\":true,\"forwarded_by\":%u}",
+             key,
+             (unsigned long long)token,
+             (unsigned long long)ttl_ms,
+             (unsigned)self_node_id);
+
+    int rc = send_frame_json(sock, req);
+    if (rc != 0) {
+        lease_log("WARN", "forward send to owner=%u failed rc=%d", (unsigned)owner_node_id, rc);
+        close(sock);
+        char out[512];
+        snprintf(out, sizeof(out),
+                 "{\"ok\":false,\"op\":\"LEASE_RENEW\",\"key\":\"%s\","
+                 "\"error\":\"owner_send_failed\",\"owner\":%u}",
+                 key, (unsigned)owner_node_id);
+        return send_frame_json(client_fd, out);
+    }
+
+    uint32_t be_len = 0;
+    rc = read_full(sock, &be_len, sizeof(be_len));
+    if (rc <= 0) {
+        lease_log("WARN", "forward recv len owner=%u rc=%d", (unsigned)owner_node_id, rc);
+        close(sock);
+        char out[512];
+        snprintf(out, sizeof(out),
+                 "{\"ok\":false,\"op\":\"LEASE_RENEW\",\"key\":\"%s\","
+                 "\"error\":\"owner_recv_failed\",\"owner\":%u}",
+                 key, (unsigned)owner_node_id);
+        return send_frame_json(client_fd, out);
+    }
+
+    uint32_t len = ntohl(be_len);
+    if (len == 0 || len > HG_LEASE_FORWARD_RESP_MAX) {
+        lease_log("WARN", "forward resp len invalid=%u owner=%u", len, (unsigned)owner_node_id);
+        close(sock);
+        char out[512];
+        snprintf(out, sizeof(out),
+                 "{\"ok\":false,\"op\":\"LEASE_RENEW\",\"key\":\"%s\","
+                 "\"error\":\"owner_resp_invalid\",\"owner\":%u}",
+                 key, (unsigned)owner_node_id);
+        return send_frame_json(client_fd, out);
+    }
+
+    char *resp = (char *)calloc(1, (size_t)len + 1);
+    if (!resp) {
+        close(sock);
+        return send_frame_json(client_fd, "{\"ok\":false,\"error\":\"oom\"}");
+    }
+    rc = read_full(sock, resp, len);
+    close(sock);
+    if (rc <= 0) {
+        free(resp);
+        char out[512];
+        snprintf(out, sizeof(out),
+                 "{\"ok\":false,\"op\":\"LEASE_RENEW\",\"key\":\"%s\","
+                 "\"error\":\"owner_resp_short\",\"owner\":%u}",
+                 key, (unsigned)owner_node_id);
+        return send_frame_json(client_fd, out);
+    }
+    resp[len] = '\0';
+
+    rc = send_frame_json(client_fd, resp);
+    free(resp);
+    return rc;
+}
+
 /* -------------------------------------------------------------------------- */
 /* In-memory lease table (debug/simple)                                       */
 /* Later: swap for hash map + raft-applied backing.                           */
@@ -475,15 +687,13 @@ static int handle_lease_acquire(int fd,
     return send_frame_json(fd, out);
 }
 
-static int handle_lease_renew(int fd, const char *key, uint64_t token, uint64_t ttl_ms, uint32_t self_node_id)
+static int handle_lease_renew(int fd,
+                              const char *key,
+                              uint64_t token,
+                              uint64_t ttl_ms,
+                              uint32_t self_node_id,
+                              bool forwarded)
 {
-    /* Owner-fast-path idea:
-     * - If this node is the owner: extend expiry locally and return ok.
-     * - Otherwise: redirect to owner.
-     *
-     * For now, we implement redirect-to-owner using local table only.
-     */
-
     pthread_mutex_lock(&g_lease_mu);
     hg_lease_entry_t *e = lease_find_locked(key);
     if (!e) {
@@ -493,9 +703,9 @@ static int handle_lease_renew(int fd, const char *key, uint64_t token, uint64_t 
 
     uint32_t owner = e->owner_node_id;
     uint64_t cur_token = e->token;
-    pthread_mutex_unlock(&g_lease_mu);
 
     if (token != cur_token) {
+        pthread_mutex_unlock(&g_lease_mu);
         char out[512];
         snprintf(out, sizeof(out),
                  "{\"ok\":false,\"op\":\"LEASE_RENEW\",\"key\":\"%s\","
@@ -504,7 +714,21 @@ static int handle_lease_renew(int fd, const char *key, uint64_t token, uint64_t 
         return send_frame_json(fd, out);
     }
 
-    if (self_node_id != 0 && owner != 0 && owner != self_node_id) {
+    if (owner != 0 && self_node_id != 0 && owner != self_node_id) {
+        pthread_mutex_unlock(&g_lease_mu);
+        if (forwarded) {
+            char out[512];
+            snprintf(out, sizeof(out),
+                     "{\"ok\":false,\"op\":\"LEASE_RENEW\",\"key\":\"%s\","
+                     "\"error\":\"owner_redirect_failed\",\"owner\":%u}",
+                     key, (unsigned)owner);
+            return send_frame_json(fd, out);
+        }
+        return forward_lease_renew_remote(fd, key, token, ttl_ms, owner, self_node_id);
+    }
+
+    if (owner != 0 && self_node_id == 0) {
+        pthread_mutex_unlock(&g_lease_mu);
         char out[512];
         snprintf(out, sizeof(out),
                  "{\"ok\":false,\"op\":\"LEASE_RENEW\",\"key\":\"%s\","
@@ -513,13 +737,9 @@ static int handle_lease_renew(int fd, const char *key, uint64_t token, uint64_t 
         return send_frame_json(fd, out);
     }
 
-    pthread_mutex_lock(&g_lease_mu);
-    e = lease_find_locked(key);
-    if (e) {
-        uint64_t tnow = now_ms();
-        e->expires_at_ms = tnow + (ttl_ms ? ttl_ms : 30000);
-    }
-    uint64_t exp = e ? e->expires_at_ms : 0;
+    uint64_t tnow = now_ms();
+    e->expires_at_ms = tnow + (ttl_ms ? ttl_ms : 30000);
+    uint64_t exp = e->expires_at_ms;
     pthread_mutex_unlock(&g_lease_mu);
 
     char out[512];
@@ -692,6 +912,7 @@ static void *conn_thread(void *arg)
         uint64_t token    = (uint64_t)jnum_i(jobj_get(&root, "token"), 0);
         uint64_t ttl_ms   = (uint64_t)jnum_i(jobj_get(&root, "ttl_ms"), 30000);
         uint32_t prefer_owner = (uint32_t)jnum_i(jobj_get(&root, "prefer_owner"), 0);
+        bool forwarded = jbool(jobj_get(&root, "forwarded"), false);
 
         if (!op_s) {
             send_frame_json(fd, "{\"ok\":false,\"error\":\"missing_op\"}");
@@ -736,7 +957,7 @@ static void *conn_thread(void *arg)
                     rc = send_frame_json(fd, "{\"ok\":false,\"error\":\"missing_token\"}");
                     break;
                 }
-                rc = handle_lease_renew(fd, key, token, ttl_ms, self_node_id);
+                rc = handle_lease_renew(fd, key, token, ttl_ms, self_node_id, forwarded);
                 break;
 
             case HG_LEASE_RELEASE:
