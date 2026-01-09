@@ -22,6 +22,8 @@
 
 struct hive_storage_node;
 struct SQLDB;
+struct hive_bootstrap_config;
+struct hive_bootstrap_config;
 
 #ifndef HIFS_STORAGE_NODE_HEARTBEAT_MAX_AGE
 #define HIFS_STORAGE_NODE_HEARTBEAT_MAX_AGE 30
@@ -276,6 +278,14 @@ bool hifs_insert_sql(const char *sql_string);
 bool hifs_persist_storage_node(uint64_t node_id,
 			       const char *node_address,
 			       uint16_t node_port);
+bool hifs_persist_cluster_record(uint64_t cluster_id,
+				 const char *cluster_name,
+				 const char *cluster_desc,
+				 uint16_t min_nodes);
+int hifs_update_node_for_add(struct hive_bootstrap_config *config,
+			     struct hive_storage_node *local,
+			     bool is_node_join_request,
+			     uint64_t requested_node_id);
 
 struct stripe_location {
 	uint8_t stripe_index;

@@ -8,24 +8,26 @@
  */
 
 
+#include <errno.h>
+#include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/socket.h>
 #include <sys/un.h>
 #include <sys/wait.h>
+#include <time.h>
+#include <unistd.h>
 
 #include "hive_bootstrap.h"
 #include "hive_bootstrap_sock.h"
 #include "../guard/hive_guard.h"
+#include "../guard/hive_guard_auth.h"
 #include "../guard/hive_guard_sock.h"
 #include "../guard/hive_guard_sql.h"
 #include "../common/hive_common_sql.h"
 #include "../common/hive_common_sock.h"
 #include "../../hifs_shared_defs.h"
-#include <openssl/asn1.h>
-#include <openssl/bio.h>
-#include <openssl/bn.h>
-#include <openssl/evp.h>
-#include <openssl/pem.h>
-#include <openssl/rsa.h>
-#include <openssl/x509.h>
 
 
 struct hive_bootstrap_request {
@@ -38,23 +40,194 @@ struct hive_bootstrap_request {
 	char node_name[100];
 	char join_token[201];
 	uint16_t min_nodes_req;
+	char raw_payload[HIVE_BOOTSTRAP_MSG_MAX];
 };
 
-static char g_status_message[64] = "IDLE";
-static unsigned int g_status_percent = 0;
-static char g_config_state[16] = "IDLE";
+char g_status_message[64] = "IDLE";
+unsigned int g_status_percent = 0;
+char g_config_state[16] = "IDLE";
 static char g_socket_path[sizeof(((struct sockaddr_un *)0)->sun_path)] =
 	HIVE_BOOTSTRAP_SOCK_PATH;
 static const char *configure_status(void);
+static void bootstrap_status_update(const char *message, unsigned int percent,
+				    const char *state);
+static void set_invalid_node_join_state(void);
+static bool parse_bootstrap_request(const char *json,
+				    struct hive_bootstrap_request *req);
 
-enum bootstrap_request_type {
-	BOOTSTRAP_REQ_UNKNOWN = 0,
-	BOOTSTRAP_REQ_CLUSTER,
-	BOOTSTRAP_REQ_NODE_JOIN,
-};
-
-static enum bootstrap_request_type g_pending_request_type =
+enum bootstrap_request_type g_pending_request_type =
 	BOOTSTRAP_REQ_UNKNOWN;
+
+static bool bootstrap_run_command(const char *const argv[])
+{
+	pid_t pid;
+
+	if (!argv || !argv[0])
+		return false;
+	pid = fork();
+	if (pid < 0) {
+		fprintf(stderr, "bootstrap: fork failed for %s: %s\n",
+			argv[0], strerror(errno));
+		return false;
+	}
+	if (pid == 0) {
+		execvp(argv[0], (char *const *)argv);
+		_exit(127);
+	}
+
+	int status;
+	while (waitpid(pid, &status, 0) < 0) {
+		if (errno == EINTR)
+			continue;
+		fprintf(stderr, "bootstrap: waitpid failed for %s: %s\n",
+			argv[0], strerror(errno));
+		return false;
+	}
+	return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+}
+
+static bool ensure_hive_guard_service(void)
+{
+	static const char *const check_enabled[] = {
+		"systemctl", "is-enabled", "hive_guard.service", NULL,
+	};
+	static const char *const enable_cmd[] = {
+		"systemctl", "enable", "--now", "hive_guard.service", NULL,
+	};
+	static const char *const restart_policy[] = {
+		"systemctl", "set-property", "hive_guard.service",
+		"Restart=always", "RestartSec=5", NULL,
+	};
+	static const char *const start_cmd[] = {
+		"systemctl", "start", "hive_guard.service", NULL,
+	};
+	static const char *const status_cmd[] = {
+		"systemctl", "is-active", "hive_guard.service", NULL,
+	};
+
+	if (!bootstrap_run_command(check_enabled)) {
+		if (!bootstrap_run_command(enable_cmd))
+			return false;
+	}
+	(void)bootstrap_run_command(restart_policy);
+	(void)bootstrap_run_command(start_cmd);
+	return bootstrap_run_command(status_cmd);
+}
+
+static bool gather_local_identity(struct hive_storage_node *node)
+{
+	if (!node)
+		return false;
+	memset(node, 0, sizeof(*node));
+
+	if (!hifs_get_local_node_identity(node))
+		return false;
+
+	if (hbc.storage_node_name[0] &&
+	    strcmp(hbc.storage_node_name, node->name) != 0) {
+		size_t len = strnlen(hbc.storage_node_name,
+				     sizeof(hbc.storage_node_name));
+
+		if (len > 0 && sethostname(hbc.storage_node_name, len) != 0)
+			fprintf(stderr,
+				"bootstrap: sethostname(%s) failed: %s\n",
+				hbc.storage_node_name, strerror(errno));
+		hifs_safe_strcpy(node->name, sizeof(node->name),
+				 hbc.storage_node_name);
+	} else if (!hbc.storage_node_name[0]) {
+		hifs_safe_strcpy(hbc.storage_node_name,
+				 sizeof(hbc.storage_node_name),
+				 node->name);
+	}
+
+	if (!node->guard_port)
+		node->guard_port = hifs_local_guard_port();
+	if (!node->stripe_port)
+		node->stripe_port = node->guard_port;
+	node->last_heartbeat = (uint64_t)time(NULL);
+	return true;
+}
+
+static bool prepare_local_node(struct hive_storage_node *node)
+{
+	if (!ensure_hive_guard_service()) {
+		fprintf(stderr,
+			"bootstrap: unable to ensure hive_guard systemd service\n");
+		return false;
+	}
+
+	if (!gather_local_identity(node)) {
+		fprintf(stderr,
+			"bootstrap: unable to gather local node identity\n");
+		return false;
+	}
+
+	return true;
+}
+
+static bool send_all(int fd, const char *buf, size_t len)
+{
+	const char *cursor = buf;
+	size_t remaining = len;
+
+	if (fd < 0 || !buf || len == 0)
+		return false;
+	while (remaining > 0) {
+		ssize_t wr = send(fd, cursor, remaining, 0);
+
+		if (wr < 0) {
+			if (errno == EINTR)
+				continue;
+			return false;
+		}
+		if (wr == 0)
+			return false;
+		cursor += wr;
+		remaining -= (size_t)wr;
+	}
+	return true;
+}
+
+static bool forward_request_to_guard(const char *json_payload)
+{
+	struct sockaddr_un addr;
+	bool ok = false;
+	int fd;
+
+	if (!json_payload || !*json_payload)
+		return false;
+	fd = socket(AF_UNIX, SOCK_STREAM, 0);
+	if (fd < 0) {
+		fprintf(stderr,
+			"bootstrap: failed to create hive_guard socket: %s\n",
+			strerror(errno));
+		return false;
+	}
+	memset(&addr, 0, sizeof(addr));
+	addr.sun_family = AF_UNIX;
+	strncpy(addr.sun_path, HIVE_GUARD_SOCK_PATH,
+		sizeof(addr.sun_path) - 1);
+	if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
+		fprintf(stderr,
+			"bootstrap: failed to connect to hive_guard socket %s: %s\n",
+			addr.sun_path, strerror(errno));
+		close(fd);
+		return false;
+	}
+	size_t payload_len =
+		strnlen(json_payload, HIVE_BOOTSTRAP_MSG_MAX - 1);
+	if (send_all(fd, json_payload, payload_len)) {
+		char newline = '\n';
+
+		ok = send_all(fd, &newline, 1);
+	}
+	if (!ok) {
+		fprintf(stderr,
+			"bootstrap: failed to forward join payload to hive_guard\n");
+	}
+	close(fd);
+	return ok;
+}
 
 static bool is_cluster_command(const char *cmd)
 {
@@ -259,760 +432,6 @@ enum {
 	HIVE_NODE_SERIAL_LEN = sizeof(((struct hive_storage_node *)0)->serial),
 };
 
-static bool bootstrap_run_command(const char *const argv[])
-{
-	pid_t pid;
-
-	if (!argv || !argv[0])
-		return false;
-	pid = fork();
-	if (pid < 0) {
-		fprintf(stderr, "bootstrap: fork failed for %s: %s\n",
-			argv[0], strerror(errno));
-		return false;
-	}
-	if (pid == 0) {
-		execvp(argv[0], (char *const *)argv);
-		_exit(127);
-	}
-
-	int status;
-	while (waitpid(pid, &status, 0) < 0) {
-		if (errno == EINTR)
-			continue;
-		fprintf(stderr, "bootstrap: waitpid failed for %s: %s\n",
-			argv[0], strerror(errno));
-		return false;
-	}
-	return WIFEXITED(status) && WEXITSTATUS(status) == 0;
-}
-
-static bool ensure_hive_guard_service(void)
-{
-	static const char *const check_enabled[] = {
-		"systemctl", "is-enabled", "hive_guard.service", NULL,
-	};
-	static const char *const enable_cmd[] = {
-		"systemctl", "enable", "--now", "hive_guard.service", NULL,
-	};
-	static const char *const restart_policy[] = {
-		"systemctl", "set-property", "hive_guard.service",
-		"Restart=always", "RestartSec=5", NULL,
-	};
-	static const char *const start_cmd[] = {
-		"systemctl", "start", "hive_guard.service", NULL,
-	};
-	static const char *const status_cmd[] = {
-		"systemctl", "is-active", "hive_guard.service", NULL,
-	};
-
-	if (!bootstrap_run_command(check_enabled)) {
-		if (!bootstrap_run_command(enable_cmd))
-			return false;
-	}
-	(void)bootstrap_run_command(restart_policy);
-	(void)bootstrap_run_command(start_cmd);
-	return bootstrap_run_command(status_cmd);
-}
-
-static bool gather_local_identity(struct hive_storage_node *node)
-{
-	if (!node)
-		return false;
-	memset(node, 0, sizeof(*node));
-
-	if (!hifs_get_local_node_identity(node))
-		return false;
-
-	if (hbc.storage_node_name[0] &&
-	    strcmp(hbc.storage_node_name, node->name) != 0) {
-		size_t len = strnlen(hbc.storage_node_name,
-				     sizeof(hbc.storage_node_name));
-
-		if (len > 0)
-			(void)sethostname(hbc.storage_node_name, len);
-		safe_copy(node->name, sizeof(node->name), hbc.storage_node_name);
-	} else if (!hbc.storage_node_name[0]) {
-		safe_copy(hbc.storage_node_name,
-			  sizeof(hbc.storage_node_name),
-			  node->name);
-	}
-
-	if (!node->guard_port)
-		node->guard_port = hifs_local_guard_port();
-	if (!node->stripe_port)
-		node->stripe_port = node->guard_port;
-	node->last_heartbeat = (uint64_t)time(NULL);
-	return true;
-}
-
-static uint64_t lookup_existing_node_id(const char *uid, const char *serial)
-{
-	if (!sqldb.conn)
-		return 0;
-
-	char uid_sql[HIVE_NODE_UID_LEN * 2 + 1];
-	char serial_sql[HIVE_NODE_SERIAL_LEN * 2 + 1];
-	const char *uid_src = uid ? uid : "";
-	const char *serial_src = serial ? serial : "";
-	unsigned long uid_len = (unsigned long)strlen(uid_src);
-	unsigned long serial_len = (unsigned long)strlen(serial_src);
-
-	mysql_real_escape_string(sqldb.conn, uid_sql, uid_src, uid_len);
-	mysql_real_escape_string(sqldb.conn, serial_sql, serial_src, serial_len);
-
-	char sql[512];
-	int written = snprintf(sql, sizeof(sql),
-			       SQL_STORAGE_NODE_ID_BY_UID_OR_SERIAL,
-			       uid_sql, serial_sql);
-	if (written < 0 || (size_t)written >= sizeof(sql))
-		return 0;
-
-	if (mysql_real_query(sqldb.conn, sql, (unsigned long)written) != 0) {
-		fprintf(stderr, "bootstrap: node lookup failed: %s\n",
-			mysql_error(sqldb.conn));
-		return 0;
-	}
-
-	MYSQL_RES *res = mysql_store_result(sqldb.conn);
-	if (!res) {
-		if (mysql_field_count(sqldb.conn) != 0)
-			fprintf(stderr, "bootstrap: node lookup store_result failed: %s\n",
-				mysql_error(sqldb.conn));
-		return 0;
-	}
-
-	uint64_t node_id = 0;
-	MYSQL_ROW row = mysql_fetch_row(res);
-
-	if (row && row[0])
-		node_id = (uint64_t)strtoull(row[0], NULL, 10);
-	mysql_free_result(res);
-	return node_id;
-}
-
-static uint64_t lookup_highest_node_id(void)
-{
-	if (!sqldb.conn)
-		return 0;
-
-	const char sql[] = SQL_STORAGE_NODE_MAX_ID_SELECT;
-
-	if (mysql_real_query(sqldb.conn, sql, (unsigned long)strlen(sql)) != 0) {
-		fprintf(stderr, "bootstrap: highest node lookup failed: %s\n",
-			mysql_error(sqldb.conn));
-		return 0;
-	}
-
-	MYSQL_RES *res = mysql_store_result(sqldb.conn);
-
-	if (!res) {
-		if (mysql_field_count(sqldb.conn) != 0)
-			fprintf(stderr,
-				"bootstrap: highest node store_result failed: %s\n",
-				mysql_error(sqldb.conn));
-		return 0;
-	}
-
-	uint64_t max_id = 0;
-	MYSQL_ROW row = mysql_fetch_row(res);
-
-	if (row && row[0])
-		max_id = (uint64_t)strtoull(row[0], NULL, 10);
-	mysql_free_result(res);
-	return max_id;
-}
-
-static bool update_storage_node_row(uint64_t cluster_id,
-				    uint64_t node_id,
-				    const struct hive_storage_node *local,
-				    int version,
-				    int patch)
-{
-	if (!sqldb.conn || !local || node_id == 0)
-		return false;
-
-	char sql_query[MAX_QUERY_SIZE];
-	char name_sql[HIVE_NODE_NAME_LEN * 2 + 1];
-	char addr_sql[HIVE_NODE_ADDR_LEN * 2 + 1];
-	char uid_sql[HIVE_NODE_UID_LEN * 2 + 1];
-	char serial_sql[HIVE_NODE_SERIAL_LEN * 2 + 1];
-	char cluster_buf[32];
-
-	const char *name_src = local->name[0] ? local->name : "hive_guard";
-	const char *addr_src = local->address[0] ? local->address : "127.0.0.1";
-	const char *uid_src = local->uid[0] ? local->uid : hifs_get_machine_id();
-	const char *serial_src = local->serial[0] ? local->serial : hifs_cached_host_serial();
-
-	mysql_real_escape_string(sqldb.conn, name_sql, name_src,
-				 (unsigned long)strlen(name_src));
-	mysql_real_escape_string(sqldb.conn, addr_sql, addr_src,
-				 (unsigned long)strlen(addr_src));
-	mysql_real_escape_string(sqldb.conn, uid_sql, uid_src,
-				 (unsigned long)strlen(uid_src));
-	mysql_real_escape_string(sqldb.conn, serial_sql, serial_src,
-				 (unsigned long)strlen(serial_src));
-	if (cluster_id)
-		snprintf(cluster_buf, sizeof(cluster_buf), "%llu",
-			 (unsigned long long)cluster_id);
-	else
-		safe_copy(cluster_buf, sizeof(cluster_buf), "NULL");
-
-	int written = snprintf(sql_query, sizeof(sql_query),
-			       SQL_STORAGE_NODE_JOIN_UPDATE,
-			       cluster_buf,
-			       name_sql,
-			       addr_sql,
-			       uid_sql,
-			       serial_sql,
-			       (unsigned)local->guard_port,
-			       (unsigned)(local->stripe_port ? local->stripe_port : local->guard_port),
-			       version,
-			       patch,
-			       (unsigned long long)node_id);
-	if (written < 0 || (size_t)written >= sizeof(sql_query))
-		return false;
-
-	if (mysql_real_query(sqldb.conn, sql_query, (unsigned long)written) != 0) {
-		fprintf(stderr, "bootstrap: storage node metadata update failed: %s\n",
-			mysql_error(sqldb.conn));
-		return false;
-	}
-
-	MYSQL_RES *res = mysql_store_result(sqldb.conn);
-	if (res) {
-		mysql_free_result(res);
-	} else if (mysql_field_count(sqldb.conn) != 0) {
-		fprintf(stderr, "bootstrap: storage node metadata consume failure: %s\n",
-			mysql_error(sqldb.conn));
-		return false;
-	}
-	return true;
-}
-
-static void bootstrap_status_update(const char *message, unsigned int percent,
-				    const char *state)
-{
-	if (percent > 100)
-		percent = 100;
-	if (!message || !*message)
-		message = "IDLE";
-	safe_copy(g_status_message, sizeof(g_status_message), message);
-	g_status_percent = percent;
-	if (state && *state)
-		safe_copy(g_config_state, sizeof(g_config_state), state);
-	else if (!g_config_state[0])
-		safe_copy(g_config_state, sizeof(g_config_state), "IDLE");
-}
-
-static void set_invalid_node_join_state(void)
-{
-	bootstrap_status_update(
-		"Cannot add a node to a cluster that does not exist yet",
-		100, "invalid_op");
-	safe_copy(hbc.cluster_state, sizeof(hbc.cluster_state), "invalid_op");
-}
-
-static bool parse_bootstrap_request(const char *json,
-				    struct hive_bootstrap_request *req)
-{
-	if (!json || !req)
-		return false;
-	memset(req, 0, sizeof(*req));
-
-    printf("Json: %s\n", json);
-	parse_json_string_value(json, "command",
-				req->command, sizeof(req->command));
-	parse_json_u64_value(json, "cluster_id", &req->cluster_id);
-	parse_json_u64_value(json, "clister_id", &req->cluster_id);
-	parse_json_string_value(json, "cluster_state",
-				req->cluster_state, sizeof(req->cluster_state));
-	parse_json_string_value(json, "cluster_name",
-				req->cluster_name, sizeof(req->cluster_name));
-	parse_json_string_value(json, "cluster_desc",
-				req->cluster_desc, sizeof(req->cluster_desc));
-	parse_json_u64_value(json, "node_id", &req->node_id);
-	parse_json_string_value(json, "node_name",
-				req->node_name, sizeof(req->node_name));
-	parse_json_string_value(json, "join_token",
-				req->join_token, sizeof(req->join_token));
-	uint64_t min_nodes_val = 0;
-	if (parse_json_u64_value(json, "min_nodes_req", &min_nodes_val))
-		req->min_nodes_req = (uint16_t)min_nodes_val;
-
-	return req->command[0] != '\0';
-}
-
-static bool bio_to_string(BIO *bio, char **out)
-{
-	if (!bio || !out)
-		return false;
-
-	char *data = NULL;
-	long len = BIO_get_mem_data(bio, &data);
-
-	if (len <= 0 || !data)
-		return false;
-	char *buf = malloc((size_t)len + 1);
-
-	if (!buf)
-		return false;
-	memcpy(buf, data, (size_t)len);
-	buf[len] = '\0';
-	*out = buf;
-	return true;
-}
-
-static bool generate_node_certificate(char **priv_pem_out, char **pub_pem_out)
-{
-	if (!priv_pem_out || !pub_pem_out)
-		return false;
-	*priv_pem_out = NULL;
-	*pub_pem_out = NULL;
-
-	bool ok = false;
-	BIGNUM *bn = BN_new();
-	RSA *rsa = RSA_new();
-	EVP_PKEY *pkey = EVP_PKEY_new();
-	X509 *x509 = X509_new();
-	BIO *priv_bio = NULL;
-	BIO *cert_bio = NULL;
-
-	if (!bn || !rsa || !pkey || !x509)
-		goto cleanup;
-	if (!BN_set_word(bn, RSA_F4))
-		goto cleanup;
-	if (RSA_generate_key_ex(rsa, NODE_CERT_KEY_BITS, bn, NULL) != 1)
-		goto cleanup;
-	if (EVP_PKEY_assign_RSA(pkey, rsa) != 1)
-		goto cleanup;
-	rsa = NULL;
-
-	X509_set_version(x509, 2);
-	uint32_t serial = (uint32_t)(time(NULL) ^ (uint32_t)getpid());
-
-	if (!serial)
-		serial = 1;
-	if (!ASN1_INTEGER_set(X509_get_serialNumber(x509), (long)serial))
-		goto cleanup;
-	if (!X509_gmtime_adj(X509_get_notBefore(x509), 0) ||
-	    !X509_gmtime_adj(X509_get_notAfter(x509),
-			     (long)NODE_CERT_VALID_DAYS * 24L * 3600L))
-		goto cleanup;
-	if (X509_set_pubkey(x509, pkey) != 1)
-		goto cleanup;
-
-	X509_NAME *name = X509_get_subject_name(x509);
-	const char *cn = hbc.storage_node_name[0]
-		? hbc.storage_node_name
-		: hbc.storage_node_uid;
-
-	if (!cn || !*cn)
-		cn = "hivefs-node";
-	if (X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC,
-				       (const unsigned char *)cn,
-				       -1, -1, 0) != 1)
-		goto cleanup;
-	if (hbc.storage_node_uid[0])
-		X509_NAME_add_entry_by_txt(name, "UID", MBSTRING_ASC,
-					   (const unsigned char *)
-						   hbc.storage_node_uid,
-					   -1, -1, 0);
-	if (hbc.storage_node_serial[0])
-		X509_NAME_add_entry_by_txt(name, "serialNumber",
-					   MBSTRING_ASC,
-					   (const unsigned char *)
-						   hbc.storage_node_serial,
-					   -1, -1, 0);
-	if (hbc.storage_node_address[0])
-		X509_NAME_add_entry_by_txt(name, "L", MBSTRING_ASC,
-					   (const unsigned char *)
-						   hbc.storage_node_address,
-					   -1, -1, 0);
-	if (X509_set_issuer_name(x509, name) != 1)
-		goto cleanup;
-	if (X509_sign(x509, pkey, EVP_sha256()) <= 0)
-		goto cleanup;
-
-	priv_bio = BIO_new(BIO_s_mem());
-	cert_bio = BIO_new(BIO_s_mem());
-	if (!priv_bio || !cert_bio)
-		goto cleanup;
-	if (!PEM_write_bio_PrivateKey(priv_bio, pkey, NULL, NULL, 0,
-				      NULL, NULL))
-		goto cleanup;
-	if (!PEM_write_bio_X509(cert_bio, x509))
-		goto cleanup;
-	if (!bio_to_string(priv_bio, priv_pem_out) ||
-	    !bio_to_string(cert_bio, pub_pem_out))
-		goto cleanup;
-
-	ok = true;
-
-cleanup:
-	BIO_free(cert_bio);
-	BIO_free(priv_bio);
-	X509_free(x509);
-	EVP_PKEY_free(pkey);
-	if (rsa)
-		RSA_free(rsa);
-	BN_free(bn);
-	if (!ok) {
-		free(*priv_pem_out);
-		free(*pub_pem_out);
-		*priv_pem_out = NULL;
-		*pub_pem_out = NULL;
-	}
-	return ok;
-}
-
-int add_node_mtls_token(uint32_t node_id, const char *token)
-{
-	(void)node_id;
-	(void)token;
-
-	if (!sqldb.conn || !hbc.storage_node_uid[0])
-		return -1;
-
-	char *priv_pem = NULL;
-	char *pub_pem = NULL;
-	char *priv_sql = NULL;
-	char *pub_sql = NULL;
-	char *sql_query = NULL;
-	int rc = -1;
-
-	if (!generate_node_certificate(&priv_pem, &pub_pem)) {
-		fprintf(stderr,
-			"bootstrap: failed to generate node mTLS certificate\n");
-		goto cleanup;
-	}
-
-	const char *serial_src = hbc.storage_node_serial[0]
-		? hbc.storage_node_serial
-		: hbc.storage_node_uid;
-	const char *name_src = hbc.storage_node_name[0]
-		? hbc.storage_node_name
-		: hbc.storage_node_uid;
-
-	char serial_sql[sizeof(hbc.storage_node_serial) * 2 + 1];
-	char name_sql[sizeof(hbc.storage_node_name) * 2 + 1];
-	char uid_sql[sizeof(hbc.storage_node_uid) * 2 + 1];
-
-	unsigned long serial_len = (unsigned long)strlen(serial_src);
-	unsigned long name_len = (unsigned long)strlen(name_src);
-	unsigned long uid_len =
-		(unsigned long)strlen(hbc.storage_node_uid);
-
-	unsigned long serial_sql_len = mysql_real_escape_string(
-		sqldb.conn, serial_sql, serial_src, serial_len);
-	serial_sql[serial_sql_len] = '\0';
-	unsigned long name_sql_len = mysql_real_escape_string(
-		sqldb.conn, name_sql, name_src, name_len);
-	name_sql[name_sql_len] = '\0';
-	unsigned long uid_sql_len = mysql_real_escape_string(
-		sqldb.conn, uid_sql, hbc.storage_node_uid, uid_len);
-	uid_sql[uid_sql_len] = '\0';
-
-	size_t priv_len = strlen(priv_pem);
-	size_t pub_len = strlen(pub_pem);
-
-	priv_sql = malloc(priv_len * 2 + 1);
-	pub_sql = malloc(pub_len * 2 + 1);
-	if (!priv_sql || !pub_sql)
-		goto cleanup;
-
-	unsigned long priv_sql_len = mysql_real_escape_string(
-		sqldb.conn, priv_sql, priv_pem, (unsigned long)priv_len);
-	priv_sql[priv_sql_len] = '\0';
-	unsigned long pub_sql_len = mysql_real_escape_string(
-		sqldb.conn, pub_sql, pub_pem, (unsigned long)pub_len);
-	pub_sql[pub_sql_len] = '\0';
-
-	size_t query_len = sizeof(SQL_HOST_AUTH_UPSERT_CERT) +
-			   serial_sql_len + uid_sql_len + name_sql_len +
-			   priv_sql_len + pub_sql_len + 64;
-	sql_query = malloc(query_len);
-	if (!sql_query)
-		goto cleanup;
-
-	int written = snprintf(sql_query, query_len,
-			       SQL_HOST_AUTH_UPSERT_CERT,
-			       serial_sql,
-			       uid_sql,
-			       name_sql,
-			       priv_sql,
-			       pub_sql,
-			       NODE_CERT_VALID_DAYS);
-	if (written < 0 || (size_t)written >= query_len)
-		goto cleanup;
-
-	if (mysql_real_query(sqldb.conn, sql_query,
-			     (unsigned long)written) != 0) {
-		fprintf(stderr,
-			"bootstrap: failed to persist node certificate: %s\n",
-			mysql_error(sqldb.conn));
-		goto cleanup;
-	}
-
-	rc = 0;
-
-cleanup:
-	free(sql_query);
-	free(priv_sql);
-	free(pub_sql);
-	if (priv_pem) {
-		memset(priv_pem, 0, strlen(priv_pem));
-		free(priv_pem);
-	}
-	free(pub_pem);
-	return rc;
-}
-
-int add_node_join_token(uint32_t node_id, const char *token)
-{
-	(void)node_id;
-
-	if (!token || !*token)
-		return 0;
-	if (!sqldb.conn || !hbc.storage_node_uid[0])
-		return -1;
-
-	char sql_query[1024];
-	char token_sql[HIVE_BOOTSTRAP_MSG_MAX * 2 + 1];
-	char uid_sql[sizeof(hbc.storage_node_uid) * 2 + 1];
-	unsigned long token_len = (unsigned long)strlen(token);
-	unsigned long uid_len =
-		(unsigned long)strlen(hbc.storage_node_uid);
-
-	if (token_len >= (sizeof(token_sql) - 1) / 2)
-		return -1;
-
-	mysql_real_escape_string(sqldb.conn,
-				 token_sql,
-				 token,
-				 token_len);
-	mysql_real_escape_string(sqldb.conn,
-				 uid_sql,
-				 hbc.storage_node_uid,
-				 uid_len);
-
-	int written = snprintf(sql_query, sizeof(sql_query),
-			       SQL_HOST_TOKEN_INSERT_NODE_JOIN,
-			       token_sql,
-			       uid_sql);
-
-	if (written < 0 || (size_t)written >= sizeof(sql_query))
-		return -1;
-
-	if (mysql_real_query(sqldb.conn, sql_query, (unsigned long)written) != 0) {
-		fprintf(stderr, "bootstrap: failed to add node add token: %s\n",
-			mysql_error(sqldb.conn));
-		return -1;
-	}
-
-	return 0;
-}
-
-int update_node_for_add(void)
-{
-	if (!ensure_hive_guard_service()) {
-		fprintf(stderr,
-			"bootstrap: unable to ensure hive_guard systemd service\n");
-		return -1;
-	}
-
-	struct hive_storage_node local;
-
-	if (!gather_local_identity(&local)) {
-		fprintf(stderr,
-			"bootstrap: unable to gather local node identity\n");
-		return -1;
-	}
-
-	init_hive_link();
-	if (!sqldb.sql_init || !sqldb.conn) {
-		fprintf(stderr,
-			"bootstrap: MariaDB connection not available\n");
-		return -1;
-	}
-
-	uint64_t node_id = hbc.storage_node_id;
-	const uint64_t requested_node_id = node_id;
-
-	if (!node_id)
-		node_id = lookup_existing_node_id(local.uid, local.serial);
-
-	if (!node_id) {
-		if (g_pending_request_type == BOOTSTRAP_REQ_NODE_JOIN) {
-			uint64_t highest = lookup_highest_node_id();
-
-			node_id = highest ? highest + 1 : 1;
-		} else if (requested_node_id) {
-			node_id = requested_node_id;
-		} else {
-			node_id = 1;
-		}
-	}
-	local.id = (uint32_t)node_id;
-	hbc.storage_node_id = (uint32_t)node_id;
-
-	int version = 0;
-	int patch = 0;
-
-	hifs_parse_version(&version, &patch);
-	if (!hifs_persist_storage_node(node_id, local.address, local.guard_port))
-		return -1;
-	if (!update_storage_node_row(hbc.cluster_id, node_id,
-				     &local, version, patch))
-		return -1;
-
-	uint64_t now = local.last_heartbeat ? local.last_heartbeat
-					     : (uint64_t)time(NULL);
-
-	hbc.storage_node_last_heartbeat = now;
-	hbc.storage_node_date_added_to_cluster = now;
-	hbc.storage_node_guard_port = local.guard_port;
-	hbc.storage_node_stripe_port = local.stripe_port;
-	hbc.storage_node_fenced = 1;
-	hbc.storage_node_hive_version = (uint32_t)version;
-	hbc.storage_node_hive_patch_level = (uint32_t)patch;
-	hbc.storage_node_client_connect_timeout_ms = 60000;
-	hbc.storage_node_storage_node_connect_timeout_ms = 30000;
-	hbc.storage_node_storage_capacity_bytes = 0;
-	hbc.storage_node_storage_used_bytes = 0;
-	hbc.storage_node_storage_reserved_bytes = 0;
-	hbc.storage_node_storage_overhead_bytes = 0;
-	hbc.storage_node_last_maintenance = 0;
-	hbc.storage_node_maintenance_reason[0] = '\0';
-	hbc.storage_node_maintenance_started_at = 0;
-	hbc.storage_node_maintenance_ended_at = 0;
-	safe_copy(hbc.storage_node_name, sizeof(hbc.storage_node_name),
-		  local.name);
-	safe_copy(hbc.storage_node_address, sizeof(hbc.storage_node_address),
-		  local.address);
-	safe_copy(hbc.storage_node_uid, sizeof(hbc.storage_node_uid),
-		  local.uid);
-	safe_copy(hbc.storage_node_serial, sizeof(hbc.storage_node_serial),
-		  local.serial);
-
-	safe_copy(hbc.database_state, sizeof(hbc.database_state), "configured");
-	safe_copy(hbc.kv_state, sizeof(hbc.kv_state), "configured");
-	safe_copy(hbc.cont1_state, sizeof(hbc.cont1_state), "configured");
-	safe_copy(hbc.cont2_state, sizeof(hbc.cont2_state), "configured");
-
-	add_node_join_token(hbc.storage_node_id, hbc.bootstrap_token);
-	add_node_mtls_token(hbc.storage_node_id, hbc.bootstrap_token);
-
-	unsigned int status_pct = g_status_percent;
-	if (status_pct > 100)
-		status_pct = 100;
-	char progress_pct[8];
-	snprintf(progress_pct, sizeof(progress_pct), "%u%%", status_pct);
-	char patch_level_str[8];
-	snprintf(patch_level_str, sizeof(patch_level_str), "%04d", patch);
-	struct hive_guard_join_context join_ctx = {
-		.cluster_id = hbc.cluster_id,
-		.node_id = hbc.storage_node_id,
-		.machine_uid = hbc.storage_node_uid,
-		.cluster_state = hbc.cluster_state,
-		.database_state = hbc.database_state,
-		.kv_state = hbc.kv_state,
-		.cont1_state = hbc.cont1_state,
-		.cont2_state = hbc.cont2_state,
-		.min_nodes_required = hbc.min_nodes_req,
-		.first_boot_ts = hbc.first_boot_ts,
-		.config_status = g_config_state,
-		.config_progress = progress_pct,
-		.config_message = g_status_message,
-		.hive_version = HIFS_VERSION,
-		.hive_patch_level = patch_level_str,
-	};
-
-    if (node_id == 1) {
-        fprintf(stdout,
-            "bootstrap: first node (id=%u) added to cluster (id=%llu)\n",
-            hbc.storage_node_id,
-            (unsigned long long)hbc.cluster_id);
-        fflush(stdout);
-    } else {
-        fprintf(stdout,
-            "bootstrap: node (id=%u) added to cluster (id=%llu)\n", hbc.storage_node_id,
-            (unsigned long long)hbc.cluster_id);
-        fflush(stdout);
-
-        if (hive_guard_distribute_node_tokens(&join_ctx) != 0)
-		fprintf(stderr,
-			"bootstrap: failed to distribute node tokens to existing nodes\n");
-    }
-	return 0;
-}
-
-static bool persist_cluster_record(const struct hive_bootstrap_request *req)
-{
-	if (!req)
-		return false;
-
-	init_hive_link();
-	if (!sqldb.sql_init || !sqldb.conn) {
-		fprintf(stderr, "cluster_config: MariaDB connection not available\n");
-		return false;
-	}
-
-	const char *name_src = req->cluster_name[0]
-		? req->cluster_name : "hive_cluster";
-	const char *desc_src = req->cluster_desc[0]
-		? req->cluster_desc : "Initial cluster configuration";
-	size_t name_len = req->cluster_name[0]
-		? strnlen(req->cluster_name, sizeof(req->cluster_name))
-		: strlen(name_src);
-	size_t desc_len = req->cluster_desc[0]
-		? strnlen(req->cluster_desc, sizeof(req->cluster_desc))
-		: strlen(desc_src);
-
-	char name_sql[sizeof(req->cluster_name) * 2 + 1];
-	char desc_sql[sizeof(req->cluster_desc) * 2 + 1];
-	unsigned long esc_len = mysql_real_escape_string(
-		sqldb.conn, name_sql, name_src, (unsigned long)name_len);
-	name_sql[esc_len] = '\0';
-	esc_len = mysql_real_escape_string(
-		sqldb.conn, desc_sql, desc_src, (unsigned long)desc_len);
-	desc_sql[esc_len] = '\0';
-
-	uint16_t min_nodes = req->min_nodes_req ? req->min_nodes_req : 1;
-	char sql_query[MAX_QUERY_SIZE];
-	int written = snprintf(sql_query, sizeof(sql_query), SQL_CLUSTER_UPSERT,
-			       (unsigned long long)req->cluster_id,
-			       name_sql,
-			       desc_sql,
-			       1U,
-			       1U,
-			       "pending",
-			       "ok",
-			       (unsigned int)min_nodes,
-			       1U);
-	if (written < 0 || (size_t)written >= sizeof(sql_query)) {
-		fprintf(stderr, "cluster_config: SQL buffer too small\n");
-		return false;
-	}
-
-	if (mysql_real_query(sqldb.conn, sql_query, (unsigned long)written) != 0) {
-		fprintf(stderr, "cluster_config: SQL failed: %s\n",
-			mysql_error(sqldb.conn));
-		return false;
-	}
-
-	MYSQL_RES *res = mysql_store_result(sqldb.conn);
-	if (res)
-		mysql_free_result(res);
-	else if (mysql_field_count(sqldb.conn) != 0) {
-		fprintf(stderr, "cluster_config: failed to consume SQL result: %s\n",
-			mysql_error(sqldb.conn));
-		return false;
-	}
-
-	return true;
-}
-
 static void configure_cluster(const struct hive_bootstrap_request *req)
 {
 	bootstrap_status_update("cluster_config: processing", 25, "OP_PENDING");
@@ -1029,7 +448,12 @@ static void configure_cluster(const struct hive_bootstrap_request *req)
 		req->cluster_name,
 		req->cluster_desc);
 
-	if (!persist_cluster_record(req)) {
+	uint16_t min_nodes = req->min_nodes_req ? req->min_nodes_req : 1;
+
+	if (!hifs_persist_cluster_record(req->cluster_id,
+					 req->cluster_name,
+					 req->cluster_desc,
+					 min_nodes)) {
 		bootstrap_status_update("cluster_config: cluster persist failed",
 					100, "IN_ERROR");
 		return;
@@ -1037,7 +461,13 @@ static void configure_cluster(const struct hive_bootstrap_request *req)
 	safe_copy(hbc.cluster_state, sizeof(hbc.cluster_state), "pending");
 	fprintf(stdout, "bootstrap: cluster metadata persisted in hive_api.cluster\n");
 	fflush(stdout);
-	update_node_for_add();
+	struct hive_storage_node local_node_cluster;
+
+	if (!prepare_local_node(&local_node_cluster))
+		return;
+
+	if (update_node_for_add(&local_node_cluster) != 0)
+		return;
 
     
 	bootstrap_status_update("cluster_config: complete", 100, "IDLE");
@@ -1059,7 +489,15 @@ static void configure_node(const struct hive_bootstrap_request *req)
 		(unsigned long long)req->node_id,
 		req->node_name);
 
-    update_node_for_add();
+	struct hive_storage_node local_node_join;
+
+	if (!prepare_local_node(&local_node_join))
+		return;
+
+	if (!forward_request_to_guard(req->raw_payload))
+		return;
+
+
 
 	bootstrap_status_update("node_join: complete", 100, "IDLE");
 }
@@ -1123,6 +561,29 @@ static bool dispatch_bootstrap_request(const struct hive_bootstrap_request *req,
 		return true;
 	}
 	return false;
+}
+
+static void bootstrap_status_update(const char *message, unsigned int percent,
+				    const char *state)
+{
+	if (percent > 100)
+		percent = 100;
+	if (!message || !*message)
+		message = "IDLE";
+	safe_copy(g_status_message, sizeof(g_status_message), message);
+	g_status_percent = percent;
+	if (state && *state)
+		safe_copy(g_config_state, sizeof(g_config_state), state);
+	else if (!g_config_state[0])
+		safe_copy(g_config_state, sizeof(g_config_state), "IDLE");
+}
+
+static void set_invalid_node_join_state(void)
+{
+	bootstrap_status_update(
+		"Cannot add a node to a cluster that does not exist yet",
+		100, "invalid_op");
+	safe_copy(hbc.cluster_state, sizeof(hbc.cluster_state), "invalid_op");
 }
 
 static bool process_client(int fd)
@@ -1317,4 +778,35 @@ static const char *configure_status(void)
 	fprintf(stdout, "bootstrap_status: %s\n", status_buf);
 	fflush(stdout);
 	return status_buf;
+}
+
+static bool parse_bootstrap_request(const char *json,
+				    struct hive_bootstrap_request *req)
+{
+	if (!json || !req)
+		return false;
+	memset(req, 0, sizeof(*req));
+	safe_copy(req->raw_payload, sizeof(req->raw_payload), json);
+
+    printf("Json: %s\n", json);
+	parse_json_string_value(json, "command",
+				req->command, sizeof(req->command));
+	parse_json_u64_value(json, "cluster_id", &req->cluster_id);
+	parse_json_u64_value(json, "clister_id", &req->cluster_id);
+	parse_json_string_value(json, "cluster_state",
+				req->cluster_state, sizeof(req->cluster_state));
+	parse_json_string_value(json, "cluster_name",
+				req->cluster_name, sizeof(req->cluster_name));
+	parse_json_string_value(json, "cluster_desc",
+				req->cluster_desc, sizeof(req->cluster_desc));
+	parse_json_u64_value(json, "node_id", &req->node_id);
+	parse_json_string_value(json, "node_name",
+				req->node_name, sizeof(req->node_name));
+	parse_json_string_value(json, "join_token",
+				req->join_token, sizeof(req->join_token));
+	uint64_t min_nodes_val = 0;
+	if (parse_json_u64_value(json, "min_nodes_req", &min_nodes_val))
+		req->min_nodes_req = (uint16_t)min_nodes_val;
+
+	return req->command[0] != '\0';
 }
