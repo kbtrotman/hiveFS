@@ -631,7 +631,7 @@ static int handle_lease_acquire(int fd,
                                uint64_t ttl_ms,
                                uint32_t prefer_owner)
 {
-    /* Debug behavior (no raft yet):
+    /* TODO: Debug behavior (no raft yet):
      * - If free/expired: grant locally with owner=prefer_owner (or 0) and token++.
      * - If held: return current owner/token.
      *
@@ -990,7 +990,12 @@ static void *conn_thread(void *arg)
 }
 
 /* -------------------------------------------------------------------------- */
-/* Listener thread                                                             */
+/* Listener thread  
+ * The leasing agent gets its own thread and a seperate listener on a new port
+ * for now. We may mold this into the same port when we move to UV protocol.
+ * But it will stay in its own thread and connections will be immediately
+ * forwarded here to take load off the storage threads.
+*/
 /* -------------------------------------------------------------------------- */
 
 static void *listener_thread(void *arg)

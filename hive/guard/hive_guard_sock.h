@@ -12,10 +12,6 @@
 
 #include "hive_guard.h"
 
-#define HIVE_GUARD_SOCK_PATH "/run/hive_guard.sock"
-#define HIVE_GUARD_SOCK_MSG_MAX 4096
-#define HIVE_GUARD_SOCK_BACKLOG 8
-
 #define GUARD_SOCK_STATE_LEN 32
 #define GUARD_SOCK_STATUS_LEN 64
 #define GUARD_SOCK_MSG_LEN 256
@@ -80,5 +76,9 @@ struct hive_guard_join_context {
 int hive_guard_distribute_node_tokens(const struct hive_guard_join_context *ctx);
 int hive_guard_apply_join_sec(const struct hive_guard_sock_join_sec *req);
 int hive_guard_apply_storage_node_update(const struct hive_guard_storage_update_cmd *cmd);
+int hive_guard_request_node_cert(const struct hive_storage_node *node,
+				 const char *key_path,
+				 const char *csr_path,
+				 const char *cert_path);
 int hive_guard_sock_start(void);
 void hive_guard_sock_stop(void);

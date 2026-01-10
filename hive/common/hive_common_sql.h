@@ -20,10 +20,50 @@
 #include <stddef.h>
 #include <stdint.h>
 
-struct hive_storage_node;
-struct SQLDB;
+#include "../../hicomm/hi_command.h"
+
+struct hive_storage_node {
+	uint32_t id;
+	char name[100];
+	char address[64];
+	char uid[128];
+	char serial[100];
+	uint16_t guard_port;
+	uint16_t stripe_port;
+	uint64_t last_heartbeat;
+	uint8_t online;
+	uint8_t fenced;
+	uint32_t hive_version;
+	uint32_t hive_patch_level;
+	uint64_t last_maintenance;
+	char maintenance_reason[256];
+	uint64_t maintenance_started_at;
+	uint64_t maintenance_ended_at;
+	uint64_t date_added_to_cluster;
+	uint64_t storage_capacity_bytes;
+	uint64_t storage_used_bytes;
+	uint64_t storage_reserved_bytes;
+	uint64_t storage_overhead_bytes;
+	uint32_t client_connect_timeout_ms;
+	uint32_t storage_node_connect_timeout_ms;
+};
+
+struct SQLDB {
+	MYSQL *conn;
+	MYSQL_RES *last_query;
+	unsigned long long last_affected;
+	unsigned long long last_insert_id;
+	int rec_count;
+	int rows;
+	int cols;
+	bool sql_init;
+	struct machine host;
+	struct superblock sb[50];
+};
+
 struct hive_bootstrap_config;
 struct hive_bootstrap_config;
+extern struct SQLDB sqldb;
 
 #ifndef HIFS_STORAGE_NODE_HEARTBEAT_MAX_AGE
 #define HIFS_STORAGE_NODE_HEARTBEAT_MAX_AGE 30
@@ -35,6 +75,14 @@ struct hive_bootstrap_config;
 
 #ifndef HIFS_STORAGE_NODE_DATA_SYNC_MIN_SECS
 #define HIFS_STORAGE_NODE_DATA_SYNC_MIN_SECS (3 * 60)
+#endif
+
+#ifndef HIFS_CLUSTER_NAME_MAX
+#define HIFS_CLUSTER_NAME_MAX 64
+#endif
+
+#ifndef HIFS_CLUSTER_DESC_MAX
+#define HIFS_CLUSTER_DESC_MAX 256
 #endif
 
 
