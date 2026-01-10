@@ -35,6 +35,7 @@
 
 #include "../../hicomm/hi_command.h"
 #include "../common/hive_common.h"
+#include "../common/hive_common_sql.h"
 
 #define MAXC 1024
 
@@ -60,32 +61,6 @@ extern	uint64_t storage_node_storage_reserved_bytes;
 extern	uint64_t storage_node_storage_overhead_bytes;
 extern	uint32_t storage_node_client_connect_timeout_ms;
 extern	uint32_t storage_node_storage_node_connect_timeout_ms;
-
-struct hive_storage_node {
-	uint32_t id;
-	char	 name[100];
-	char     address[64];  /* "ip:port" */
-	char     uid[128];
-	char     serial[100];
-	uint16_t guard_port;
-	uint16_t stripe_port;
-	uint64_t last_heartbeat;
-	uint8_t  online;
-	uint8_t  fenced;
-	uint32_t hive_version;
-	uint32_t hive_patch_level;
-	uint64_t last_maintenance;
-	char     maintenance_reason[256];
-	uint64_t maintenance_started_at;
-	uint64_t maintenance_ended_at;
-	uint64_t date_added_to_cluster;
-	uint64_t storage_capacity_bytes;
-	uint64_t storage_used_bytes;
-	uint64_t storage_reserved_bytes;
-	uint64_t storage_overhead_bytes;
-	uint32_t client_connect_timeout_ms;
-	uint32_t storage_node_connect_timeout_ms;
-};
 
 // Prototypes
 int hive_guard_server_main(void);

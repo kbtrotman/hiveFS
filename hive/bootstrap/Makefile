@@ -26,8 +26,7 @@ UV_LIB := /usr/lib
 
 # ---- Sources ----
 SRCS_C  := hive_bootstrap.c hive_bootstrap_sock.c \
-           ../common/hive_common_sql.c ../common/hive_common_sock.c \
-           ../guard/hive_guard_sock.c ../guard/hive_guard_auth.c
+           ../common/hive_common_sql.c ../common/hive_common_sock.c
 
 
 OBJS_C  := $(SRCS_C:.c=.o)

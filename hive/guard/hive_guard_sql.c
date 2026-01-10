@@ -305,6 +305,76 @@ bool get_hive_host_data(void)
 	return 1;
 }
 
+bool hifs_persist_cluster_record(uint64_t cluster_id,
+				 const char *cluster_name,
+				 const char *cluster_desc,
+				 uint16_t min_nodes)
+{
+	init_hive_link();
+	if (!sqldb.sql_init || !sqldb.conn) {
+		fprintf(stderr, "cluster_config: MariaDB connection not available\n");
+		return false;
+	}
+
+	const char *name_src = (cluster_name && cluster_name[0]) ?
+			       cluster_name :
+			       "hive_cluster";
+	const char *desc_src = (cluster_desc && cluster_desc[0]) ?
+			       cluster_desc :
+			       "Initial cluster configuration";
+	size_t name_len = (cluster_name && cluster_name[0]) ?
+			  strnlen(cluster_name, HIFS_CLUSTER_NAME_MAX) :
+			  strlen(name_src);
+	size_t desc_len = (cluster_desc && cluster_desc[0]) ?
+			  strnlen(cluster_desc, HIFS_CLUSTER_DESC_MAX) :
+			  strlen(desc_src);
+
+	char name_sql[HIFS_CLUSTER_NAME_MAX * 2 + 1];
+	char desc_sql[HIFS_CLUSTER_DESC_MAX * 2 + 1];
+
+	unsigned long esc_len = mysql_real_escape_string(
+		sqldb.conn, name_sql, name_src, (unsigned long)name_len);
+	name_sql[esc_len] = '\0';
+	esc_len = mysql_real_escape_string(
+		sqldb.conn, desc_sql, desc_src, (unsigned long)desc_len);
+	desc_sql[esc_len] = '\0';
+
+	uint16_t min_required = min_nodes ? min_nodes : 1;
+	char sql_query[MAX_QUERY_SIZE];
+	int written = snprintf(sql_query, sizeof(sql_query), SQL_CLUSTER_UPSERT,
+			       (unsigned long long)cluster_id,
+			       name_sql,
+			       desc_sql,
+			       1U,
+			       1U,
+			       "pending",
+			       "ok",
+			       (unsigned int)min_required,
+			       1U);
+	if (written < 0 || (size_t)written >= sizeof(sql_query)) {
+		fprintf(stderr, "cluster_config: SQL buffer too small\n");
+		return false;
+	}
+
+	if (mysql_real_query(sqldb.conn, sql_query, (unsigned long)written) != 0) {
+		fprintf(stderr, "cluster_config: SQL failed: %s\n",
+			mysql_error(sqldb.conn));
+		return false;
+	}
+
+	MYSQL_RES *res = mysql_store_result(sqldb.conn);
+
+	if (res)
+		mysql_free_result(res);
+	else if (mysql_field_count(sqldb.conn) != 0) {
+		fprintf(stderr, "cluster_config: failed to consume SQL result: %s\n",
+			mysql_error(sqldb.conn));
+		return false;
+	}
+
+	return true;
+}
+
 char *hifs_get_quoted_value(const char *in_str)
 {
 	if (!sqldb.sql_init || !sqldb.conn || !in_str)

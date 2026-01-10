@@ -23,12 +23,10 @@
 #include "../bootstrap/hive_bootstrap_sock.h"
 #include "../../hifs_shared_defs.h"
 
-#include <openssl/asn1.h>
-#include <openssl/bio.h>
-#include <openssl/evp.h>
-#include <openssl/pem.h>
-#include <openssl/x509.h>
-
+#include <fcntl.h>
+#include <limits.h>
+#include <stdbool.h>
+#include <sys/stat.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -36,126 +34,51 @@
 #include <time.h>
 #include <unistd.h>
 
-#define NODE_CERT_KEY_BITS   2048
 #define NODE_CERT_VALID_DAYS 365
 
-static bool bio_to_string(BIO *bio, char **out)
+static void ensure_pki_directories(void)
 {
-	if (!bio || !out)
-		return false;
+	const char *dirs[] = {
+		HIVE_PKI_DIR,
+		HIVE_NODE_CERT_DIR,
+		HIVE_CERT_DIR,
+		NULL
+	};
 
-	char *data = NULL;
-	long len = BIO_get_mem_data(bio, &data);
-
-	if (len <= 0 || !data)
-		return false;
-	char *buf = malloc((size_t)len + 1);
-
-	if (!buf)
-		return false;
-	memcpy(buf, data, (size_t)len);
-	buf[len] = '\0';
-	*out = buf;
-	return true;
+	for (size_t i = 0; dirs[i]; ++i) {
+		if (mkdir(dirs[i], 0700) == 0 || errno == EEXIST)
+			continue;
+		fprintf(stderr,
+			"bootstrap: failed to create %s: %s\n",
+			dirs[i],
+			strerror(errno));
+	}
 }
 
-static bool generate_node_certificate(const struct hive_storage_node *node,
-				      char **priv_pem_out,
-				      char **pub_pem_out)
+static bool build_cert_path(char *dst, size_t dst_len,
+			    const char *dir, const char *uid,
+			    const char *suffix)
 {
-	if (!node || !priv_pem_out || !pub_pem_out)
+	if (!dst || dst_len == 0 || !dir || !uid || !suffix)
 		return false;
-	*priv_pem_out = NULL;
-	*pub_pem_out = NULL;
+	int written = snprintf(dst, dst_len, "%s/%s%s", dir, uid, suffix);
 
-	bool ok = false;
-	EVP_PKEY_CTX *key_ctx = NULL;
-	EVP_PKEY *pkey = NULL;
-	X509 *x509 = X509_new();
-	BIO *priv_bio = NULL;
-	BIO *cert_bio = NULL;
+	return written >= 0 && (size_t)written < dst_len;
+}
 
-	if (!x509)
-		goto cleanup;
-	key_ctx = EVP_PKEY_CTX_new_id(EVP_PKEY_RSA, NULL);
-	if (!key_ctx)
-		goto cleanup;
-	if (EVP_PKEY_keygen_init(key_ctx) <= 0)
-		goto cleanup;
-	if (EVP_PKEY_CTX_set_rsa_keygen_bits(key_ctx, NODE_CERT_KEY_BITS) <= 0)
-		goto cleanup;
-	if (EVP_PKEY_keygen(key_ctx, &pkey) <= 0)
-		goto cleanup;
+static void touch_empty_file(const char *path)
+{
+	if (!path || !*path)
+		return;
+	int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
 
-	X509_set_version(x509, 2);
-	uint32_t serial = (uint32_t)(time(NULL) ^ (uint32_t)getpid());
-
-	if (!serial)
-		serial = 1;
-	if (!ASN1_INTEGER_set(X509_get_serialNumber(x509), (long)serial))
-		goto cleanup;
-	if (!X509_gmtime_adj(X509_get_notBefore(x509), 0) ||
-	    !X509_gmtime_adj(X509_get_notAfter(x509),
-			     (long)NODE_CERT_VALID_DAYS * 24L * 3600L))
-		goto cleanup;
-	if (X509_set_pubkey(x509, pkey) != 1)
-		goto cleanup;
-
-	X509_NAME *name = X509_get_subject_name(x509);
-	const char *cn = (node->name[0] != '\0') ? node->name : node->uid;
-
-	if (!cn || !*cn)
-		cn = "hivefs-node";
-	if (X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC,
-				       (const unsigned char *)cn,
-				       -1, -1, 0) != 1)
-		goto cleanup;
-	if (node->uid[0])
-		X509_NAME_add_entry_by_txt(name, "UID", MBSTRING_ASC,
-					   (const unsigned char *)node->uid,
-					   -1, -1, 0);
-	if (node->serial[0])
-		X509_NAME_add_entry_by_txt(name, "serialNumber",
-					   MBSTRING_ASC,
-					   (const unsigned char *)node->serial,
-					   -1, -1, 0);
-	if (node->address[0])
-		X509_NAME_add_entry_by_txt(name, "L", MBSTRING_ASC,
-					   (const unsigned char *)node->address,
-					   -1, -1, 0);
-	if (X509_set_issuer_name(x509, name) != 1)
-		goto cleanup;
-	if (X509_sign(x509, pkey, EVP_sha256()) <= 0)
-		goto cleanup;
-
-	priv_bio = BIO_new(BIO_s_mem());
-	cert_bio = BIO_new(BIO_s_mem());
-	if (!priv_bio || !cert_bio)
-		goto cleanup;
-	if (!PEM_write_bio_PrivateKey(priv_bio, pkey, NULL, NULL, 0,
-				      NULL, NULL))
-		goto cleanup;
-	if (!PEM_write_bio_X509(cert_bio, x509))
-		goto cleanup;
-	if (!bio_to_string(priv_bio, priv_pem_out) ||
-	    !bio_to_string(cert_bio, pub_pem_out))
-		goto cleanup;
-
-	ok = true;
-
-cleanup:
-	BIO_free(cert_bio);
-	BIO_free(priv_bio);
-	X509_free(x509);
-	EVP_PKEY_free(pkey);
-	EVP_PKEY_CTX_free(key_ctx);
-	if (!ok) {
-		free(*priv_pem_out);
-		free(*pub_pem_out);
-		*priv_pem_out = NULL;
-		*pub_pem_out = NULL;
-	}
-	return ok;
+	if (fd >= 0)
+		close(fd);
+	else
+		fprintf(stderr,
+			"bootstrap: failed to create %s: %s\n",
+			path,
+			strerror(errno));
 }
 
 int add_node_join_token(uint32_t node_id, const char *token)
@@ -208,18 +131,41 @@ int add_node_mtls_token(const struct hive_storage_node *node)
 	if (!node || !sqldb.conn || !node->uid[0])
 		return -1;
 
-	char *priv_pem = NULL;
-	char *pub_pem = NULL;
+	char key_path[PATH_MAX];
+	char cert_path[PATH_MAX];
+	char csr_path[PATH_MAX];
 	char *priv_sql = NULL;
 	char *pub_sql = NULL;
 	char *sql_query = NULL;
 	int rc = -1;
 
-	if (!generate_node_certificate(node, &priv_pem, &pub_pem)) {
-		fprintf(stderr,
-			"bootstrap: failed to generate node mTLS certificate\n");
+	ensure_pki_directories();
+	if (!build_cert_path(key_path, sizeof(key_path),
+			     HIVE_NODE_CERT_DIR, node->uid, ".key"))
 		goto cleanup;
+	if (!build_cert_path(cert_path, sizeof(cert_path),
+			     HIVE_NODE_CERT_DIR, node->uid, ".crt"))
+		goto cleanup;
+	if (!build_cert_path(csr_path, sizeof(csr_path),
+			     HIVE_CERT_DIR, node->uid, ".csr"))
+		goto cleanup;
+
+	if (hive_guard_request_node_cert(node,
+					 key_path,
+					 csr_path,
+					 cert_path) != 0) {
+		int saved_err = errno;
+
+		fprintf(stderr,
+			"bootstrap: certmonger request failed for %s: %s\n",
+			node->uid,
+			strerror(saved_err));
+		errno = saved_err;
 	}
+
+	touch_empty_file(key_path);
+	touch_empty_file(cert_path);
+	touch_empty_file(csr_path);
 
 	const char *serial_src = node->serial[0] ? node->serial : node->uid;
 	const char *name_src = node->name[0] ? node->name : node->uid;
@@ -242,8 +188,8 @@ int add_node_mtls_token(const struct hive_storage_node *node)
 		sqldb.conn, uid_sql, node->uid, uid_len);
 	uid_sql[uid_sql_len] = '\0';
 
-	size_t priv_len = strlen(priv_pem);
-	size_t pub_len = strlen(pub_pem);
+	size_t priv_len = strlen(key_path);
+	size_t pub_len = strlen(cert_path);
 
 	priv_sql = malloc(priv_len * 2 + 1);
 	pub_sql = malloc(pub_len * 2 + 1);
@@ -251,10 +197,10 @@ int add_node_mtls_token(const struct hive_storage_node *node)
 		goto cleanup;
 
 	unsigned long priv_sql_len = mysql_real_escape_string(
-		sqldb.conn, priv_sql, priv_pem, (unsigned long)priv_len);
+		sqldb.conn, priv_sql, key_path, (unsigned long)priv_len);
 	priv_sql[priv_sql_len] = '\0';
 	unsigned long pub_sql_len = mysql_real_escape_string(
-		sqldb.conn, pub_sql, pub_pem, (unsigned long)pub_len);
+		sqldb.conn, pub_sql, cert_path, (unsigned long)pub_len);
 	pub_sql[pub_sql_len] = '\0';
 
 	size_t query_len = sizeof(SQL_HOST_AUTH_UPSERT_CERT) +
@@ -289,11 +235,6 @@ cleanup:
 	free(sql_query);
 	free(priv_sql);
 	free(pub_sql);
-	if (priv_pem) {
-		memset(priv_pem, 0, strlen(priv_pem));
-		free(priv_pem);
-	}
-	free(pub_pem);
 	return rc;
 }
 

@@ -20,11 +20,58 @@
 #include <pthread.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "hive_guard_sql.h"
 #include "hive_guard_raft.h"
+#include "hive_guard_auth.h"
+#include "../bootstrap/hive_bootstrap_sock.h"
+#include "../common/hive_common_sql.h"
 #include "../common/hive_common_sock.h"
+
+#ifndef HIVE_CERTMONGER_SOCK_PATH
+#define HIVE_CERTMONGER_SOCK_PATH "/run/certmonger.sock"
+#endif
+
+#define GUARD_CLUSTER_NAME_LEN 128
+#define GUARD_CLUSTER_DESC_LEN 512
+
+struct hive_guard_sock_cluster_join {
+	uint64_t cluster_id;
+	uint64_t node_id;
+	uint64_t min_nodes_req;
+	char cluster_name[GUARD_CLUSTER_NAME_LEN];
+	char cluster_desc[GUARD_CLUSTER_DESC_LEN];
+	char cluster_state[GUARD_SOCK_STATE_LEN];
+	char join_token[GUARD_SOCK_TOKEN_LEN];
+};
+
+static void guard_sock_copy_field(char *dst, size_t dst_len,
+				  const char *value, const char *fallback);
+static void guard_sock_send_status_response(int fd);
+
+char g_status_message[64] = "IDLE";
+unsigned int g_status_percent = 0;
+char g_config_state[16] = "IDLE";
+
+void bootstrap_status_update(const char *message, unsigned int percent,
+			     const char *state)
+{
+	if (percent > 100)
+		percent = 100;
+	if (!message || !*message)
+		message = "IDLE";
+	guard_sock_copy_field(g_status_message, sizeof(g_status_message),
+			      message, "IDLE");
+	g_status_percent = percent;
+	if (state && *state)
+		guard_sock_copy_field(g_config_state, sizeof(g_config_state),
+				      state, "IDLE");
+	else if (!g_config_state[0])
+		guard_sock_copy_field(g_config_state, sizeof(g_config_state),
+				      "IDLE", "IDLE");
+}
 
 static pthread_t g_guard_sock_thread;
 static volatile int g_guard_sock_stop = 0;
@@ -114,6 +161,118 @@ static const char *json_string_or_null(const char *src, char *buf, size_t buf_sz
 static const char *default_state(const char *state, const char *fallback)
 {
 	return (state && *state) ? state : fallback;
+}
+
+static void guard_sock_copy_field(char *dst, size_t dst_len,
+				  const char *value, const char *fallback)
+{
+	const char *src = (value && *value) ? value : fallback;
+
+	if (!dst || dst_len == 0)
+		return;
+	if (!src)
+		src = "";
+	hifs_safe_strcpy(dst, dst_len, src);
+}
+
+static unsigned int guard_sock_progress_percent(const char *progress)
+{
+	if (!progress || !*progress)
+		return 0;
+	errno = 0;
+	char *end = NULL;
+	unsigned long val = strtoul(progress, &end, 10);
+
+	if (end == progress || errno == ERANGE)
+		return 0;
+	if (val > 100)
+		val = 100;
+	return (unsigned int)val;
+}
+
+static int guard_sock_send_all(int fd, const char *buf, size_t len)
+{
+	size_t done = 0;
+
+	while (done < len) {
+		ssize_t written = write(fd, buf + done, len - done);
+
+		if (written < 0) {
+			if (errno == EINTR)
+				continue;
+			return -1;
+		}
+		done += (size_t)written;
+	}
+	return 0;
+}
+
+int hive_guard_request_node_cert(const struct hive_storage_node *node,
+				 const char *key_path,
+				 const char *csr_path,
+				 const char *cert_path)
+{
+	if (!node || !key_path || !csr_path || !cert_path)
+		return -1;
+
+	int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+
+	if (fd < 0)
+		return -1;
+
+	struct sockaddr_un addr;
+
+	memset(&addr, 0, sizeof(addr));
+	addr.sun_family = AF_UNIX;
+	strncpy(addr.sun_path,
+		HIVE_CERTMONGER_SOCK_PATH,
+		sizeof(addr.sun_path) - 1);
+	if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
+		int saved = errno;
+
+		close(fd);
+		errno = saved;
+		return -1;
+	}
+
+	const char *cn = (node->name[0] != '\0') ? node->name : node->uid;
+	const char *serial = (node->serial[0] != '\0') ? node->serial : node->uid;
+	char request[1024];
+	int written = snprintf(request, sizeof(request),
+			       "REQUEST_NODE_CERT\ncn=%s\nuid=%s\nserial=%s\nkey=%s\ncsr=%s\ncert=%s\n\n",
+			       cn,
+			       node->uid,
+			       serial,
+			       key_path,
+			       csr_path,
+			       cert_path);
+	if (written < 0 || (size_t)written >= sizeof(request)) {
+		close(fd);
+		errno = EMSGSIZE;
+		return -1;
+	}
+	if (guard_sock_send_all(fd, request, (size_t)written) != 0) {
+		int saved = errno;
+
+		close(fd);
+		errno = saved;
+		return -1;
+	}
+
+	struct pollfd pfd = {
+		.fd = fd,
+		.events = POLLIN,
+	};
+	int poll_rc = poll(&pfd, 1, 200);
+
+	if (poll_rc > 0 && (pfd.revents & POLLIN)) {
+		char buf[256];
+
+		(void)read(fd, buf, sizeof(buf));
+	}
+
+	close(fd);
+	return 0;
 }
 
 int hive_guard_distribute_node_tokens(const struct hive_guard_join_context *ctx)
@@ -463,8 +622,8 @@ static bool guard_sock_parse_u64_value(const char *json, const char *key,
 	return true;
 }
 
-static bool guard_sock_parse_join_sec(const char *json,
-				      struct hive_guard_sock_join_sec *out)
+static bool guard_sock_parse_join_request(const char *json,
+					  struct hive_guard_sock_join_sec *out)
 {
 	char command[32];
 
@@ -474,8 +633,10 @@ static bool guard_sock_parse_join_sec(const char *json,
 	if (!guard_sock_parse_string_value(json, "command",
 					   command, sizeof(command)))
 		return false;
-	if (strcmp(command, "join_sec") != 0)
+	if (strcmp(command, "join_sec") != 0 &&
+	    strcmp(command, "node_join") != 0)
 		return false;
+	strncpy(out->action, command, sizeof(out->action) - 1);
 	if (!guard_sock_parse_u64_value(json, "cluster_id",
 					&out->cluster_id))
 		return false;
@@ -525,6 +686,166 @@ static bool guard_sock_parse_join_sec(const char *json,
 	return true;
 }
 
+static bool guard_sock_parse_cluster_join(const char *json,
+					  struct hive_guard_sock_cluster_join *out)
+{
+	char command[32];
+
+	if (!json || !out)
+		return false;
+	memset(out, 0, sizeof(*out));
+	if (!guard_sock_parse_string_value(json, "command",
+					   command, sizeof(command)))
+		return false;
+	if (strcmp(command, "cluster_join") != 0)
+		return false;
+	if (!guard_sock_parse_u64_value(json, "cluster_id",
+					&out->cluster_id))
+		return false;
+	guard_sock_parse_u64_value(json, "node_id", &out->node_id);
+	guard_sock_parse_u64_value(json, "min_nodes_req",
+				   &out->min_nodes_req);
+	guard_sock_parse_string_value(json, "cluster_name",
+				      out->cluster_name,
+				      sizeof(out->cluster_name));
+	guard_sock_parse_string_value(json, "cluster_desc",
+				      out->cluster_desc,
+				      sizeof(out->cluster_desc));
+	guard_sock_parse_string_value(json, "cluster_state",
+				      out->cluster_state,
+				      sizeof(out->cluster_state));
+	guard_sock_parse_string_value(json, "join_token",
+				      out->join_token,
+				      sizeof(out->join_token));
+	return true;
+}
+
+static bool guard_sock_try_handle_status_request(int fd, const char *json)
+{
+	char command[32];
+	char state[32];
+	char message[128];
+	char progress[32];
+
+	if (!guard_sock_parse_string_value(json, "command",
+					   command, sizeof(command)))
+		return false;
+	if (strcmp(command, "status") != 0)
+		return false;
+	state[0] = '\0';
+	message[0] = '\0';
+	progress[0] = '\0';
+	guard_sock_parse_string_value(json, "config_status",
+				      state, sizeof(state));
+	guard_sock_parse_string_value(json, "config_msg",
+				      message, sizeof(message));
+	guard_sock_parse_string_value(json, "config_progress",
+				      progress, sizeof(progress));
+	if (state[0] || message[0] || progress[0]) {
+		unsigned int percent = guard_sock_progress_percent(progress);
+
+		bootstrap_status_update(message[0] ? message : "IDLE",
+					percent,
+					state[0] ? state : "IDLE");
+	}
+	guard_sock_send_status_response(fd);
+	return true;
+}
+
+static int guard_sock_handle_node_join(const struct hive_guard_sock_join_sec *req)
+{
+	struct hive_storage_node local;
+
+	if (!req)
+		return -EINVAL;
+	if (!hifs_get_local_node_identity(&local))
+		return -EIO;
+	if (!local.guard_port)
+		local.guard_port = hifs_local_guard_port();
+	if (!local.stripe_port)
+		local.stripe_port = local.guard_port;
+	local.last_heartbeat = (uint64_t)time(NULL);
+
+	hbc.cluster_id = req->cluster_id;
+	hbc.storage_node_id = (uint32_t)req->node_id;
+	hbc.min_nodes_req = req->min_nodes_req;
+	guard_sock_copy_field(hbc.cluster_state, sizeof(hbc.cluster_state),
+			      req->cluster_state, "unconfigured");
+	guard_sock_copy_field(hbc.database_state, sizeof(hbc.database_state),
+			      req->database_state, "configured");
+	guard_sock_copy_field(hbc.kv_state, sizeof(hbc.kv_state),
+			      req->kv_state, "configured");
+	guard_sock_copy_field(hbc.cont1_state, sizeof(hbc.cont1_state),
+			      req->cont1_state, "configured");
+	guard_sock_copy_field(hbc.cont2_state, sizeof(hbc.cont2_state),
+			      req->cont2_state, "configured");
+	guard_sock_copy_field(hbc.bootstrap_token, sizeof(hbc.bootstrap_token),
+			      req->bootstrap_token, "");
+	guard_sock_copy_field(hbc.first_boot_ts, sizeof(hbc.first_boot_ts),
+			      req->first_boot_ts, "");
+	guard_sock_copy_field(hbc.storage_node_name,
+			      sizeof(hbc.storage_node_name),
+			      local.name, "");
+	guard_sock_copy_field(hbc.storage_node_address,
+			      sizeof(hbc.storage_node_address),
+			      local.address, "");
+	guard_sock_copy_field(hbc.storage_node_uid,
+			      sizeof(hbc.storage_node_uid),
+			      local.uid, "");
+	guard_sock_copy_field(hbc.storage_node_serial,
+			      sizeof(hbc.storage_node_serial),
+			      local.serial, "");
+	hbc.storage_node_guard_port = local.guard_port;
+	hbc.storage_node_stripe_port = local.stripe_port;
+	hbc.storage_node_last_heartbeat = local.last_heartbeat;
+	hbc.storage_node_fenced = 1;
+
+	g_status_percent = guard_sock_progress_percent(req->config_progress);
+	guard_sock_copy_field(g_config_state, sizeof(g_config_state),
+			      req->config_status, "IDLE");
+	guard_sock_copy_field(g_status_message, sizeof(g_status_message),
+			      req->config_msg, "");
+
+	enum bootstrap_request_type prev = g_pending_request_type;
+
+	g_pending_request_type = BOOTSTRAP_REQ_NODE_JOIN;
+	int rc = update_node_for_add(&local);
+	g_pending_request_type = prev;
+	return rc;
+}
+
+static int guard_sock_handle_cluster_join(const struct hive_guard_sock_cluster_join *req)
+{
+	if (!req)
+		return -EINVAL;
+	uint16_t min_nodes = (uint16_t)(req->min_nodes_req
+						? req->min_nodes_req : 1);
+
+	hbc.cluster_id = req->cluster_id;
+	hbc.storage_node_id = req->node_id ? (uint32_t)req->node_id : 1U;
+	hbc.min_nodes_req = min_nodes;
+	guard_sock_copy_field(hbc.cluster_state, sizeof(hbc.cluster_state),
+			      req->cluster_state, "configuring");
+	guard_sock_copy_field(hbc.bootstrap_token,
+			      sizeof(hbc.bootstrap_token),
+			      req->join_token, "");
+	bootstrap_status_update("cluster_config: processing",
+				25, "OP_PENDING");
+	if (!hifs_persist_cluster_record(req->cluster_id,
+					 req->cluster_name,
+					 req->cluster_desc,
+					 min_nodes)) {
+		bootstrap_status_update(
+			"cluster_config: cluster persist failed",
+			100, "IN_ERROR");
+		return -EIO;
+	}
+	bootstrap_status_update(
+		"cluster_config: cluster metadata persisted",
+		80, "OP_PENDING");
+	return 0;
+}
+
 static int guard_sock_handle_join_sec(const struct hive_guard_sock_join_sec *req)
 {
 	struct hive_guard_join_context ctx = {
@@ -552,8 +873,8 @@ static int guard_sock_handle_join_sec(const struct hive_guard_sock_join_sec *req
 		.hive_patch_level = req->hive_patch_level[0]
 			? req->hive_patch_level : NULL,
 	};
-
-	/* Future commands will hook into Raft, for now log receipt. */
+	if (req->action[0] && strcmp(req->action, "node_join") == 0)
+		return guard_sock_handle_node_join(req);
 	fprintf(stdout,
 		"hive_guard_sock: join_sec cluster=%llu node=%llu "
 		"state=%s progress=%s\n",
@@ -566,12 +887,53 @@ static int guard_sock_handle_join_sec(const struct hive_guard_sock_join_sec *req
 	return 0;
 }
 
-static bool guard_sock_dispatch_request(const char *json)
+static void guard_sock_send_status_response(int fd)
+{
+	char msg_buf[128];
+	char state_buf[32];
+	char progress_buf[16];
+	char resp[256];
+
+	json_escape_string(g_status_message, msg_buf, sizeof(msg_buf));
+	json_escape_string(g_config_state, state_buf, sizeof(state_buf));
+	snprintf(progress_buf, sizeof(progress_buf), "%u%%",
+		 g_status_percent);
+	snprintf(resp, sizeof(resp),
+		 "{\"ok\":true,"
+		 "\"config_status\":\"%s\","
+		 "\"config_progress\":\"%s\","
+		 "\"config_msg\":\"%s\"}",
+		 state_buf[0] ? state_buf : "IDLE",
+		 progress_buf,
+		 msg_buf[0] ? msg_buf : "IDLE");
+	hive_common_sock_respond(fd, resp);
+	hive_common_sock_respond(fd, "\n");
+}
+
+static bool guard_sock_dispatch_request(int fd, const char *json)
 {
 	struct hive_guard_sock_join_sec join_req;
+	struct hive_guard_sock_cluster_join cluster_req;
 
-	if (guard_sock_parse_join_sec(json, &join_req))
-		return guard_sock_handle_join_sec(&join_req) == 0;
+	if (guard_sock_parse_join_request(json, &join_req)) {
+		if (guard_sock_handle_join_sec(&join_req) == 0) {
+			hive_common_sock_respond(fd, "OK\n");
+			return true;
+		}
+		hive_common_sock_respond(fd, "ERR node join failed\n");
+		return false;
+	}
+	if (guard_sock_parse_cluster_join(json, &cluster_req)) {
+		if (guard_sock_handle_cluster_join(&cluster_req) == 0) {
+			hive_common_sock_respond(fd, "OK\n");
+			return true;
+		}
+		hive_common_sock_respond(fd, "ERR cluster join failed\n");
+		return false;
+	}
+	if (guard_sock_try_handle_status_request(fd, json))
+		return true;
+	hive_common_sock_respond(fd, "ERR unknown command\n");
 	return false;
 }
 
@@ -584,11 +946,7 @@ static void guard_sock_process_client(int fd)
 		return;
 	}
 
-	if (!guard_sock_dispatch_request(buf)) {
-		hive_common_sock_respond(fd, "ERR unknown command\n");
-		return;
-	}
-	hive_common_sock_respond(fd, "OK\n");
+	(void)guard_sock_dispatch_request(fd, buf);
 }
 
 static void guard_sock_make_nonblocking(int fd)

@@ -47,20 +47,6 @@
 
 /* SQL Connect */
 
-struct SQLDB {
-	MYSQL *conn;
-	MYSQL_RES *last_query;
-	unsigned long long last_affected;
-	unsigned long long last_insert_id;
-	int rec_count;
-	int rows;
-	int cols;
-	bool sql_init;
-	struct machine host;
-	struct superblock sb[50];
-};
-extern struct SQLDB sqldb;
-
 /* SQL format strings are generally declared in hive/common/hive_common_sql.h */
 
 #define SQL_HOST_TOKEN_SELECT_NODE_JOIN_LATEST \

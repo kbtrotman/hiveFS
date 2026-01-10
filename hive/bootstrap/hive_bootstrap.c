@@ -22,10 +22,7 @@
 
 #include "hive_bootstrap.h"
 #include "hive_bootstrap_sock.h"
-#include "../guard/hive_guard.h"
-#include "../guard/hive_guard_sn_tcp.h"
-#include "../guard/hive_guard_sql.h"
-#include "../guard/hive_guard_kv.h"
+#include "../common/hive_common_sql.h"
 #include <syslog.h>
 
 

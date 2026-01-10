@@ -19,4 +19,6 @@ extern enum bootstrap_request_type g_pending_request_type;
 
 extern struct hive_bootstrap_config hbc;
 
+void bootstrap_status_update(const char *message, unsigned int percent,
+				    const char *state);
 int hive_bootstrap_sock_run(const char *socket_path);

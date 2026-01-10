@@ -36,6 +36,22 @@
 #define HIVE_NODE_CONF_PATH   HIVE_BOOTSTRAP_SYS_DIR "/node.json.conf"
 #define HIVE_CLUSTER_DIR      HIVE_BOOTSTRAP_SYS_DIR "/cluster"
 #define HIVE_PKI_DIR          HIVE_BOOTSTRAP_SYS_DIR "/pki"
+#define HIVE_CA_ROOT          HIVE_PKI_DIR "/ca"      // CA cert we want to trust, local copy
+#define HIVE_NODE_CERT_DIR    HIVE_PKI_DIR "/node"    // This node's TLS identity
+#define HIVE_RAFT_CERT_DIR    HIVE_PKI_DIR "/raft"    // if we want a seperate identity for raft operations
+#define HIVE_API_CERT_DIR     HIVE_PKI_DIR "/api"     // if we want a seperate identity for the backend api connections
+#define HIVE_CERT_DIR         HIVE_PKI_DIR "/requests"   // cert request copies
+
+
+#ifndef HIVE_GUARD_SOCK_PATH
+#define HIVE_GUARD_SOCK_PATH "/run/hive_guard.sock"
+#endif
+#ifndef HIVE_GUARD_SOCK_MSG_MAX
+#define HIVE_GUARD_SOCK_MSG_MAX 4096
+#endif
+#ifndef HIVE_GUARD_SOCK_BACKLOG
+#define HIVE_GUARD_SOCK_BACKLOG 8
+#endif
 
 
 #define HIVE_GUARD_SNAPSHOT_BASE_DIR HIVE_DATA_DIR "/meta/snapshots"
