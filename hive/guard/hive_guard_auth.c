@@ -14,7 +14,7 @@
  * management routines for hiveFS. This also will need to include
  * user and group managmenet as they relate to tokens and certs.
  * 
- * Basically, this is client access,l node access, and RBAC.
+ * Basically, this is client access, node access, and RBAC.
  * 
  */
 #include "hive_guard_auth.h"

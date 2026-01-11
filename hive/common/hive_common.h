@@ -35,6 +35,8 @@
 #define HIVE_BOOTSTRAP_SYS_DIR "/etc/hivefs"
 #define HIVE_NODE_CONF_PATH   HIVE_BOOTSTRAP_SYS_DIR "/node.json.conf"
 #define HIVE_CLUSTER_DIR      HIVE_BOOTSTRAP_SYS_DIR "/cluster"
+#define HIVE_CLUSTER_ID       HIVE_CLUSTER_DIR "/identity"
+#define HIVE_NODE_ID          HIVE_BOOTSTRAP_SYS_DIR "/node"
 #define HIVE_PKI_DIR          HIVE_BOOTSTRAP_SYS_DIR "/pki"
 #define HIVE_CA_ROOT          HIVE_PKI_DIR "/ca"      // CA cert we want to trust, local copy
 #define HIVE_NODE_CERT_DIR    HIVE_PKI_DIR "/node"    // This node's TLS identity

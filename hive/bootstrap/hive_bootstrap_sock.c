@@ -10,10 +10,15 @@
 
 #include <ctype.h>
 #include <errno.h>
+#include <fcntl.h>
+#include <limits.h>
+#include <libgen.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <sys/statvfs.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <sys/wait.h>
@@ -26,6 +31,16 @@
 #include "../common/hive_common_sock.h"
 #include "../../hifs_shared_defs.h"
 
+#ifndef ARRAY_SIZE
+#define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
+#endif
+
+#define UUID_TEXT_LEN 36
+#define UUID_BUF_LEN (UUID_TEXT_LEN + 1)
+#define BYTES_PER_GIB (1024ULL * 1024ULL * 1024ULL)
+#define HIVE_METADATA_MIN_BYTES (200ULL * BYTES_PER_GIB)
+#define HIVE_GUARD_KV_MIN_BYTES (200ULL * BYTES_PER_GIB)
+#define HIVE_LOG_MIN_BYTES (50ULL * BYTES_PER_GIB)
 
 struct hive_bootstrap_request {
 	char command[32];
@@ -851,6 +866,261 @@ static const char *json_number_or_null(char *buf, size_t buf_sz,
 	return buf;
 }
 
+static bool ensure_directory_path(const char *path)
+{
+	if (!path || !*path)
+		return false;
+	if (mkdir(path, 0755) == 0 || errno == EEXIST)
+		return true;
+	fprintf(stderr, "bootstrap: mkdir(%s) failed: %s\n",
+		path, strerror(errno));
+	return false;
+}
+
+static void trim_newline(char *buf)
+{
+	if (!buf)
+		return;
+	size_t len = strcspn(buf, "\r\n");
+
+	buf[len] = '\0';
+}
+
+static bool read_uuid_from_file(const char *path, char *uuid, size_t uuid_sz)
+{
+	if (!path || !uuid || uuid_sz < UUID_BUF_LEN)
+		return false;
+	FILE *fp = fopen(path, "re");
+
+	if (!fp)
+		return false;
+	bool ok = fgets(uuid, (int)uuid_sz, fp) != NULL;
+
+	fclose(fp);
+	if (!ok)
+		return false;
+	trim_newline(uuid);
+	return strlen(uuid) == UUID_TEXT_LEN;
+}
+
+static bool read_kernel_uuid(char *uuid, size_t uuid_sz)
+{
+	if (!uuid || uuid_sz < UUID_BUF_LEN)
+		return false;
+	FILE *fp = fopen("/proc/sys/kernel/random/uuid", "re");
+
+	if (!fp)
+		return false;
+	bool ok = fgets(uuid, (int)uuid_sz, fp) != NULL;
+
+	fclose(fp);
+	if (!ok)
+		return false;
+	trim_newline(uuid);
+	return strlen(uuid) == UUID_TEXT_LEN;
+}
+
+static bool write_text_file(const char *path, const char *text)
+{
+	if (!path || !text)
+		return false;
+	int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+
+	if (fd < 0) {
+		fprintf(stderr, "bootstrap: open(%s) failed: %s\n",
+			path, strerror(errno));
+		return false;
+	}
+	size_t len = strlen(text);
+	size_t off = 0;
+	bool ok = true;
+
+	while (off < len) {
+		ssize_t n = write(fd, text + off, len - off);
+
+		if (n < 0) {
+			if (errno == EINTR)
+				continue;
+			ok = false;
+			fprintf(stderr, "bootstrap: write(%s) failed: %s\n",
+				path, strerror(errno));
+			break;
+		}
+		off += (size_t)n;
+	}
+	close(fd);
+	return ok && off == len;
+}
+
+static bool ensure_chrony_ready(void)
+{
+	struct stat st;
+	static const char *const disable_ntp_cmd[] = {
+		"timedatectl", "set-ntp", "no", NULL,
+	};
+	static const char *const status_cmd[] = {
+		"systemctl", "is-active", "chronyd.service", NULL,
+	};
+	static const char *const is_enabled_cmd[] = {
+		"systemctl", "is-enabled", "chronyd.service", NULL,
+	};
+	static const char *const enable_cmd[] = {
+		"systemctl", "enable", "--now", "chronyd.service", NULL,
+	};
+	static const char *const start_cmd[] = {
+		"systemctl", "start", "chronyd.service", NULL,
+	};
+
+	if (stat("/etc/chrony/chrony.conf", &st) != 0 ||
+	    !S_ISREG(st.st_mode)) {
+		fprintf(stderr,
+			"bootstrap: chrony config missing at /etc/chrony/chrony.conf\n");
+		return false;
+	}
+
+	(void)bootstrap_run_command(disable_ntp_cmd);
+	bool active = bootstrap_run_command(status_cmd);
+	bool enabled = bootstrap_run_command(is_enabled_cmd);
+
+	if (!enabled) {
+		if (!bootstrap_run_command(enable_cmd))
+			return false;
+		active = bootstrap_run_command(status_cmd);
+	}
+	if (!active) {
+		if (!bootstrap_run_command(start_cmd))
+			return false;
+	}
+	return bootstrap_run_command(status_cmd);
+}
+
+static bool get_parent_path(const char *path, char *parent, size_t parent_sz)
+{
+	if (!path || !parent || parent_sz == 0)
+		return false;
+
+	char tmp[PATH_MAX];
+	size_t len = strlen(path);
+
+	if (len >= sizeof(tmp)) {
+		fprintf(stderr, "bootstrap: path too long: %s\n", path);
+		return false;
+	}
+	memcpy(tmp, path, len + 1);
+
+	if (len > 1 && tmp[len - 1] == '/')
+		tmp[len - 1] = '\0';
+
+	char *dir = dirname(tmp);
+
+	if (!dir)
+		return false;
+	size_t dir_len = strnlen(dir, parent_sz);
+
+	if (dir_len >= parent_sz)
+		return false;
+	memcpy(parent, dir, dir_len);
+	parent[dir_len] = '\0';
+	if (parent[0] == '\0')
+		strcpy(parent, "/");
+	return true;
+}
+
+static bool path_is_mountpoint(const char *path, const struct stat *st_path)
+{
+	struct stat parent;
+	char parent_path[PATH_MAX];
+
+	if (!path || !st_path)
+		return false;
+	if (!get_parent_path(path, parent_path, sizeof(parent_path)))
+		return false;
+	if (stat(parent_path, &parent) != 0)
+		return false;
+	return st_path->st_dev != parent.st_dev;
+}
+
+static bool check_directory_fs(const char *path, uint64_t min_bytes, dev_t *dev_out)
+{
+	struct stat st;
+
+	if (stat(path, &st) != 0) {
+		fprintf(stderr, "bootstrap: stat(%s) failed: %s\n",
+			path, strerror(errno));
+		return false;
+	}
+	if (!S_ISDIR(st.st_mode)) {
+		fprintf(stderr, "bootstrap: %s is not a directory\n", path);
+		return false;
+	}
+	if (dev_out)
+		*dev_out = st.st_dev;
+
+	bool ok = true;
+
+	if (!path_is_mountpoint(path, &st)) {
+		fprintf(stderr, "bootstrap: %s is not a mountpoint\n", path);
+		ok = false;
+	}
+
+	struct statvfs vfs;
+
+	if (statvfs(path, &vfs) != 0) {
+		fprintf(stderr, "bootstrap: statvfs(%s) failed: %s\n",
+			path, strerror(errno));
+		ok = false;
+	} else {
+		unsigned long long total = vfs.f_frsize;
+
+		total *= vfs.f_blocks;
+		if (min_bytes > 0 && total < min_bytes) {
+			fprintf(stderr,
+				"bootstrap: %s capacity %llu bytes, need %llu\n",
+				path, total, (unsigned long long)min_bytes);
+			ok = false;
+		}
+	}
+	return ok;
+}
+
+static bool verify_required_filesystems(bool enforce)
+{
+	const struct {
+		const char *path;
+		uint64_t min_bytes;
+	} reqs[] = {
+		{ HIVE_METADATA_DIR, HIVE_METADATA_MIN_BYTES },
+		{ HIVE_GUARD_KV_DIR, HIVE_GUARD_KV_MIN_BYTES },
+		{ HIVE_LOG_DIR, HIVE_LOG_MIN_BYTES },
+	};
+	dev_t devs[ARRAY_SIZE(reqs)] = { 0 };
+	bool ok = true;
+
+	for (size_t i = 0; i < ARRAY_SIZE(reqs); ++i) {
+		if (!check_directory_fs(reqs[i].path, reqs[i].min_bytes,
+					&devs[i]))
+			ok = false;
+	}
+	for (size_t i = 0; i < ARRAY_SIZE(reqs); ++i) {
+		for (size_t j = i + 1; j < ARRAY_SIZE(reqs); ++j) {
+			if (devs[i] != 0 && devs[i] == devs[j]) {
+				fprintf(stderr,
+					"bootstrap: %s and %s share the same device\n",
+					reqs[i].path, reqs[j].path);
+				ok = false;
+			}
+		}
+	}
+	if (ok)
+		return true;
+	if (!enforce) {
+		fprintf(stderr,
+			"bootstrap: filesystem checks failed but enforcement is disabled\n");
+		return true;
+	}
+	return false;
+}
+
 enum {
 	HIVE_NODE_NAME_LEN = sizeof(((struct hive_storage_node *)0)->name),
 	HIVE_NODE_ADDR_LEN = sizeof(((struct hive_storage_node *)0)->address),
@@ -874,6 +1144,47 @@ static void configure_cluster(const struct hive_bootstrap_request *req)
 		(unsigned long long)req->cluster_id,
 		req->cluster_name,
 		req->cluster_desc);
+
+	char cluster_uuid[UUID_BUF_LEN];
+	char node_uuid[UUID_BUF_LEN];
+
+	if (!ensure_directory_path(HIVE_BOOTSTRAP_SYS_DIR) ||
+	    !ensure_directory_path(HIVE_CLUSTER_DIR)) {
+		push_guard_status_update("cluster_config: cannot prep directories",
+					 100, "IN_ERROR");
+		return;
+	}
+	if (!read_uuid_from_file(HIVE_CLUSTER_ID, cluster_uuid,
+				 sizeof(cluster_uuid))) {
+		if (!read_kernel_uuid(cluster_uuid, sizeof(cluster_uuid)) ||
+		    !write_text_file(HIVE_CLUSTER_ID, cluster_uuid)) {
+			push_guard_status_update("cluster_config: cluster uuid failed",
+						 100, "IN_ERROR");
+			return;
+		}
+	}
+	if (!read_uuid_from_file(HIVE_NODE_ID, node_uuid,
+				 sizeof(node_uuid))) {
+		if (!read_kernel_uuid(node_uuid, sizeof(node_uuid)) ||
+		    !write_text_file(HIVE_NODE_ID, node_uuid)) {
+			push_guard_status_update("cluster_config: node uuid failed",
+						 100, "IN_ERROR");
+			return;
+		}
+	}
+	if (!ensure_chrony_ready()) {
+		push_guard_status_update("cluster_config: chrony not ready",
+					 100, "IN_ERROR");
+		return;
+	}
+	const bool enforce_fs_checks = false; /* flip to true after testing. */
+
+	if (!verify_required_filesystems(enforce_fs_checks)) {
+		push_guard_status_update("cluster_config: filesystem check failed",
+					 100, "IN_ERROR");
+		return;
+	}
+
 
 	if (!forward_cluster_join_request(req)) {
 		push_guard_status_update("cluster_config: cluster persist failed",
@@ -935,7 +1246,7 @@ static void configure_foreigner(const struct hive_bootstrap_request *req)
 	fprintf(stdout, "bootstrap: add_foreigner request received\n");
 
 	struct hive_storage_node local_node_join;
-	
+
 	if (!prepare_local_node(&local_node_join))
 		return;
 

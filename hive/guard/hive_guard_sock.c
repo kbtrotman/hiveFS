@@ -846,6 +846,33 @@ static int guard_sock_handle_cluster_join(const struct hive_guard_sock_cluster_j
 	return 0;
 }
 
+// TODO:
+// Need to flesh out this func using the comments in the function.
+int guard_sock_handle_cluster_init(const struct hive_guard_sock_join_sec req)
+{
+	if (!req)
+		return -EINVAL;
+	uint16_t min_nodes = (uint16_t)(req->min_nodes_req
+						? req->min_nodes_req : 1);
+
+    // Create raft directories if they don't exist and crreate raft log if
+    // it doesn't exist. (HIVE_GUARD_RAFT_DIR)
+
+    // Need to update key pairs (x,509) and cert. Call update_node_for_add()
+    // since the process is the same. Later, this needs to be moved to raft
+    // once testing is done.
+
+    // Later: Init cluster in raft also. Leave this comment. It can't be done now.
+
+    // Call hifs_persist_cluster_record() from hive_guard_sql.c
+    // NOTE: this would generally be in raft, but for now, we're just
+    // getting the process right.
+
+
+    // Print a successful message in the logs & return.
+
+}
+
 static int guard_sock_handle_join_sec(const struct hive_guard_sock_join_sec *req)
 {
 	struct hive_guard_join_context ctx = {
@@ -875,6 +902,8 @@ static int guard_sock_handle_join_sec(const struct hive_guard_sock_join_sec *req
 	};
 	if (req->action[0] && strcmp(req->action, "node_join") == 0)
 		return guard_sock_handle_node_join(req);
+    if (req->action[0] && strcmp(req->action, "cluster_init") == 0)
+		return guard_sock_handle_cluster_init(req);
 	fprintf(stdout,
 		"hive_guard_sock: join_sec cluster=%llu node=%llu "
 		"state=%s progress=%s\n",
