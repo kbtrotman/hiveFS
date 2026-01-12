@@ -32,7 +32,6 @@ class UserProfileSerializer(serializers.ModelSerializer):
             "is_staff",
             "date_joined",
         )
-        read_only_fields = fields
 
 
 class CustomRegisterSerializer(RegisterSerializer):
