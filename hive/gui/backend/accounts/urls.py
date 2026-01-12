@@ -33,4 +33,5 @@ urlpatterns = [
         name="account_email_verification_sent",
     ),
     path("auth/session/", SessionStatusView.as_view(), name="session-status"),
+    
 ]
