@@ -3,7 +3,7 @@ from dj_rest_auth.registration.serializers import RegisterSerializer
 from rest_framework import serializers
 
 from tenant.models import Tenant
-from .models import Group, GroupMembership, Role, RoleAssignment
+from .models import Group, GroupMembership, Role, RoleAssignment, LDAPModel, SAMLModel, MFAModel
 
 
 class UserProfileSerializer(serializers.ModelSerializer):
@@ -139,3 +139,43 @@ class GroupMembershipSerializer(serializers.ModelSerializer):
             "added_at",
         )
         read_only_fields = ("id", "added_at")
+
+class LDAPSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = LDAPModel
+        fields = (
+            "server_uri",
+            "port",
+            "tls_mode",
+            "tls_verify",
+            "connect_timeout",
+            "bind_method",
+            "bind_dn",
+            "dn_or_oldap",
+            "user_dn",
+            "group_dn",
+        )
+
+
+class SAMLSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SAMLModel
+        fields = (
+            "idp_entity_id",
+            "sso_url",
+            "slo_url",
+            "certificate",
+            "attribute_mapping",
+        )
+        
+class MFASerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MFAModel
+        fields = (
+            "mfa_enabled",
+            "user",
+            "method",
+            "secret",
+            "created_at",
+            
+        )    

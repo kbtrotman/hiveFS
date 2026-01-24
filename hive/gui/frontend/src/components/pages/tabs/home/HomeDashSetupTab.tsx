@@ -1,10 +1,10 @@
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../ui/card';
-import { Label } from '../../ui/label';
-import { Input } from '../../ui/input';
-import { Button } from '../../ui/button';
-import { Switch } from '../../ui/switch';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../../ui/card';
+import { Label } from '../../../ui/label';
+import { Input } from '../../../ui/input';
+import { Button } from '../../../ui/button';
+import { Switch } from '../../../ui/switch';
 
-export function DashboardSetupTab() {
+export function HomeDashSetupTab() {
   return (
     <div className="max-w-4xl space-y-6">
       <div>

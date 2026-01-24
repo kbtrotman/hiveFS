@@ -1,8 +1,8 @@
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
-import { Button } from '../ui/button';
-import { Switch } from '../ui/switch';
-import { Label } from '../ui/label';
-import { Badge } from '../ui/badge';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../../ui/card';
+import { Button } from '../../../ui/button';
+import { Switch } from '../../../ui/switch';
+import { Label } from '../../../ui/label';
+import { Badge } from '../../../ui/badge';
 import { Bell, Mail, MessageSquare, AlertCircle, CheckCircle2, Info } from 'lucide-react';
 
 const notifications = [
@@ -13,7 +13,7 @@ const notifications = [
   { type: 'info', icon: Info, color: 'text-blue-500', title: 'New user registered', message: 'User operator2 has been added to the system', time: '5 hours ago', read: true },
 ];
 
-export function NotificationsPage() {
+export function NotificationsAlertsTab() {
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">

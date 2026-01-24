@@ -1,8 +1,8 @@
 import { useMemo } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../ui/card';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../ui/table';
-import { Badge } from '../../ui/badge';
-import { Button } from '../../ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../../ui/card';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../../ui/table';
+import { Badge } from '../../../ui/badge';
+import { Button } from '../../../ui/button';
 import { MoreVertical } from 'lucide-react';
 import {
   formatTimestamp,
@@ -12,12 +12,12 @@ import {
   safeNumber,
   sumStatField,
   useDiskStats,
-} from '../../useDiskStats';
+} from '../../../useDiskStats';
 
 const formatNumber = (value: number) =>
   Number.isFinite(value) ? new Intl.NumberFormat().format(value) : '—';
 
-export function ClientsTab() {
+export function ClusterClientsTab() {
   const { stats, isLoading, error } = useDiskStats();
   const aggregated = useMemo(() => aggregateStatsByNode(stats), [stats]);
 

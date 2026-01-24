@@ -205,3 +205,58 @@ class RoleAssignment(models.Model):
     def __str__(self):
         target = self.permission_id if self.permission_id is not None else "*"
         return f"{self.role.name}: {self.permission_type} ({target})"
+
+class LDAPModel(models.Model):
+    server_uri = models.CharField(max_length=1000, blank=True)
+    port = models.IntegerField()
+    tls_mode = models.IntegerField()
+    tls_verify = models.BooleanField(default=False)
+    connect_timeout = models.IntegerField(default=3000)
+    bind_method = models.IntegerField(default=False)
+    bind_dn = models.CharField(max_length=200, blank=True)
+    dn_or_oldap = models.BooleanField(default=True)
+    user_dn = models.CharField(max_length=200, blank=True)
+    group_dn = models.CharField(max_length=200, blank=True, null=True)
+    auth_source = models.CharField(max_length=50, blank=True)
+    mfa_enabled = models.BooleanField(default=False)
+    mfa_method = models.CharField(max_length=50, blank=True)
+    
+    def __str__(self):
+        return f"LDAP Server: {self.server_uri}:{self.port}"
+    
+    class Meta:
+        verbose_name = "LDAP Configuration"
+        verbose_name_plural = "LDAP Configurations"
+        
+class SAMLModel(models.Model):
+    idp_entity_id = models.CharField(max_length=1000, blank=True)
+    sso_url = models.CharField(max_length=1000, blank=True)
+    slo_url = models.CharField(max_length=1000, blank=True)
+    certificate = models.TextField(blank=True)
+    attribute_mapping = models.JSONField(blank=True, null=True)
+
+    
+    def __str__(self):
+        return f"SAML IdP: {self.idp_entity_id}"
+    
+    class Meta:
+        verbose_name = "SAML Configuration"
+        verbose_name_plural = "SAML Configurations"
+        
+class MFAModel(models.Model):
+    mfa_enabled = models.BooleanField(default=False)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="mfa_settings",
+    )
+    method = models.CharField(max_length=50)
+    secret = models.CharField(max_length=200)
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    def __str__(self):
+        return f"MFA for {self.user.email} via {self.method}"
+    
+    class Meta:
+        verbose_name = "MFA Setting"
+        verbose_name_plural = "MFA Settings"

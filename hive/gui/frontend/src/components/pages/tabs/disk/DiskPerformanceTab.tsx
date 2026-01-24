@@ -1,5 +1,5 @@
 import { useMemo, type ReactNode } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../../ui/card';
 import { Activity, TrendingUp, TrendingDown } from 'lucide-react';
 import {
   calculateMemoryUsage,
@@ -8,12 +8,12 @@ import {
   safeNumber,
   sumStatField,
   useDiskStats,
-} from '../../useDiskStats';
+} from '../../../useDiskStats';
 
 const formatNumber = (value: number, options?: Intl.NumberFormatOptions) =>
   Number.isFinite(value) ? new Intl.NumberFormat(undefined, options).format(value) : '—';
 
-export function NodesPerformanceTab() {
+export function DiskPerformanceTab() {
   const { stats, isLoading, error } = useDiskStats();
   const aggregated = useMemo(() => aggregateStatsByNode(stats), [stats]);
 

@@ -1,6 +1,6 @@
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
-import { Button } from '../ui/button';
-import { Badge } from '../ui/badge';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../../ui/card';
+import { Button } from '../../../ui/button';
+import { Badge } from '../../../ui/badge';
 import { FileText, Download, Calendar, TrendingUp } from 'lucide-react';
 
 const reports = [
@@ -18,7 +18,7 @@ const scheduledReports = [
   { name: 'Monthly Security Audit', frequency: 'Monthly', time: '1st at 00:00 UTC', format: 'PDF' },
 ];
 
-export function ReportsPage() {
+export function ReportsRunReportTab() {
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">

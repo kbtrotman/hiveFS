@@ -33,25 +33,51 @@ interface TopBarProps {
 }
 
 const tabs = [
-  { id: 'dashboard', label: 'Dashboard Setup' },
-  { id: 'status', label: 'Status' },
-  { id: 'monitor', label: 'Monitor' },
-  { id: 'performance', label: 'Performance' },
+  { id: 'dashboard', label: 'My Dashboards' },
+  { id: 'dash_setup', label: 'Dashboard Setup' },
+  { id: 'compo_creator', label: 'Component Creator' },
   { id: 'clients', label: 'Clients' },
+  { id: 'monitor', label: 'Monitor' },
+  { id: 'manage', label: 'Manage' },
+  { id: 'performance', label: 'Performance' },
+  { id: 'access', label: 'Access' },
+  { id: 'audit', label: 'Audit' },
+  { id: 'api_access', label: 'API Access' },
+  { id: 'logs', label: 'Logs' },
+  { id: 'tags', label: 'File Tagging' },
+  { id: 'versions', label: 'File Versioning' },
+  { id: 'tag_settings', label: 'Tag Settings' },
+  { id: 'version_settings', label: 'Version Settings' },
+  { id: 'cmd_line', label: 'Open Node Consoles' },
+  { id: 'reports', label: 'Run Report' },
+  { id: 'rep_creator', label: 'Create Report' },
+  { id: 'rep_scheduler', label: 'Report Scheduler' },
+  { id: 'rep_settings', label: 'Report Settings' },
+  { id: 'alerts', label: 'Alerts' },
+  { id: 'create_alerts', label: 'Create Alerts' },
+  { id: 'not_endpoints', label: 'Notification Endpoints' },
+  { id: 'not_create', label: 'Create Notifications' },
+  { id: 'not_history', label: 'Notification History' },
+  { id: 'hel_support', label: 'Get Support' },
+  { id: 'hel_bundle', label: 'Create Support Bundle' },
+  { id: 'hel_docs', label: 'Documentation' },
+  { id: 'hel_search', label: 'Search Help' },
+  { id: 'hel_ai', label: 'AI Helper' },
 ];
 
 // Define which tabs are available for each sidebar item
 const tabAvailability: Record<string, string[]> = {
-  home: ['dashboard', 'status', 'performance', 'clients'],
-  servers: ['dashboard', 'status', 'monitor', 'performance', 'clients'],
-  disk: ['dashboard', 'status', 'performance', 'clients'],
-  security: ['dashboard', 'status', 'performance', 'clients'],
-  tags: ['dashboard', 'status', 'performance'],
-  cli: ['dashboard', 'status'],
-  reports: ['dashboard'],
-  notifications: ['dashboard', 'status'],
-  help: [], // No tabs for help
-  profile: [], // No tabs for profile
+  home: ['dashboard', 'dash_setup', 'compo_creator'],
+  cluster: ['manage', 'monitor', 'performance', 'clients'],
+  servers: ['manage', 'monitor', 'performance'],
+  disk: ['manage', 'monitor', 'performance'],
+  security: ['access', 'audit', 'api_access', 'logs'],
+  tags: ['tags', 'versions', 'tag_settings', 'version_settings'],
+  cli: ['cmd_line'],
+  reports: ['reports', 'rep_creator', 'rep_scheduler', 'rep_settings'],
+  notifications: ['alerts', 'create_alerts', 'not_endpoints', 'not_create', 'not_history'],
+  help: ['hel_support', 'hel_bundle', 'hel_docs', 'hel_search', 'hel_ai'],
+  profile: [],
 };
 
 const titleCase = (value: string) =>
@@ -86,7 +112,8 @@ export function TopBar({
   onOpenPermissionsSettings,
 }: TopBarProps) {
   const availableTabs = showTabs ? (tabAvailability[activeSidebarItem] || []) : [];
-  const tabsVisible = showTabs && availableTabs.length > 0;
+  const visibleTabs = tabs.filter((tab) => availableTabs.includes(tab.id));
+  const tabsVisible = showTabs && visibleTabs.length > 0;
   const [favorites, setFavorites] = useState<FavoriteEntry[]>([DEFAULT_FAVORITE]);
 
   const currentFavoriteId = useMemo(
@@ -176,28 +203,21 @@ export function TopBar({
       <div className="relative z-10 flex h-full items-center justify-between px-6">
       {/* Tabs */}
       {tabsVisible && (
-        <div className="flex gap-1">
-          {tabs.map((tab) => {
-            const isAvailable = availableTabs.includes(tab.id);
-            return (
-              <button
-                key={tab.id}
-                onClick={() => isAvailable && onTabChange(tab.id)}
-                disabled={!isAvailable}
-                className={`
-                  px-4 py-2 rounded-md transition-colors text-sm
-                  ${!isAvailable 
-                    ? 'text-muted-foreground/40 cursor-not-allowed opacity-50' 
-                    : activeTab === tab.id 
-                      ? 'bg-primary text-primary-foreground' 
-                      : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-                  }
-                `}
-              >
-                {tab.label}
-              </button>
-            );
-          })}
+        <div className="flex flex-wrap gap-1">
+          {visibleTabs.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => onTabChange(tab.id)}
+              className={`
+                px-4 py-2 rounded-md transition-colors text-sm
+                ${activeTab === tab.id
+                  ? 'bg-primary text-primary-foreground'
+                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'}
+              `}
+            >
+              {tab.label}
+            </button>
+          ))}
         </div>
       )}
 

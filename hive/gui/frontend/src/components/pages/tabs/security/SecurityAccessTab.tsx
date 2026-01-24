@@ -1,8 +1,8 @@
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
-import { Button } from '../ui/button';
-import { Badge } from '../ui/badge';
-import { Switch } from '../ui/switch';
-import { Label } from '../ui/label';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../../ui/card';
+import { Button } from '../../../ui/button';
+import { Badge } from '../../../ui/badge';
+import { Switch } from '../../../ui/switch';
+import { Label } from '../../../ui/label';
 import { Shield, Lock, Key, AlertTriangle, CheckCircle2 } from 'lucide-react';
 
 const securityEvents = [
@@ -20,7 +20,7 @@ const permissions = [
   { user: 'backup-service', role: 'Service Account', read: true, write: true, delete: false, admin: false },
 ];
 
-export function SecurityPage() {
+export function SecurityAccessTab() {
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">

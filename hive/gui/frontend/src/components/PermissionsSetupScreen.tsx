@@ -7,7 +7,6 @@ import { Checkbox } from './ui/checkbox';
 import { Textarea } from './ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
 import { Badge } from './ui/badge';
 
@@ -58,8 +57,8 @@ type DraftState = {
 };
 
 type PermissionsSetupScreenProps = {
-  triggerLabel?: string;
-  defaultOpen?: boolean;
+  initialTab?: TabKey;
+  className?: string;
 };
 
 const API_BASE_URL = 'http://localhost:8000/api/v1';
@@ -251,12 +250,8 @@ const normalizeRole = (payload: Partial<Role>): Role => ({
 
 type EntityForTab<T extends TabKey> = CollectionMap[T][number];
 
-export function PermissionsSetupScreen({
-  triggerLabel = 'Manage Permissions',
-  defaultOpen = false,
-}: PermissionsSetupScreenProps) {
-  const [open, setOpen] = useState(defaultOpen);
-  const [activeTab, setActiveTab] = useState<TabKey>('users');
+export function PermissionsSetupScreen({ initialTab = 'users', className }: PermissionsSetupScreenProps) {
+  const [activeTab, setActiveTab] = useState<TabKey>(initialTab);
   const [users, setUsers] = useState<User[]>(FALLBACK_DATA.users);
   const [groups, setGroups] = useState<Group[]>(FALLBACK_DATA.groups);
   const [roles, setRoles] = useState<Role[]>(FALLBACK_DATA.roles);
@@ -277,6 +272,10 @@ export function PermissionsSetupScreen({
     groups: {},
     roles: {},
   });
+
+  useEffect(() => {
+    setActiveTab(initialTab);
+  }, [initialTab]);
 
   const setterMap: { [K in TabKey]: React.Dispatch<React.SetStateAction<CollectionMap[K]>> } = {
     users: setUsers,
@@ -880,31 +879,26 @@ const addEntity = (tab: TabKey) => {
   );
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button variant="outline">{triggerLabel}</Button>
-      </DialogTrigger>
-      <DialogContent className="max-w-6xl">
-        <DialogHeader>
-          <DialogTitle>Permission Setup</DialogTitle>
-          <DialogDescription>
-            Manage user accounts, group membership, and role permissions.
-          </DialogDescription>
-        </DialogHeader>
-        <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as TabKey)}>
-          <TabsList>
-            <TabsTrigger value="users">Users</TabsTrigger>
-            <TabsTrigger value="groups">Groups</TabsTrigger>
-            <TabsTrigger value="roles">Roles</TabsTrigger>
-          </TabsList>
-          {statusMessage && <p className="text-xs text-emerald-500">{statusMessage}</p>}
-          {errorMessage && <p className="text-xs text-destructive">{errorMessage}</p>}
-          <TabsContent value="users">{renderUsersTab()}</TabsContent>
-          <TabsContent value="groups">{renderGroupsTab()}</TabsContent>
-          <TabsContent value="roles">{renderRolesTab()}</TabsContent>
-        </Tabs>
-      </DialogContent>
-    </Dialog>
+    <div className={['space-y-4', className].filter(Boolean).join(' ')}>
+      <header className="space-y-1">
+        <h2 className="text-2xl font-semibold">Permission Setup</h2>
+        <p className="text-sm text-muted-foreground">
+          Manage user accounts, group membership, and role permissions.
+        </p>
+      </header>
+      <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as TabKey)}>
+        <TabsList className="flex-wrap">
+          <TabsTrigger value="users">Users</TabsTrigger>
+          <TabsTrigger value="groups">Groups</TabsTrigger>
+          <TabsTrigger value="roles">Roles</TabsTrigger>
+        </TabsList>
+        {statusMessage && <p className="text-xs text-emerald-500">{statusMessage}</p>}
+        {errorMessage && <p className="text-xs text-destructive">{errorMessage}</p>}
+        <TabsContent value="users">{renderUsersTab()}</TabsContent>
+        <TabsContent value="groups">{renderGroupsTab()}</TabsContent>
+        <TabsContent value="roles">{renderRolesTab()}</TabsContent>
+      </Tabs>
+    </div>
   );
 }
 

@@ -4,13 +4,16 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Group, GroupMembership, Role, RoleAssignment
+from .models import Group, GroupMembership, Role, RoleAssignment, LDAPModel, SAMLModel, MFAModel
 from .serializers import (
     GroupMembershipSerializer,
     GroupSerializer,
     RoleAssignmentSerializer,
     RoleSerializer,
     UserProfileSerializer,
+    LDAPSerializer,
+    SAMLSerializer,
+    MFASerializer,
 )
 
 User = get_user_model()
@@ -62,3 +65,26 @@ class RoleAssignmentViewSet(viewsets.ModelViewSet):
     queryset = RoleAssignment.objects.select_related("role", "tenant")
     serializer_class = RoleAssignmentSerializer
     permission_classes = [permissions.IsAuthenticated]
+
+class LDAPViewSet(viewsets.ModelViewSet):
+    """LDAP endpoints for directory configuration."""
+
+    serializer_class = LDAPSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    queryset = LDAPModel.objects.all()
+
+
+class SAMLViewSet(viewsets.ModelViewSet):
+    """SAML endpoints for identity provider configuration."""
+
+    serializer_class = SAMLSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    queryset = SAMLModel.objects.all()
+
+
+class MFAViewSet(viewsets.ModelViewSet):
+    """MFA endpoints for multi-factor settings."""
+
+    serializer_class = MFASerializer
+    permission_classes = [permissions.IsAuthenticated]
+    queryset = MFAModel.objects.select_related("user")

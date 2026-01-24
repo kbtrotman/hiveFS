@@ -1,6 +1,6 @@
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
-import { Button } from '../ui/button';
-import { Input } from '../ui/input';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../../ui/card';
+import { Button } from '../../../ui/button';
+import { Input } from '../../../ui/input';
 import { BookOpen, MessageCircle, FileText, Video, ExternalLink, Search } from 'lucide-react';
 
 const quickLinks = [
@@ -26,7 +26,7 @@ const faqs = [
   { question: 'Can I integrate HiveFS with other tools?', answer: 'Yes, HiveFS provides REST API and CLI tools for integration...' },
 ];
 
-export function HelpPage() {
+export function HelpDocsTab() {
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
