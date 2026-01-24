@@ -25,9 +25,15 @@ from tenant.views import TenantRootView
 from nodes.views import StorageNodeViewSet, StorageNodeStatViewSet
 from disk.views import DiskNodeViewSet, DiskNodeStatViewSet
 from api.views import BootstrapError, BootstrapInitView, BootstrapStatusView, AddNodeView, AddForeignerView
+from accounts.views import (
+    GroupMembershipViewSet,
+    GroupViewSet,
+    RoleAssignmentViewSet,
+    RoleViewSet,
+    UserViewSet,
+)
 
 router = DefaultRouter(trailing_slash=False)
-#router.register(r'groups', GroupViewSet, basename='group')
 router.register(r'tree', TreeNodeViewSet, basename='tree')
 router.register(r'settings', SettingsRootView, basename='settings')
 router.register(r'audit', AuditRootView, basename='audit')
@@ -37,6 +43,16 @@ router.register(r'nodes', StorageNodeViewSet, basename='nodes')
 router.register(r'snstats', StorageNodeViewSet, basename='snstats')
 router.register(r'disk', DiskNodeViewSet, basename='disk')
 router.register(r'stats', DiskNodeStatViewSet, basename='stats')
+router.register(r"accounts", UserViewSet, basename="account")
+router.register(r"groups", GroupViewSet, basename="group")
+router.register(r"roles", RoleViewSet, basename="role")
+router.register(
+    r"group-memberships", GroupMembershipViewSet, basename="group-membership"
+)
+router.register(
+    r"role-assignments", RoleAssignmentViewSet, basename="role-assignment"
+)
+
 
 urlpatterns = [
     path("api/v1/", include(router.urls)),

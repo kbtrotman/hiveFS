@@ -15,13 +15,9 @@ from .serializers import (
 
 User = get_user_model()
 
-class UsersViewSet(viewsets.ModelViewSet):
-    queryset = User.objects.select_related("tenant").prefetch_related("roles")
-    serializer_class = GroupSerializer
-    permission_classes = [permissions.IsAuthenticated]
 
-class UserViewSet(viewsets.GenericViewSet):
-    """Endpoints for authenticated users to inspect their profile."""
+class UserViewSet(viewsets.ModelViewSet):
+    """User endpoints including a profile endpoint for the current user."""
 
     serializer_class = UserProfileSerializer
     permission_classes = [permissions.IsAuthenticated]
