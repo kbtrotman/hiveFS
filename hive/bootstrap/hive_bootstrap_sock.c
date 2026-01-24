@@ -1147,6 +1147,7 @@ static void configure_cluster(const struct hive_bootstrap_request *req)
 
 	char cluster_uuid[UUID_BUF_LEN];
 	char node_uuid[UUID_BUF_LEN];
+	char hw_node_uuid[UUID_BUF_LEN];
 
 	if (!ensure_directory_path(HIVE_BOOTSTRAP_SYS_DIR) ||
 	    !ensure_directory_path(HIVE_CLUSTER_DIR)) {
@@ -1167,7 +1168,17 @@ static void configure_cluster(const struct hive_bootstrap_request *req)
 				 sizeof(node_uuid))) {
 		if (!read_kernel_uuid(node_uuid, sizeof(node_uuid)) ||
 		    !write_text_file(HIVE_NODE_ID, node_uuid)) {
-			push_guard_status_update("cluster_config: node uuid failed",
+			push_guard_status_update("cluster_config: node uuid failed",\
+
+						 100, "IN_ERROR");
+			return;
+		}
+	}
+	if (!read_uuid_from_file(HW_NODE_UID, hw_node_uuid,
+				 sizeof(hw_node_uuid))) {
+		if (!read_kernel_uuid(hw_node_uuid, sizeof(hw_node_uuid)) ||
+		    !write_text_file(HW_NODE_UID, hw_node_uuid)) {
+			push_guard_status_update("cluster_config: hw node uuid failed",
 						 100, "IN_ERROR");
 			return;
 		}
@@ -1226,6 +1237,24 @@ static void configure_node(const struct hive_bootstrap_request *req)
 		req->node_name);
 
 	struct hive_storage_node local_node_join;
+
+	if (!read_uuid_from_file(HIVE_NODE_ID, node_uuid, sizeof(node_uuid))) {
+		if (!read_kernel_uuid(node_uuid, sizeof(node_uuid)) ||
+		    !write_text_file(HIVE_NODE_ID, node_uuid)) {
+			push_guard_status_update("cluster_config: node uuid failed",\
+				
+						 100, "IN_ERROR");
+			return;
+		}
+	}
+	if (!read_uuid_from_file(HW_NODE_UID, hw_node_uuid, sizeof(hw_node_uuid))) {
+		if (!read_kernel_uuid(hw_node_uuid, sizeof(hw_node_uuid)) ||
+		    !write_text_file(HW_NODE_UID, hw_node_uuid)) {
+			push_guard_status_update("cluster_config: hw node uuid failed",
+						 100, "IN_ERROR");
+			return;
+		}
+	}
 
 	if (!prepare_local_node(&local_node_join))
 		return;

@@ -55,6 +55,23 @@ static void ensure_pki_directories(void)
 	}
 }
 
+char *generate_random_token(size_t length)
+{
+    char *buf = malloc(length + 1);
+    ssize_t rc = getrandom(buf, length, 0);
+    if (rc < 0) {
+        free(buf);
+        return NULL;
+    }
+    if ((size_t)rc != length) {
+        free(buf);
+        return NULL;
+    }
+    buf[length] = '\0';
+    
+    return buf;
+}
+
 static bool build_cert_path(char *dst, size_t dst_len,
 			    const char *dir, const char *uid,
 			    const char *suffix)

@@ -9,11 +9,12 @@ compile_commands.json
 CTestTestfile.cmake
 cache.hifs
 node_modules
+.vscode
+.codex
 bin/
 lib/
 lib64/
 share/
-src/
 include/
 node_modules/
 __pycache__

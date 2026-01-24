@@ -22,9 +22,12 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <sys/random.h>
+#include <errno.h>
 
 struct hive_storage_node;
 
+char *generate_random_token(size_t length);
 int add_node_mtls_token(const struct hive_storage_node *node);
 int add_node_join_token(uint32_t node_id, const char *token);
 int update_node_for_add(struct hive_storage_node *local);

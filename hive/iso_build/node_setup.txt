@@ -1,0 +1,52 @@
+HOW TO SETUP A NODE ISO BUILD:
+
+Install certmonger:
+apt install certmonger
+sudo systemctl edit certmonger.service
+
+Install postfix
+Install quadlet
+Install podman
+
+cp etc/hivefs/node.json.conf
+
+sudo systemctl reload postfix
+sudo postmap /etc/postfix/transport
+sudo service postfix restart
+sudo postfix reload
+
+[Service]
+# Change Type from dbus to simple so systemd doesn't wait for a D-Bus signal
+Type=simple
+
+# Clear and redefine ExecStart
+ExecStart=
+ExecStart=/usr/sbin/certmonger -S -p /run/certmonger.pid -n -L -P /run/certmonger.sock
+
+# Clear BusName since certmonger won't be registering on D-Bus with -L
+BusName=
+
+sudo systemctl daemon-reload
+sudo systemctl restart certmonger.service
+
+mkdir -p /etc/hivefs
+mkdir -p /etc/hivefs/pki
+mkdir -p /etc/hivefs/cluster
+
+sudo apt install chrony
+sudo timedatectl set-ntp no # Disables systemd-timesyncd
+sudo systemctl enable chronyd
+
+
+Edit /etc/chrony/chrony.conf:
+
+# Use high-availability pools with the 'iburst' option for fast initial sync
+server time.google.com iburst nts
+server time.cloudflare.com iburst nts
+server time.facebook.com iburst nts
+# Or use a regional pool nts
+pool 2.ubuntu.pool.ntp.org iburst nts
+# Step the clock if the error is larger than 1 second, but only for the first 3 updates
+makestep 1.0 3
+
+

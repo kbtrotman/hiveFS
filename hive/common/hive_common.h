@@ -36,10 +36,16 @@
 #define HIVE_NODE_CONF_PATH   HIVE_BOOTSTRAP_SYS_DIR "/node.json.conf"
 #define HIVE_CLUSTER_DIR      HIVE_BOOTSTRAP_SYS_DIR "/cluster"
 #define HIVE_CLUSTER_ID       HIVE_CLUSTER_DIR "/identity"
-#define HIVE_NODE_ID          HIVE_BOOTSTRAP_SYS_DIR "/node"
+#define HIVE_CLUSTER_NAME     HIVE_CLUSTER_DIR "/name"
+#define HIVE_NODE_DIR         HIVE_BOOTSTRAP_SYS_DIR "/node"
+#define HIVE_NODE_ID          HIVE_NODE_DIR "/cl_node_uuid"
+#define HW_NODE_UID           HIVE_NODE_ID "/machine_uid"
+#define HIVE_GUARD_SQL_LOG    HIVE_LOG_DIR "/hive_guard_sql.log"
+#define HIVE_GUARD_LOG        HIVE_LOG_DIR "/hive_guard.log"
+#define HIVE_BOOTSTRAP_LOG    HIVE_LOG_DIR "/hive_bootstrap.log"
 #define HIVE_PKI_DIR          HIVE_BOOTSTRAP_SYS_DIR "/pki"
 #define HIVE_CA_ROOT          HIVE_PKI_DIR "/ca"      // CA cert we want to trust, local copy
-#define HIVE_NODE_CERT_DIR    HIVE_PKI_DIR "/node"    // This node's TLS identity
+#define HIVE_NODE_CERT_DIR    HIVE_PKI_DIR "/node"    // This node's HW & Cluster identity
 #define HIVE_RAFT_CERT_DIR    HIVE_PKI_DIR "/raft"    // if we want a seperate identity for raft operations
 #define HIVE_API_CERT_DIR     HIVE_PKI_DIR "/api"     // if we want a seperate identity for the backend api connections
 #define HIVE_CERT_DIR         HIVE_PKI_DIR "/requests"   // cert request copies
