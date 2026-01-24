@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../ui/card';
-import { Badge } from '../../ui/badge';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../../ui/card';
+import { Badge } from '../../../ui/badge';
 import { AlertCircle, CheckCircle2, AlertTriangle, Activity } from 'lucide-react';
 import {
   formatRelativeTime,
@@ -9,7 +9,7 @@ import {
   resolveStatHealth,
   aggregateStatsByNode,
   useDiskStats,
-} from '../../useDiskStats';
+} from '../../../useDiskStats';
 
 type ComponentState = {
   name: string;
@@ -18,7 +18,7 @@ type ComponentState = {
   timestamp?: string | null;
 };
 
-export function StatusTab() {
+export function DiskMonitorTab() {
   const { stats, isLoading, error, lastUpdated } = useDiskStats();
   const aggregated = useMemo(() => aggregateStatsByNode(stats), [stats]);
 

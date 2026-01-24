@@ -1,7 +1,7 @@
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
-import { Button } from '../ui/button';
-import { Input } from '../ui/input';
-import { Badge } from '../ui/badge';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../../ui/card';
+import { Button } from '../../../ui/button';
+import { Input } from '../../../ui/input';
+import { Badge } from '../../../ui/badge';
 import { Terminal, Copy, Download, Key } from 'lucide-react';
 
 const connectionMethods = [
@@ -18,7 +18,7 @@ const recentCommands = [
   { command: 'hivefs user list --all', time: '2 hours ago', user: 'admin', result: 'success' },
 ];
 
-export function CommandLinePage() {
+export function CliCommandLineTab() {
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">

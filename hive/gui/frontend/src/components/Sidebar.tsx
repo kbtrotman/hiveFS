@@ -1,14 +1,15 @@
-import { 
-  Home, 
-  Server, 
-  HardDrive, 
-  Shield, 
-  Tag, 
-  Terminal, 
-  FileText, 
-  Bell, 
-  HelpCircle, 
-  User 
+import {
+  Home,
+  Layers,
+  Server,
+  HardDrive,
+  Shield,
+  Tag,
+  Terminal,
+  FileText,
+  Bell,
+  HelpCircle,
+  User,
 } from 'lucide-react';
 import { ImageWithFallback } from './figma/ImageWithFallback';
 import type { CSSProperties } from 'react';
@@ -20,13 +21,14 @@ interface SidebarProps {
 
 const menuItems = [
   { id: 'home', icon: Home, label: 'MY DASHBOARD' },
+  { id: 'cluster', icon: Layers, label: 'Cluster' },
   { id: 'servers', icon: Server, label: 'Nodes' },
   { id: 'disk', icon: HardDrive, label: 'Disk' },
+  { id: 'reports', icon: FileText, label: 'Reports' },
+  { id: 'notifications', icon: Bell, label: 'Notifications' },
   { id: 'security', icon: Shield, label: 'Security' },
   { id: 'tags', icon: Tag, label: 'Tags/Versioning' },
   { id: 'cli', icon: Terminal, label: 'Command-line Access' },
-  { id: 'reports', icon: FileText, label: 'Reports' },
-  { id: 'notifications', icon: Bell, label: 'Notifications' },
   { id: 'help', icon: HelpCircle, label: 'Help' },
   { id: 'profile', icon: User, label: 'Profile Setup' },
 ];

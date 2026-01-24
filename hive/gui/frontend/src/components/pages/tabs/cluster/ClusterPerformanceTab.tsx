@@ -1,15 +1,15 @@
 import { useMemo } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card';
-import { PerformanceChart } from '../../PerformanceChart';
+import { Card, CardContent, CardHeader, CardTitle } from '../../../ui/card';
+import { PerformanceChart } from '../../../PerformanceChart';
 import { Activity, HardDrive, Zap, TrendingUp } from 'lucide-react';
-import { aggregateStatsByNode, formatTimestamp, safeNumber, sumStatField, useDiskStats } from '../../useDiskStats';
+import { aggregateStatsByNode, formatTimestamp, safeNumber, sumStatField, useDiskStats } from '../../../useDiskStats';
 
 const formatNumber = (value: number, options?: Intl.NumberFormatOptions) => {
   if (!Number.isFinite(value)) return '—';
   return new Intl.NumberFormat(undefined, { maximumFractionDigits: 1, ...options }).format(value);
 };
 
-export function PerformanceTab() {
+export function ClusterPerformanceTab() {
   const { stats, isLoading, error, lastUpdated } = useDiskStats();
   const aggregated = useMemo(() => aggregateStatsByNode(stats), [stats]);
 

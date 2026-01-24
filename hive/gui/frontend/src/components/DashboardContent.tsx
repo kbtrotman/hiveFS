@@ -1,22 +1,41 @@
-import { PerformanceTab } from './tabs/Dashboard/PerformanceTab';
-import { DashboardSetupTab } from './tabs/Dashboard/DashboardSetupTab';
-import { ClientsTab } from './tabs/Dashboard/ClientsTab';
-import { StatusTab } from './tabs/Dashboard/StatusTab';
-import { ServersPage } from './pages/ServersPage';
-import { DiskPage } from './pages/DiskPage';
-import { SecurityPage } from './pages/SecurityPage';
-import { TagsVersioningPage } from './pages/TagsVersioningPage';
-import { CommandLinePage } from './pages/CommandLinePage';
-import { ReportsPage } from './pages/ReportsPage';
-import { NotificationsPage } from './pages/NotificationsPage';
-import { HelpPage } from './pages/HelpPage';
+import type { ComponentType } from 'react';
 import { ProfilePage } from './pages/ProfilePage';
-
-// Nodes tabs
-import { NodesDashboardTab } from './tabs/nodes/NodesDashboardTab';
-import { NodesStatusTab } from './tabs/nodes/NodesStatusTab';
-import { NodesPerformanceTab } from './tabs/nodes/NodesPerformanceTab';
-import { NodesClientsTab } from './tabs/nodes/NodesClientsTab';
+import { HomeDashboardTab } from './pages/tabs/home/HomeDashboardTab';
+import { HomeDashSetupTab } from './pages/tabs/home/HomeDashSetupTab';
+import { HomeComponentCreatorTab } from './pages/tabs/home/HomeComponentCreatorTab';
+import { ClusterManageTab } from './pages/tabs/cluster/ClusterManageTab';
+import { ClusterMonitorTab } from './pages/tabs/cluster/ClusterMonitorTab';
+import { ClusterPerformanceTab } from './pages/tabs/cluster/ClusterPerformanceTab';
+import { ClusterClientsTab } from './pages/tabs/cluster/ClusterClientsTab';
+import { ServersManageTab } from './pages/tabs/servers/ServersManageTab';
+import { ServersMonitorTab } from './pages/tabs/servers/ServersMonitorTab';
+import { ServersPerformanceTab } from './pages/tabs/servers/ServersPerformanceTab';
+import { DiskManageTab } from './pages/tabs/disk/DiskManageTab';
+import { DiskMonitorTab } from './pages/tabs/disk/DiskMonitorTab';
+import { DiskPerformanceTab } from './pages/tabs/disk/DiskPerformanceTab';
+import { SecurityAccessTab } from './pages/tabs/security/SecurityAccessTab';
+import { SecurityAuditTab } from './pages/tabs/security/SecurityAuditTab';
+import { SecurityApiAccessTab } from './pages/tabs/security/SecurityApiAccessTab';
+import { SecurityLogsTab } from './pages/tabs/security/SecurityLogsTab';
+import { TagsFileTaggingTab } from './pages/tabs/tags/TagsFileTaggingTab';
+import { TagsFileVersioningTab } from './pages/tabs/tags/TagsFileVersioningTab';
+import { TagSettingsTab } from './pages/tabs/tags/TagSettingsTab';
+import { VersionSettingsTab } from './pages/tabs/tags/VersionSettingsTab';
+import { CliCommandLineTab } from './pages/tabs/cli/CliCommandLineTab';
+import { ReportsRunReportTab } from './pages/tabs/reports/ReportsRunReportTab';
+import { ReportsCreateReportTab } from './pages/tabs/reports/ReportsCreateReportTab';
+import { ReportsSchedulerTab } from './pages/tabs/reports/ReportsSchedulerTab';
+import { ReportsSettingsTab } from './pages/tabs/reports/ReportsSettingsTab';
+import { NotificationsAlertsTab } from './pages/tabs/notifications/NotificationsAlertsTab';
+import { NotificationsCreateAlertsTab } from './pages/tabs/notifications/NotificationsCreateAlertsTab';
+import { NotificationsEndpointsTab } from './pages/tabs/notifications/NotificationsEndpointsTab';
+import { NotificationsCreateNotificationsTab } from './pages/tabs/notifications/NotificationsCreateNotificationsTab';
+import { NotificationsHistoryTab } from './pages/tabs/notifications/NotificationsHistoryTab';
+import { HelpSupportTab } from './pages/tabs/help/HelpSupportTab';
+import { HelpSupportBundleTab } from './pages/tabs/help/HelpSupportBundleTab';
+import { HelpDocsTab } from './pages/tabs/help/HelpDocsTab';
+import { HelpSearchTab } from './pages/tabs/help/HelpSearchTab';
+import { HelpAiTab } from './pages/tabs/help/HelpAiTab';
 
 
 interface DashboardContentProps {
@@ -24,101 +43,89 @@ interface DashboardContentProps {
   activeSidebarItem?: string;
 }
 
+const sidebarTabComponents: Record<string, Record<string, ComponentType>> = {
+  home: {
+    dashboard: HomeDashboardTab,
+    dash_setup: HomeDashSetupTab,
+    compo_creator: HomeComponentCreatorTab,
+  },
+  cluster: {
+    manage: ClusterManageTab,
+    monitor: ClusterMonitorTab,
+    performance: ClusterPerformanceTab,
+    clients: ClusterClientsTab,
+  },
+  servers: {
+    manage: ServersManageTab,
+    monitor: ServersMonitorTab,
+    performance: ServersPerformanceTab,
+  },
+  disk: {
+    manage: DiskManageTab,
+    monitor: DiskMonitorTab,
+    performance: DiskPerformanceTab,
+  },
+  security: {
+    access: SecurityAccessTab,
+    audit: SecurityAuditTab,
+    api_access: SecurityApiAccessTab,
+    logs: SecurityLogsTab,
+  },
+  tags: {
+    tags: TagsFileTaggingTab,
+    versions: TagsFileVersioningTab,
+    tag_settings: TagSettingsTab,
+    version_settings: VersionSettingsTab,
+  },
+  cli: {
+    cmd_line: CliCommandLineTab,
+  },
+  reports: {
+    reports: ReportsRunReportTab,
+    rep_creator: ReportsCreateReportTab,
+    rep_scheduler: ReportsSchedulerTab,
+    rep_settings: ReportsSettingsTab,
+  },
+  notifications: {
+    alerts: NotificationsAlertsTab,
+    create_alerts: NotificationsCreateAlertsTab,
+    not_endpoints: NotificationsEndpointsTab,
+    not_create: NotificationsCreateNotificationsTab,
+    not_history: NotificationsHistoryTab,
+  },
+  help: {
+    hel_support: HelpSupportTab,
+    hel_bundle: HelpSupportBundleTab,
+    hel_docs: HelpDocsTab,
+    hel_search: HelpSearchTab,
+    hel_ai: HelpAiTab,
+  },
+};
+
 export function DashboardContent({ activeTab, activeSidebarItem = 'home' }: DashboardContentProps) {
-  // If on home, show the tabs-based dashboard
-  if (activeSidebarItem === 'home') {
+  if (activeSidebarItem === 'profile') {
     return (
       <div className="p-6">
-        {activeTab === 'performance' && <PerformanceTab />}
-        {activeTab === 'dashboard' && <DashboardSetupTab />}
-        {activeTab === 'clients' && <ClientsTab />}
-        {activeTab === 'status' && <StatusTab />}
+        <ProfilePage />
       </div>
     );
   }
 
-  // Nodes section with tabs
-  if (activeSidebarItem === 'servers') {
-    return (
-      <div className="p-6">
-        {activeTab === 'dashboard' && <NodesStatusTab />}
-        {activeTab === 'status' && <ServersPage />}
-        {activeTab === 'monitor' && <NodesDashboardTab />}
-        {activeTab === 'performance' && <NodesPerformanceTab />}
-        {activeTab === 'clients' && <NodesClientsTab />}
-      </div>
-    );
+  const sidebarTabs = sidebarTabComponents[activeSidebarItem];
+  if (sidebarTabs) {
+    const TabComponent = sidebarTabs[activeTab];
+    if (TabComponent) {
+      return (
+        <div className="p-6">
+          <TabComponent />
+        </div>
+      );
+    }
   }
 
-  // Disk section with tabs
-  if (activeSidebarItem === 'disk') {
-    return (
-      <div className="p-6">
-        {activeTab === 'dashboard' && <DiskPage />}
-        {activeTab === 'status' && <DiskPage />}
-        {activeTab === 'performance' && <DiskPage />}
-        {activeTab === 'clients' && <DiskPage />}
-      </div>
-    );
-  }
-
-  // Security section with tabs
-  if (activeSidebarItem === 'security') {
-    return (
-      <div className="p-6">
-        {activeTab === 'dashboard' && <SecurityPage />}
-        {activeTab === 'status' && <SecurityPage />}
-        {activeTab === 'performance' && <SecurityPage />}
-        {activeTab === 'clients' && <SecurityPage />}
-      </div>
-    );
-  }
-
-  // Tags section with tabs (no clients)
-  if (activeSidebarItem === 'tags') {
-    return (
-      <div className="p-6">
-        {activeTab === 'dashboard' && <TagsVersioningPage />}
-        {activeTab === 'status' && <TagsVersioningPage />}
-        {activeTab === 'performance' && <TagsVersioningPage />}
-      </div>
-    );
-  }
-
-  // CLI section with tabs (only dashboard and status)
-  if (activeSidebarItem === 'cli') {
-    return (
-      <div className="p-6">
-        {activeTab === 'dashboard' && <CommandLinePage />}
-        {activeTab === 'status' && <CommandLinePage />}
-      </div>
-    );
-  }
-
-  // Reports section (only dashboard)
-  if (activeSidebarItem === 'reports') {
-    return (
-      <div className="p-6">
-        {activeTab === 'dashboard' && <ReportsPage />}
-      </div>
-    );
-  }
-
-  // Notifications section with tabs (only dashboard and status)
-  if (activeSidebarItem === 'notifications') {
-    return (
-      <div className="p-6">
-        {activeTab === 'dashboard' && <NotificationsPage />}
-        {activeTab === 'status' && <NotificationsPage />}
-      </div>
-    );
-  }
-
-  // Pages without tabs
   return (
-    <div className="p-6">
-      {activeSidebarItem === 'help' && <HelpPage />}
-      {activeSidebarItem === 'profile' && <ProfilePage />}
+    <div className="p-6 text-sm text-muted-foreground">
+      Select a tab from the toolbar to begin.
     </div>
   );
 }

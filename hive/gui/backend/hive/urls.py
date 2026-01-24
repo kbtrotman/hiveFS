@@ -31,6 +31,9 @@ from accounts.views import (
     RoleAssignmentViewSet,
     RoleViewSet,
     UserViewSet,
+    LDAPViewSet,
+    SAMLViewSet,
+    MFAViewSet,
 )
 
 router = DefaultRouter(trailing_slash=False)
@@ -46,6 +49,9 @@ router.register(r'stats', DiskNodeStatViewSet, basename='stats')
 router.register(r"accounts", UserViewSet, basename="account")
 router.register(r"groups", GroupViewSet, basename="group")
 router.register(r"roles", RoleViewSet, basename="role")
+router.register(r"ldap", LDAPViewSet, basename="ldap")
+router.register(r"saml", SAMLViewSet, basename="saml")
+router.register(r"mfa", MFAViewSet, basename="mfa")
 router.register(
     r"group-memberships", GroupMembershipViewSet, basename="group-membership"
 )

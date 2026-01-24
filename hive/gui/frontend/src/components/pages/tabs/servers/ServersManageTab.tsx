@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../ui/card';
-import { Button } from '../../ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../../ui/card';
+import { Button } from '../../../ui/button';
 import { Server, Cpu, HardDrive, Network } from 'lucide-react';
 import {
   formatTimestamp,
@@ -10,12 +10,12 @@ import {
   safeNumber,
   sumStatField,
   useDiskStats,
-} from '../../useDiskStats';
+} from '../../../useDiskStats';
 
 const formatNumber = (value: number, options?: Intl.NumberFormatOptions) =>
   Number.isFinite(value) ? new Intl.NumberFormat(undefined, options).format(value) : '—';
 
-export function NodesDashboardTab() {
+export function ServersManageTab() {
   const { stats, isLoading, error, lastUpdated } = useDiskStats();
   const aggregated = useMemo(() => aggregateStatsByNode(stats), [stats]);
 

@@ -1,7 +1,7 @@
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
-import { Button } from '../ui/button';
-import { Badge } from '../ui/badge';
-import { Input } from '../ui/input';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../../ui/card';
+import { Button } from '../../../ui/button';
+import { Badge } from '../../../ui/badge';
+import { Input } from '../../../ui/input';
 import { Tag, GitBranch, History, Plus } from 'lucide-react';
 
 const tags = [
@@ -19,7 +19,7 @@ const versions = [
   { file: '/data/scripts/backup.sh', version: 'v1.3.2', size: '8.7 KB', modified: '2 days ago', user: 'operator1' },
 ];
 
-export function TagsVersioningPage() {
+export function TagsFileTaggingTab() {
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
