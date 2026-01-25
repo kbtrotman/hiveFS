@@ -1,9 +1,9 @@
 
-  # HiveFS Dashboard (Copy)
+  # HiveFS Dashboard (Github Archive Copy)
 
-  This is a code bundle for HiveFS Dashboard (Copy). The original project is available at https://www.figma.com/design/JQmGYZh3wddNLfnZePC1fE/HiveFS-Dashboard--Copy-.
+  This is a code bundle for HiveFS Dashboard (Copy).
 
-  ## Running the code
+  ## Running the code in dev
 
   Run `npm i` to install the dependencies.
 
