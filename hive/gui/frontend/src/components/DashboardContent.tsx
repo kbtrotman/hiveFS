@@ -23,7 +23,7 @@ import { TagSettingsTab } from './pages/tabs/tags/TagSettingsTab';
 import { VersionSettingsTab } from './pages/tabs/tags/VersionSettingsTab';
 import { CliCommandLineTab } from './pages/tabs/cli/CliCommandLineTab';
 import { ReportsRunReportTab } from './pages/tabs/reports/ReportsRunReportTab';
-import { ReportsCreateReportTab } from './pages/tabs/reports/ReportsCreateReportTab';
+import { ReportsCreatorTab } from './pages/tabs/reports/ReportsCreatorTab';
 import { ReportsSchedulerTab } from './pages/tabs/reports/ReportsSchedulerTab';
 import { ReportsSettingsTab } from './pages/tabs/reports/ReportsSettingsTab';
 import { NotificationsAlertsTab } from './pages/tabs/notifications/NotificationsAlertsTab';
@@ -82,7 +82,7 @@ const sidebarTabComponents: Record<string, Record<string, ComponentType>> = {
   },
   reports: {
     reports: ReportsRunReportTab,
-    rep_creator: ReportsCreateReportTab,
+    rep_creator: ReportsCreatorTab,
     rep_scheduler: ReportsSchedulerTab,
     rep_settings: ReportsSettingsTab,
   },

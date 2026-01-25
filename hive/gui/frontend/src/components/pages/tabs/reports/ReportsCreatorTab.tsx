@@ -4,10 +4,10 @@ import { Input } from '../../../ui/input';
 import { Button } from '../../../ui/button';
 import { ComponentLayoutBuilder, ReusableComponent } from '../../../ComponentLayoutBuilder';
 
-export function HomeComponentCreatorTab() {
-  const [dashboardName, setDashboardName] = useState('');
+export function ReportsCreatorTab() {
+  const [reportName, setReportName] = useState('');
 
-  // Saved components library (would be loaded from API/storage - shared with reports)
+  // Saved components library (would be loaded from API/storage - shared with dashboard)
   const [savedComponents] = useState<ReusableComponent[]>([
     {
       id: '1',
@@ -27,26 +27,14 @@ export function HomeComponentCreatorTab() {
       type: 'metric',
       config: { metrics: ['uptime', 'errorRate', 'activeNodes'] },
     },
-    {
-      id: '4',
-      name: 'Alert Summary',
-      type: 'table',
-      config: { columns: ['Time', 'Severity', 'Message'], dataSource: 'alerts' },
-    },
-    {
-      id: '5',
-      name: 'Throughput Trends',
-      type: 'chart',
-      config: { chartType: 'area', dataSource: 'throughput', timeRange: '7d' },
-    },
   ]);
 
   const [workingComponents, setWorkingComponents] = useState<ReusableComponent[]>([]);
 
-  const handleSaveDashboard = () => {
+  const handleSaveReport = () => {
     // Would save to API/storage
-    console.log('Saving dashboard:', {
-      name: dashboardName,
+    console.log('Saving report:', {
+      name: reportName,
       components: workingComponents,
     });
   };
@@ -56,21 +44,21 @@ export function HomeComponentCreatorTab() {
       {/* Page Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-foreground/80">Dashboard Creator</h1>
+          <h1 className="text-foreground/80">Report Creator</h1>
           <p className="text-muted-foreground text-sm mt-1">
-            Build custom dashboards using reusable components
+            Build custom reports using reusable components
           </p>
         </div>
         <div className="flex items-center gap-3">
           <Input
-            placeholder="Dashboard name"
-            value={dashboardName}
-            onChange={(e) => setDashboardName(e.target.value)}
+            placeholder="Report name"
+            value={reportName}
+            onChange={(e) => setReportName(e.target.value)}
             className="w-64 text-sm"
           />
-          <Button disabled={!dashboardName.trim() || workingComponents.length === 0} onClick={handleSaveDashboard}>
+          <Button disabled={!reportName.trim() || workingComponents.length === 0} onClick={handleSaveReport}>
             <Save className="w-4 h-4 mr-2" />
-            Save Dashboard
+            Save Report
           </Button>
         </div>
       </div>
