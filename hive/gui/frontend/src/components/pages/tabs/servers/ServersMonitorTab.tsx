@@ -1,75 +1,146 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../../ui/card';
+import { Button } from '../../../ui/button';
 import { Badge } from '../../../ui/badge';
-import { AlertCircle, CheckCircle2, AlertTriangle, Activity } from 'lucide-react';
-import {
-  formatRelativeTime,
-  formatTimestamp,
-  getNodeLabel,
-  resolveStatHealth,
-  aggregateStatsByNode,
-  useDiskStats,
-} from '../../../useDiskStats';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../../ui/table';
+import { Server, Plus, Power, PowerOff, MoreVertical } from 'lucide-react';
 
-type ComponentState = {
-  name: string;
-  status: 'healthy' | 'warning' | 'error';
-  message?: string | null;
-  timestamp?: string | null;
-};
+interface StorageNode {
+  key: string;
+  node: string;
+  node_address: string;
+  node_uid: string;
+  node_serial: string;
+  node_guard_port: number;
+  node_data_port: number;
+  last_heartbeat?: string | null;
+  hive_version?: string | null;
+  fenced?: boolean | null;
+  last_maintenance?: string | null;
+  date_added_to_cluster?: string | null;
+  storage_capacity_bytes?: number | null;
+  storage_used_bytes?: number | null;
+  storage_reserved_bytes?: number | null;
+  storage_overhead_bytes?: number | null;
+  [key: string]: unknown;
+}
+
+interface StorageNodeStats {
+  key: string;
+  s_ts?: string | null;
+  cpu?: number | null;
+  read_iops?: number | null;
+  write_iops?: number | null;
+  total_iops?: number | null;
+  t_throughput?: number | null;
+  c_net_in?: number | null;
+  c_net_out?: number | null;
+  s_net_in?: number | null;
+  s_net_out?: number | null;
+  avg_latency?: number | null;
+  [key: string]: unknown;
+}
+
+const API_BASE = import.meta?.env?.VITE_NODES_API_BASE_URL ?? 'http://localhost:8000/api/v1';
 
 export function ServersMonitorTab() {
-  const { stats, isLoading, error, lastUpdated } = useDiskStats();
-  const aggregated = useMemo(() => aggregateStatsByNode(stats), [stats]);
+  const [nodes, setNodes] = useState<StorageNode[]>([]);
+  const [stats, setStats] = useState<Record<string, StorageNodeStats>>({});
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const summary = useMemo(() => {
-    const statuses = aggregated.map((stat) => resolveStatHealth(stat));
-    const errors = statuses.filter((status) => status === 'error').length;
-    const warnings = statuses.filter((status) => status === 'warning').length;
-    const overall =
-      errors > 0 ? 'Attention required' : warnings > 0 ? 'Warnings detected' : 'Healthy';
+  useEffect(() => {
+    let isMounted = true;
 
-    return {
-      overall,
-      alerts: errors + warnings,
-      reporting: aggregated.length,
-      lastSample: lastUpdated,
+    async function fetchData() {
+      setIsLoading(true);
+      setError(null);
+      try {
+        const [nodeRes, statsRes] = await Promise.all([
+          fetch(`${API_BASE}/nodes`),
+          fetch(`${API_BASE}/snstats`),
+        ]);
+
+        if (!nodeRes.ok) {
+          throw new Error(`Failed to load nodes (${nodeRes.status})`);
+        }
+        if (!statsRes.ok) {
+          throw new Error(`Failed to load stats (${statsRes.status})`);
+        }
+
+        const nodesPayload: StorageNode[] = await nodeRes.json();
+        const statsPayload: StorageNodeStats[] = await statsRes.json();
+
+        if (!isMounted) return;
+        setNodes(nodesPayload);
+        setStats(
+          statsPayload.reduce<Record<string, StorageNodeStats>>((acc, stat) => {
+            if (stat.key) acc[stat.key] = stat;
+            return acc;
+          }, {}),
+        );
+      } catch (err) {
+        if (!isMounted) return;
+        setError(err instanceof Error ? err.message : 'Unable to load nodes');
+      } finally {
+        if (isMounted) {
+          setIsLoading(false);
+        }
+      }
+    }
+
+    fetchData();
+    return () => {
+      isMounted = false;
     };
-  }, [aggregated, lastUpdated]);
+  }, []);
 
-  const componentStatus: ComponentState[] = useMemo(
-    () =>
-      aggregated.map((stat) => ({
-        name: getNodeLabel(stat),
-        status: resolveStatHealth(stat),
-        message: stat.message,
-        timestamp: stat.s_ts,
-      })),
-    [aggregated],
-  );
+  const { totalNodes, runningNodes, stoppedNodes, clusterHealth } = useMemo(() => {
+    const total = nodes.length;
+    const running = nodes.filter((node) => !node.fenced).length;
+    const stopped = total - running;
+    return {
+      totalNodes: total,
+      runningNodes: running,
+      stoppedNodes: stopped,
+      clusterHealth: stopped > 0 ? 'Attention required' : total > 0 ? 'Healthy' : 'Unknown',
+    };
+  }, [nodes]);
 
-  const recentEvents = useMemo(() => {
-    return stats
-      .filter((stat) => stat.message)
-      .sort((a, b) => {
-        const aTime = a.s_ts ? new Date(a.s_ts).getTime() : 0;
-        const bTime = b.s_ts ? new Date(b.s_ts).getTime() : 0;
-        return bTime - aTime;
-      })
-      .slice(0, 5)
-      .map((stat) => ({
-        severity: resolveStatHealth(stat),
-        message: stat.message ?? 'No message provided',
-        time: formatRelativeTime(stat.s_ts),
-        label: getNodeLabel(stat),
-      }));
-  }, [stats]);
+  const formatPercent = (value?: number | null, fractionDigits = 0) => {
+    if (value === null || value === undefined || Number.isNaN(value)) return '—';
+    return `${value.toFixed(fractionDigits)}%`;
+  };
+
+  const formatDiskUsage = (node: StorageNode) => {
+    const cap = Number(node.storage_capacity_bytes ?? 0);
+    const used = Number(node.storage_used_bytes ?? 0);
+    if (!cap) return '—';
+    return `${Math.round((used / cap) * 100)}%`;
+  };
+
+  const formatHeartbeat = (timestamp?: string | null) => {
+    if (!timestamp) return '—';
+    try {
+      return new Date(timestamp).toLocaleString();
+    } catch {
+      return timestamp;
+    }
+  };
+
+  const resolveStatus = (node: StorageNode) => (node.fenced ? 'fenced' : 'running');
 
   return (
     <div className="space-y-6">
-      <div>
-        <h2>System Status</h2>
-        <p className="text-muted-foreground">Real-time monitoring of all system components</p>
+      <div className="flex justify-between items-center">
+        <div>
+          <h2>Node Management</h2>
+          <p className="text-muted-foreground">Monitor and manage your HiveFS node cluster</p>
+        </div>
+        <Button>
+          <Plus className="w-4 h-4 mr-2" />
+          Add Node
+        </Button>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -77,31 +148,39 @@ export function ServersMonitorTab() {
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-muted-foreground">Overall Status</p>
-                <p className="mt-2 text-green-500">
-                  {isLoading ? 'Loading…' : summary.overall}
-                </p>
+                <p className="text-sm text-muted-foreground">Total Nodes</p>
+                <p className="mt-2">{isLoading ? '…' : totalNodes}</p>
               </div>
-              <Activity className="w-5 h-5 text-green-500" />
+              <Server className="w-5 h-5 text-blue-500" />
             </div>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-6">
-            <p className="text-sm text-muted-foreground">Active Alerts</p>
-            <p className="mt-2">{isLoading ? '—' : summary.alerts}</p>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-muted-foreground">Running</p>
+                <p className="mt-2 text-green-500">{isLoading ? '…' : runningNodes}</p>
+              </div>
+              <Power className="w-5 h-5 text-green-500" />
+            </div>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-6">
-            <p className="text-sm text-muted-foreground">Nodes Reporting</p>
-            <p className="mt-2">{isLoading ? '—' : summary.reporting}</p>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-muted-foreground">Stopped</p>
+                <p className="mt-2 text-red-500">{isLoading ? '…' : stoppedNodes}</p>
+              </div>
+              <PowerOff className="w-5 h-5 text-red-500" />
+            </div>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-6">
-            <p className="text-sm text-muted-foreground">Last Sample</p>
-            <p className="mt-2">{summary.lastSample ? formatTimestamp(summary.lastSample) : '—'}</p>
+            <p className="text-sm text-muted-foreground">Cluster Health</p>
+            <p className="mt-2 text-green-500">{isLoading ? '—' : clusterHealth}</p>
           </CardContent>
         </Card>
       </div>
@@ -114,87 +193,72 @@ export function ServersMonitorTab() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Component Status</CardTitle>
-          <CardDescription>Status of all system components</CardDescription>
+          <CardTitle>Node List</CardTitle>
+          <CardDescription>All nodes in the HiveFS cluster</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="space-y-4">
-            {componentStatus.map((item, index) => {
-              const Icon =
-                item.status === 'error'
-                  ? AlertCircle
-                  : item.status === 'warning'
-                    ? AlertTriangle
-                    : CheckCircle2;
-              const badgeVariant =
-                item.status === 'error'
-                  ? 'destructive'
-                  : item.status === 'warning'
-                    ? 'secondary'
-                    : 'default';
-              return (
-                <div key={index} className="flex items-center justify-between py-3 border-b border-border last:border-0">
-                  <div className="flex items-center gap-3">
-                    <Icon
-                      className={`w-5 h-5 ${
-                        item.status === 'error'
-                          ? 'text-red-500'
-                          : item.status === 'warning'
-                            ? 'text-yellow-500'
-                            : 'text-green-500'
-                      }`}
-                    />
-                    <div>
-                      <p>{item.name}</p>
-                      <p className="text-sm text-muted-foreground">
-                        {item.timestamp ? formatTimestamp(item.timestamp) : 'No timestamp'}
-                      </p>
-                      {item.message && (
-                        <p className="text-xs text-muted-foreground">{item.message}</p>
-                      )}
-                    </div>
-                  </div>
-                  <Badge variant={badgeVariant as 'default' | 'secondary' | 'destructive'}>
-                    {item.status}
-                  </Badge>
-                </div>
-              );
-            })}
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Recent Events</CardTitle>
-          <CardDescription>System events and notifications from the last 24 hours</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            {recentEvents.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No recent events reported.</p>
-            ) : (
-              recentEvents.map((event, index) => (
-                <div key={index} className="flex gap-3 py-2">
-                  {event.severity === 'error' && (
-                    <AlertCircle className="w-5 h-5 text-red-500 mt-0.5" />
-                  )}
-                  {event.severity === 'warning' && (
-                    <AlertTriangle className="w-5 h-5 text-yellow-500 mt-0.5" />
-                  )}
-                  {event.severity === 'healthy' && (
-                    <CheckCircle2 className="w-5 h-5 text-blue-500 mt-0.5" />
-                  )}
-                  <div className="flex-1">
-                    <p>{event.message}</p>
-                    <p className="text-sm text-muted-foreground">
-                      {event.label} • {event.time}
-                    </p>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Node Name</TableHead>
+                <TableHead>Version</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>CPU</TableHead>
+                <TableHead>Throughput</TableHead>
+                <TableHead>Disk Usage</TableHead>
+                <TableHead>Last Heartbeat</TableHead>
+                <TableHead></TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {isLoading ? (
+                <TableRow>
+                  <TableCell colSpan={8} className="text-center text-muted-foreground">
+                    Loading nodes…
+                  </TableCell>
+                </TableRow>
+              ) : nodes.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={8} className="text-center text-muted-foreground">
+                    No nodes found.
+                  </TableCell>
+                </TableRow>
+              ) : (
+                nodes.map((node) => {
+                  const nodeStats = stats[node.key];
+                  const status = resolveStatus(node);
+                  return (
+                    <TableRow key={node.key}>
+                      <TableCell>{node.node}</TableCell>
+                      <TableCell>
+                        <Badge variant="outline">{node.hive_version ?? 'Unknown'}</Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={status === 'running' ? 'default' : 'secondary'}>
+                          {status}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {formatPercent(nodeStats?.cpu ?? null)}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {nodeStats?.t_throughput ? `${nodeStats.t_throughput} MB/s` : '—'}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">{formatDiskUsage(node)}</TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {formatHeartbeat(node.last_heartbeat)}
+                      </TableCell>
+                      <TableCell>
+                        <Button variant="ghost" size="icon">
+                          <MoreVertical className="w-4 h-4" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
+              )}
+            </TableBody>
+          </Table>
         </CardContent>
       </Card>
     </div>

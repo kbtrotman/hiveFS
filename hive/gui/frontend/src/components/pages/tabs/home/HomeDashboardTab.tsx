@@ -23,7 +23,7 @@ import { TagSettingsTab } from '../tags/TagSettingsTab';
 import { VersionSettingsTab } from '../tags/VersionSettingsTab';
 import { CliCommandLineTab } from '../cli/CliCommandLineTab';
 import { ReportsRunReportTab } from '../reports/ReportsRunReportTab';
-import { ReportsCreateReportTab } from '../reports/ReportsCreateReportTab';
+import { ReportsCreatorTab } from '../reports/ReportsCreatorTab';
 import { ReportsSchedulerTab } from '../reports/ReportsSchedulerTab';
 import { ReportsSettingsTab } from '../reports/ReportsSettingsTab';
 import { NotificationsAlertsTab } from '../notifications/NotificationsAlertsTab';
@@ -89,7 +89,7 @@ const sidebarTabComponents: Record<string, Record<string, ComponentType>> = {
   },
   reports: {
     reports: ReportsRunReportTab,
-    rep_creator: ReportsCreateReportTab,
+    rep_creator: ReportsCreatorTab,
     rep_scheduler: ReportsSchedulerTab,
     rep_settings: ReportsSettingsTab,
   },
