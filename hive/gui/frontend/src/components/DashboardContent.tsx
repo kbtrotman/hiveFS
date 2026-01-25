@@ -27,9 +27,8 @@ import { ReportsCreatorTab } from './pages/tabs/reports/ReportsCreatorTab';
 import { ReportsSchedulerTab } from './pages/tabs/reports/ReportsSchedulerTab';
 import { ReportsSettingsTab } from './pages/tabs/reports/ReportsSettingsTab';
 import { NotificationsAlertsTab } from './pages/tabs/notifications/NotificationsAlertsTab';
-import { NotificationsCreateAlertsTab } from './pages/tabs/notifications/NotificationsCreateAlertsTab';
 import { NotificationsEndpointsTab } from './pages/tabs/notifications/NotificationsEndpointsTab';
-import { NotificationsCreateNotificationsTab } from './pages/tabs/notifications/NotificationsCreateNotificationsTab';
+import { NotificationsCreateTab } from './pages/tabs/notifications/NotificationsCreateTab';
 import { NotificationsHistoryTab } from './pages/tabs/notifications/NotificationsHistoryTab';
 import { HelpSupportTab } from './pages/tabs/help/HelpSupportTab';
 import { HelpSupportBundleTab } from './pages/tabs/help/HelpSupportBundleTab';
@@ -88,9 +87,8 @@ const sidebarTabComponents: Record<string, Record<string, ComponentType>> = {
   },
   notifications: {
     alerts: NotificationsAlertsTab,
-    create_alerts: NotificationsCreateAlertsTab,
     not_endpoints: NotificationsEndpointsTab,
-    not_create: NotificationsCreateNotificationsTab,
+    not_create: NotificationsCreateTab,
     not_history: NotificationsHistoryTab,
   },
   help: {

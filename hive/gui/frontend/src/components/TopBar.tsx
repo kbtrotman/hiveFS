@@ -54,7 +54,6 @@ const tabs = [
   { id: 'rep_scheduler', label: 'Report Scheduler' },
   { id: 'rep_settings', label: 'Report Settings' },
   { id: 'alerts', label: 'Alerts' },
-  { id: 'create_alerts', label: 'Create Alerts' },
   { id: 'not_endpoints', label: 'Notification Endpoints' },
   { id: 'not_create', label: 'Create Notifications' },
   { id: 'not_history', label: 'Notification History' },
@@ -75,7 +74,7 @@ const tabAvailability: Record<string, string[]> = {
   tags: ['tags', 'versions', 'tag_settings', 'version_settings'],
   cli: ['cmd_line'],
   reports: ['reports', 'rep_creator', 'rep_scheduler', 'rep_settings'],
-  notifications: ['alerts', 'create_alerts', 'not_endpoints', 'not_create', 'not_history'],
+  notifications: ['alerts', 'not_endpoints', 'not_create', 'not_history'],
   help: ['hel_support', 'hel_bundle', 'hel_docs', 'hel_search', 'hel_ai'],
   profile: [],
 };
