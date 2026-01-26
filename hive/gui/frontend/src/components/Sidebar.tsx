@@ -12,6 +12,7 @@ import {
   User,
 } from 'lucide-react';
 import { ImageWithFallback } from './figma/ImageWithFallback';
+import hiveFsLogo from './hfs_logo.png';
 import type { CSSProperties } from 'react';
 
 interface SidebarProps {
@@ -71,9 +72,9 @@ export function Sidebar({ activeItem, onItemClick }: SidebarProps) {
         <div className="h-16 flex items-center px-6 border-b border-border">
           <div className="flex items-center gap-3">
             <ImageWithFallback 
-              src="https://images.unsplash.com/photo-1568526381923-caf3fd520382?w=400&q=80"
+              src={hiveFsLogo}
               alt="Beehive Logo"
-              className="w-8 h-8 rounded-lg object-cover"
+              className="w-12 h-12 rounded-xl object-contain bg-card/60 p-1"
             />
             <span className="font-semibold">HiveFS</span>
           </div>

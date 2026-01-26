@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { Moon, Sun, Settings, Bookmark, User, LogOut, Star, StarOff } from 'lucide-react';
 import { Button } from './ui/button';
 import {
@@ -110,10 +110,25 @@ export function TopBar({
   onOpenFilesystemSettings,
   onOpenPermissionsSettings,
 }: TopBarProps) {
-  const availableTabs = showTabs ? (tabAvailability[activeSidebarItem] || []) : [];
-  const visibleTabs = tabs.filter((tab) => availableTabs.includes(tab.id));
+  const availableTabs = useMemo(
+    () => (showTabs ? tabAvailability[activeSidebarItem] || [] : []),
+    [showTabs, activeSidebarItem],
+  );
+  const visibleTabs = useMemo(
+    () => tabs.filter((tab) => availableTabs.includes(tab.id)),
+    [availableTabs],
+  );
   const tabsVisible = showTabs && visibleTabs.length > 0;
   const [favorites, setFavorites] = useState<FavoriteEntry[]>([DEFAULT_FAVORITE]);
+
+  useEffect(() => {
+    if (!tabsVisible) return;
+    const firstTabId = visibleTabs[0]?.id;
+    if (!firstTabId) return;
+    if (!activeTab || !availableTabs.includes(activeTab)) {
+      onTabChange(firstTabId);
+    }
+  }, [tabsVisible, visibleTabs, activeTab, availableTabs, onTabChange]);
 
   const currentFavoriteId = useMemo(
     () => `${activeSidebarItem || 'home'}:${activeTab || 'dashboard'}`,

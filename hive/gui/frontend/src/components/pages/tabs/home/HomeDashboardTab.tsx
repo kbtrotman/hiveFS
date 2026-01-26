@@ -17,8 +17,8 @@ import { SecurityAccessTab } from '../security/SecurityAccessTab';
 import { SecurityAuditTab } from '../security/SecurityAuditTab';
 import { SecurityApiAccessTab } from '../security/SecurityApiAccessTab';
 import { SecurityLogsTab } from '../security/SecurityLogsTab';
-import { TagsFileTaggingTab } from '../tags/TagsFileTaggingTab';
-import { TagsFileVersioningTab } from '../tags/TagsFileVersioningTab';
+import { FileTaggingTab } from '../tags/FileTagging';
+import { FileVersioningTab } from '../tags/FileVersioningTab';
 import { TagSettingsTab } from '../tags/TagSettingsTab';
 import { VersionSettingsTab } from '../tags/VersionSettingsTab';
 import { CliCommandLineTab } from '../cli/CliCommandLineTab';
@@ -78,8 +78,8 @@ const sidebarTabComponents: Record<string, Record<string, ComponentType>> = {
     logs: SecurityLogsTab,
   },
   tags: {
-    tags: TagsFileTaggingTab,
-    versions: TagsFileVersioningTab,
+    tags: FileTaggingTab,
+    versions: FileVersioningTab,
     tag_settings: TagSettingsTab,
     version_settings: VersionSettingsTab,
   },

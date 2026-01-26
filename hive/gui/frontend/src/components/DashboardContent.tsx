@@ -17,8 +17,8 @@ import { SecurityAccessTab } from './pages/tabs/security/SecurityAccessTab';
 import { SecurityAuditTab } from './pages/tabs/security/SecurityAuditTab';
 import { SecurityApiAccessTab } from './pages/tabs/security/SecurityApiAccessTab';
 import { SecurityLogsTab } from './pages/tabs/security/SecurityLogsTab';
-import { TagsFileTaggingTab } from './pages/tabs/tags/TagsFileTaggingTab';
-import { TagsFileVersioningTab } from './pages/tabs/tags/TagsFileVersioningTab';
+import { FileTaggingTab } from './pages/tabs/tags/FileTagging';
+import { FileVersioningTab } from './pages/tabs/tags/FileVersioningTab';
 import { TagSettingsTab } from './pages/tabs/tags/TagSettingsTab';
 import { VersionSettingsTab } from './pages/tabs/tags/VersionSettingsTab';
 import { CliCommandLineTab } from './pages/tabs/cli/CliCommandLineTab';
@@ -71,8 +71,8 @@ const sidebarTabComponents: Record<string, Record<string, ComponentType>> = {
     logs: SecurityLogsTab,
   },
   tags: {
-    tags: TagsFileTaggingTab,
-    versions: TagsFileVersioningTab,
+    tags: FileTaggingTab,
+    versions: FileVersioningTab,
     tag_settings: TagSettingsTab,
     version_settings: VersionSettingsTab,
   },
