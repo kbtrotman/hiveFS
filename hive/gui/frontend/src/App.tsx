@@ -16,7 +16,7 @@ const BOOTSTRAP_READY_STATUSES = new Set(['IDLE', 'OP_PENDING']);
 
 export default function App() {
   const [theme, setTheme] = useState<'light' | 'dark'>('dark');
-  const [activeTab, setActiveTab] = useState('performance');
+  const [activeTab, setActiveTab] = useState('dashboard');
   const [activeSidebarItem, setActiveSidebarItem] = useState('home');
   
   // Authentication state
