@@ -288,6 +288,7 @@ export default function App() {
             onOpenNetworkSettings={openNetworkSettings}
             onOpenFilesystemSettings={openFilesystemSettings}
             onOpenPermissionsSettings={openPermissionsSettings}
+            settingsEnabled
           />
           <main className="flex-1 overflow-y-auto bg-muted/20">
             <DashboardContent activeTab={activeTab} activeSidebarItem={activeSidebarItem} />

@@ -44,6 +44,40 @@ interface DiskTreeNode {
   dentryId?: string;
 }
 
+type FilesystemStat = {
+  node_id: number;
+  fs_ts: string;
+  fs_name: string;
+  fs_path: string;
+  fs_type: string;
+  fs_total_bytes: number;
+  fs_used_bytes: number;
+  fs_avail_bytes: number;
+  fs_used_pct: number;
+  in_total_bytes: number;
+  in_used_bytes: number;
+  in_avail_bytes: number;
+  in_used_pct: number;
+  health: string;
+};
+
+type DiskStat = {
+  node_id: number;
+  disk_ts: string;
+  disk_name: string;
+  disk_path: string;
+  disk_size_bytes: number;
+  disk_rotational: boolean;
+  reads_completed: number;
+  writes_completed: number;
+  read_bytes: number;
+  write_bytes: number;
+  io_in_progress: number;
+  io_ms: number;
+  fs_path: string | null;
+  health: string;
+};
+
 const NODE_KIND_ICON: Record<string, typeof Globe> = {
   global: Globe,
   client: User,
@@ -146,6 +180,10 @@ export function DiskManageTab() {
   const [junctionTarget, setJunctionTarget] = useState('');
   const [treeData, setTreeData] = useState<DiskTreeNode[]>([]);
   const [loadingNodes, setLoadingNodes] = useState<Record<string, boolean>>({});
+  const [fsStats, setFsStats] = useState<FilesystemStat[]>([]);
+  const [diskStats, setDiskStats] = useState<DiskStat[]>([]);
+  const [fsError, setFsError] = useState<string | null>(null);
+  const [diskError, setDiskError] = useState<string | null>(null);
 
   const adaptApiNode = (node: ApiTreeNode): DiskTreeNode => ({
     id: node.key,
@@ -199,6 +237,49 @@ export function DiskManageTab() {
     },
     [mergeChildren]
   );
+
+  const formatBytes = (bytes: number) => {
+    if (!Number.isFinite(bytes)) return '—';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+    let value = bytes;
+    let unit = 0;
+    while (value >= 1024 && unit < units.length - 1) {
+      value /= 1024;
+      unit++;
+    }
+    return `${value.toFixed(1)} ${units[unit]}`;
+  };
+
+  useEffect(() => {
+    const loadFsStats = async () => {
+      try {
+        const resp = await fetch('http://localhost:8000/api/v1/health/fs');
+        if (!resp.ok) throw new Error(`Failed to load fs stats (${resp.status})`);
+        const payload = await resp.json();
+        setFsStats(Array.isArray(payload) ? payload : payload?.results ?? []);
+        setFsError(null);
+      } catch (err) {
+        console.error('Failed to fetch filesystem health', err);
+        setFsError('Filesystem metrics unavailable');
+      }
+    };
+
+    const loadDiskStats = async () => {
+      try {
+        const resp = await fetch('http://localhost:8000/api/v1/health/disks');
+        if (!resp.ok) throw new Error(`Failed to load disk stats (${resp.status})`);
+        const payload = await resp.json();
+        setDiskStats(Array.isArray(payload) ? payload : payload?.results ?? []);
+        setDiskError(null);
+      } catch (err) {
+        console.error('Failed to fetch disk health', err);
+        setDiskError('Disk metrics unavailable');
+      }
+    };
+
+    loadFsStats();
+    loadDiskStats();
+  }, []);
 
   useEffect(() => {
     fetchTreeNodes('root');
@@ -276,62 +357,114 @@ export function DiskManageTab() {
         </Card>
       </div>
 
-      {/* Bottom 2 cards - Disk Health first, then Recent Activity */}
+      {/* Node health metrics */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card>
+        <Card className="border-primary/10 bg-gradient-to-b from-background/80 to-background shadow-lg shadow-primary/10">
           <CardHeader>
-            <CardTitle>Disk Health</CardTitle>
-            <CardDescription>SMART status and disk diagnostics</CardDescription>
+            <CardTitle>Node Physical Space Metrics</CardTitle>
+            <CardDescription>Filesystem capacity and inode consumption per node</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            <div className="flex justify-between items-center">
-              <span className="text-sm text-muted-foreground">Overall Health</span>
-              <span className="text-green-500">Good</span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-sm text-muted-foreground">Failed Sectors</span>
-              <span>0</span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-sm text-muted-foreground">Temperature</span>
-              <span>42°C</span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-sm text-muted-foreground">Power-On Hours</span>
-              <span>12,450</span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-sm text-muted-foreground">Last Check</span>
-              <span>2 hours ago</span>
-            </div>
+            {fsError && <p className="text-sm text-destructive">{fsError}</p>}
+            {!fsError && (
+              <div className="space-y-3">
+                {(fsStats ?? []).slice(0, 4).map((fs) => (
+                  <div key={`${fs.node_id}-${fs.fs_path}`} className="rounded-lg border border-border/60 p-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-medium">
+                          Node {fs.node_id} • {fs.fs_name}
+                        </p>
+                        <p className="text-xs text-muted-foreground">{fs.fs_path}</p>
+                      </div>
+                      <Badge className={Number(fs.fs_used_pct) > 80 ? 'bg-amber-500' : 'bg-emerald-500'}>
+                        {fs.health}
+                      </Badge>
+                    </div>
+                    <div className="mt-2 flex items-center justify-between text-xs text-muted-foreground">
+                      <span>{formatBytes(fs.fs_used_bytes)} used</span>
+                      <span>{formatBytes(fs.fs_total_bytes)} total</span>
+                    </div>
+                    <div className="mt-1 h-1.5 rounded-full bg-muted">
+                      <div
+                        className="h-full rounded-full bg-gradient-to-r from-sky-400 via-blue-500 to-teal-400"
+                        style={{ width: `${fs.fs_used_pct}%` }}
+                      />
+                    </div>
+                    <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+                      <div className="rounded border border-border/60 p-2">
+                        <p className="text-muted-foreground">Inodes used</p>
+                        <p className="font-medium">{Number(fs.in_used_pct).toFixed(1)}%</p>
+                      </div>
+                      <div className="rounded border border-border/60 p-2">
+                        <p className="text-muted-foreground">Free bytes</p>
+                        <p className="font-medium">{formatBytes(fs.fs_avail_bytes)}</p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                {!fsStats.length && (
+                  <p className="text-sm text-muted-foreground">No filesystem metrics available.</p>
+                )}
+              </div>
+            )}
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="border-primary/10 bg-gradient-to-b from-background/80 to-background shadow-lg shadow-primary/10">
           <CardHeader>
-            <CardTitle>Recent Activity</CardTitle>
-            <CardDescription>Recent disk operations</CardDescription>
+            <CardTitle>Node Physical Disk Metrics</CardTitle>
+            <CardDescription>Drive throughput and SMART data per node</CardDescription>
           </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {[
-                { action: 'Write', file: 'dataset_2024_12.hive', size: '2.3 GB', time: '2 min ago' },
-                { action: 'Delete', file: 'temp_cache_old.dat', size: '450 MB', time: '15 min ago' },
-                { action: 'Write', file: 'user_profile_sync.hive', size: '128 MB', time: '32 min ago' },
-                { action: 'Read', file: 'analytics_data.hive', size: '5.2 GB', time: '1 hour ago' },
-              ].map((activity, index) => (
-                <div key={index} className="flex items-center justify-between py-2 border-b border-border last:border-0">
-                  <div>
-                    <p className="text-sm">{activity.file}</p>
-                    <p className="text-xs text-muted-foreground">{activity.time}</p>
+          <CardContent className="space-y-3">
+            {diskError && <p className="text-sm text-destructive">{diskError}</p>}
+            {!diskError && (
+              <div className="space-y-3">
+                {(diskStats ?? []).slice(0, 5).map((disk) => (
+                  <div key={`${disk.node_id}-${disk.disk_name}`} className="rounded-lg border border-border/60 p-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-medium">
+                          Node {disk.node_id} • {disk.disk_name}
+                        </p>
+                        <p className="text-xs text-muted-foreground">{disk.disk_path}</p>
+                      </div>
+                      <Badge className={disk.health === 'OK' ? 'bg-emerald-500' : 'bg-destructive'}>
+                        {disk.health}
+                      </Badge>
+                    </div>
+                    <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+                      <div className="rounded border border-border/60 p-2">
+                        <p className="text-muted-foreground">Capacity</p>
+                        <p className="font-medium">{formatBytes(disk.disk_size_bytes)}</p>
+                      </div>
+                      <div className="rounded border border-border/60 p-2">
+                        <p className="text-muted-foreground">Rotation</p>
+                        <p className="font-medium">{disk.disk_rotational ? 'HDD' : 'SSD'}</p>
+                      </div>
+                      <div className="rounded border border-border/60 p-2">
+                        <p className="text-muted-foreground">Reads</p>
+                        <p className="font-medium">
+                          {formatBytes(disk.read_bytes)} / {disk.reads_completed} ops
+                        </p>
+                      </div>
+                      <div className="rounded border border-border/60 p-2">
+                        <p className="text-muted-foreground">Writes</p>
+                        <p className="font-medium">
+                          {formatBytes(disk.write_bytes)} / {disk.writes_completed} ops
+                        </p>
+                      </div>
+                    </div>
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      IO queue: {disk.io_in_progress} • Active {disk.io_ms} ms
+                    </p>
                   </div>
-                  <div className="text-right">
-                    <p className="text-sm">{activity.size}</p>
-                    <p className="text-xs text-muted-foreground">{activity.action}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
+                ))}
+                {!diskStats.length && (
+                  <p className="text-sm text-muted-foreground">No disk metrics available.</p>
+                )}
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>

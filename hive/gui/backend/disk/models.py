@@ -61,4 +61,89 @@ class Storage_Node_Stats(models.Model):
     class Meta:
         managed = False
         db_table = 'v_stats'
-        
+
+class StorageNodeFsStats(models.Model):
+    HEALTH_OK = "ok"
+    HEALTH_WARN = "warn"
+    HEALTH_CRIT = "crit"
+    HEALTH_CHOICES = [
+        (HEALTH_OK, "ok"),
+        (HEALTH_WARN, "warn"),
+        (HEALTH_CRIT, "crit"),
+    ]
+
+    node_id = models.PositiveIntegerField()
+    fs_ts = models.DateTimeField()
+
+    fs_name = models.CharField(max_length=255)
+    fs_path = models.CharField(max_length=255)
+    fs_type = models.CharField(max_length=64)
+
+    fs_total_bytes = models.BigIntegerField()
+    fs_used_bytes = models.BigIntegerField()
+    fs_avail_bytes = models.BigIntegerField()
+    fs_used_pct = models.DecimalField(max_digits=5, decimal_places=2)
+
+    in_total_bytes = models.BigIntegerField()
+    in_used_bytes = models.BigIntegerField()
+    in_avail_bytes = models.BigIntegerField()
+    in_used_pct = models.DecimalField(max_digits=5, decimal_places=2)
+
+    health = models.CharField(max_length=4, choices=HEALTH_CHOICES, default=HEALTH_OK)
+
+    class Meta:
+        managed = False
+        db_table = "v_sn_fs_stats"
+        indexes = [
+            models.Index(fields=["fs_ts"], name="idx_fs_ts"),
+        ]
+        # Django can’t represent the compound PK cleanly; table enforces it.
+        # Leave unmanaged and query by filters.
+
+
+class StorageNodeDiskStats(models.Model):
+    """
+    Hardware / physical-disk stats table.
+
+    Assumes a schema like:
+      node_id, disk_ts, disk_name, disk_path, disk_size_bytes, disk_rotational,
+      reads_completed, writes_completed, read_bytes, write_bytes,
+      io_in_progress, io_ms, fs_path, health
+    """
+
+    HEALTH_OK = "ok"
+    HEALTH_WARN = "warn"
+    HEALTH_CRIT = "crit"
+    HEALTH_CHOICES = [
+        (HEALTH_OK, "ok"),
+        (HEALTH_WARN, "warn"),
+        (HEALTH_CRIT, "crit"),
+    ]
+
+    node_id = models.PositiveIntegerField()
+    disk_ts = models.DateTimeField()
+
+    disk_name = models.CharField(max_length=64)
+    disk_path = models.CharField(max_length=128)
+
+    disk_size_bytes = models.BigIntegerField()
+    disk_rotational = models.BooleanField()  # 0 SSD / 1 HDD
+
+    reads_completed = models.BigIntegerField()
+    writes_completed = models.BigIntegerField()
+    read_bytes = models.BigIntegerField()
+    write_bytes = models.BigIntegerField()
+
+    io_in_progress = models.BigIntegerField()
+    io_ms = models.BigIntegerField()
+
+    fs_path = models.CharField(max_length=255, null=True, blank=True)
+    health = models.CharField(max_length=4, choices=HEALTH_CHOICES, default=HEALTH_OK)
+
+    class Meta:
+        managed = False
+        db_table = "v_sn_disk_stats"
+        indexes = [
+            models.Index(fields=["disk_ts"], name="idx_disk_ts"),
+            models.Index(fields=["node_id", "disk_name"], name="idx_node_disk"),
+        ]
