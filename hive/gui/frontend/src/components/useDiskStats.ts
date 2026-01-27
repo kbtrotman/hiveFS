@@ -212,7 +212,7 @@ export function useDiskStats(pollInterval = 0): UseDiskStatsResult {
     setError(null);
     try {
       const controller = new AbortController();
-      const res = await fetch(`${API_BASE}/stats`, { signal: controller.signal });
+      const res = await fetch(`${API_BASE}/health/stats`, { signal: controller.signal });
       if (!res.ok) {
         throw new Error(`Failed to load stats (${res.status})`);
       }

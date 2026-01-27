@@ -151,24 +151,27 @@ DATABASES = {
         'NAME': 'hive_api',
         'USER': 'hiveadmin',
         'PASSWORD': 'hiveadmin',
-        'HOST': 'localhost',  # Or the IP/hostname of your MariaDB server
-        'PORT': '3306',       # Default MariaDB port
+        'OPTIONS': {
+            'unix_socket': '/run/mysqld/mysqld.sock', # Custom socket path
+        },
     },
     'meta': {
         'ENGINE': 'django.db.backends.mysql',
         'NAME': 'hive_meta',
         'USER': 'hiveadmin',
         'PASSWORD': 'hiveadmin',
-        'HOST': 'localhost',  # Or the IP/hostname of your MariaDB server
-        'PORT': '3306',       # Default MariaDB port
+        'OPTIONS': {
+            'unix_socket': '/run/mysqld/mysqld.sock', # Custom socket path
+        },
     },
     'data': {
         'ENGINE': 'django.db.backends.mysql',
         'NAME': 'hive_data',
         'USER': 'hiveadmin',
         'PASSWORD': 'hiveadmin',
-        'HOST': 'localhost',  # Or the IP/hostname of your MariaDB server
-        'PORT': '3306',       # Default MariaDB port
+        'OPTIONS': {
+            'unix_socket': '/run/mysqld/mysqld.sock', # Custom socket path
+        },
     }
 }
 

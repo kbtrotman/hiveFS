@@ -1,0 +1,15 @@
+# Dev-only frontend container running Vite on port 3000
+FROM node:20-alpine
+WORKDIR /app
+
+# Install dependencies first for caching
+COPY package*.json ./
+RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
+
+# Copy app
+COPY . ./
+
+EXPOSE 3000
+
+# Vite dev server (your vite.config.tsx uses port 3000)
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "3000"]
