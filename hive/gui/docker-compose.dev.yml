@@ -1,0 +1,51 @@
+name: hive-dev
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: hive-backend-dev
+    environment:
+      # Django settings
+      DJANGO_SETTINGS_MODULE: "src.config.settings"
+      PYTHONUNBUFFERED: "1"
+
+      # DB via unix socket (set these in an .env for convenience)
+      DB_SOCKET_PATH: "${DB_SOCKET_PATH:-/run/mysqld/mysqld.sock}"
+
+      # Optional: API base behind Vite proxy is /api
+      # (frontend calls /api/v1/...)
+    volumes:
+      # Live code editing
+      - ./backend:/app
+
+      # Host sockets
+      - /run/hive_bootstrap.sock:/run/hive_bootstrap.sock:rw
+      - /run/mysqld/mysqld.sock:/run/mysqld/mysqld.sock:ro
+    # Optional: expose backend only on localhost for debugging
+    ports:
+      - "127.0.0.1:8000:8000"
+    networks:
+      - fe_be
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: ../Dockerfile.frontend.dev
+    container_name: hive-frontend-dev
+    environment:
+      NODE_ENV: development
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    networks:
+      - fe_be
+
+networks:
+  fe_be:
+    driver: bridge

@@ -1,0 +1,38 @@
+# Apache reverse proxy + static Vite frontend
+#
+# Production container (Option A):
+# - Only this container exposes an internet-facing port
+# - Serves the built SPA (Vite)
+# - Reverse-proxies /api/* to the backend service on a private network
+
+ARG FRONTEND_DIR=frontend
+
+# -------------------- build stage --------------------
+FROM node:20-alpine AS frontend_build
+ARG FRONTEND_DIR
+WORKDIR /src/${FRONTEND_DIR}
+
+# Install deps first for better caching
+COPY ${FRONTEND_DIR}/package*.json ./
+RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
+
+# Copy the rest of the frontend and build
+COPY ${FRONTEND_DIR}/ ./
+# Your vite.config outputs to "build" per your config
+RUN npm run build
+
+# -------------------- runtime stage --------------------
+FROM httpd:2.4-alpine
+
+# Enable required modules and configure vhost + proxy
+COPY httpd.conf /usr/local/apache2/conf/httpd.conf
+
+# Copy built static assets into Apache docroot
+# (Vite build output directory is "build")
+COPY --from=frontend_build /src/${FRONTEND_DIR}/build/ /usr/local/apache2/htdocs/
+
+# Security-ish defaults: don't advertise extra info
+RUN sed -i 's/^#ServerTokens OS/ServerTokens Prod/' /usr/local/apache2/conf/extra/httpd-default.conf \
+ && sed -i 's/^#ServerSignature Off/ServerSignature Off/' /usr/local/apache2/conf/extra/httpd-default.conf
+
+EXPOSE 80

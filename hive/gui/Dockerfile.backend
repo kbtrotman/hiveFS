@@ -1,14 +1,41 @@
-FROM python:3.9-slim-buster AS base
+# Backend (Django) container
+# - No ports published in prod
+# - Connects to MariaDB via unix socket mounted from host
+# - Has RW access to /run/hive_bootstrap.sock
 
-ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
 
 WORKDIR /app
-COPY requirements.txt /app/
-RUN pip install --no-cache-dir -r requirements.txt
-COPY . /app/
-COPY entrypoint.sh ./
-RUN useradd --create-home django && chown -R django:django /app
+
+# System deps for mysqlclient (and general build tooling)
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      build-essential \
+      pkg-config \
+      default-libmysqlclient-dev \
+      curl \
+ && rm -rf /var/lib/apt/lists/*
+
+# Install python deps
+COPY backend/requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
+
+# Copy backend source
+COPY backend/ /app/
+
+# Use a non-root user
+RUN useradd --create-home --shell /usr/sbin/nologin django \
+ && chown -R django:django /app
 USER django
+
 EXPOSE 8000
-ENTRYPOINT ["./entrypoint.sh"]
-CMD ["gunicorn", "src.config.wsgi:application", "--bind", "0.0.0.0:8000"]
+
+# Expect repo to provide an entrypoint; keep it optional
+# If we don't have entrypoint.sh, remove this line.
+# COPY backend/entrypoint.sh /app/entrypoint.sh
+# ENTRYPOINT ["/app/entrypoint.sh"]
+
+CMD ["gunicorn", "src.config.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "2", "--threads", "4", "--timeout", "60"]
