@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { AlertTriangle, Power, RefreshCw, ShieldAlert, ShieldCheck, CheckCircle, XCircle } from 'lucide-react';
+import { AlertTriangle, Power, RefreshCw, ShieldAlert, ShieldCheck, CheckCircle, XCircle, Plus } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../../../ui/card';
 import { Button } from '../../../ui/button';
 import { Separator } from '../../../ui/separator';
@@ -17,6 +17,10 @@ interface Alert {
 
 export function ClusterManageTab() {
   const [selectedNode, setSelectedNode] = useState<string>('node-1');
+  const [knownClusters] = useState([
+    { id: 'primary', name: 'Primary Cluster', location: 'San Jose', nodes: 18, status: 'healthy' },
+    { id: 'dr-east', name: 'DR East', location: 'Ashburn', nodes: 12, status: 'warning' },
+  ]);
   const [alerts, setAlerts] = useState<Alert[]>([
     {
       id: '1',
@@ -76,6 +80,37 @@ export function ClusterManageTab() {
           Manage cluster operations, node states, and active alerts
         </p>
       </div>
+      <Card className="border-primary/10 bg-gradient-to-b from-background/80 to-background shadow-lg shadow-primary/10">
+        <CardHeader className="flex flex-row items-center justify-between">
+          <div>
+            <CardTitle className="text-foreground/90">Known Clusters</CardTitle>
+            <p className="text-sm text-muted-foreground">Manage local and connected peer clusters.</p>
+          </div>
+          <Button variant="outline">
+            <Plus className="w-4 h-4 mr-2" />
+            Add Foreign Cluster
+          </Button>
+        </CardHeader>
+        <CardContent className="flex flex-wrap gap-4">
+          {knownClusters.map((cluster) => (
+            <div
+              key={cluster.id}
+              className="flex flex-col rounded-lg border border-border/60 bg-muted/30 px-4 py-3 min-w-[220px]"
+            >
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold">{cluster.name}</p>
+                <Badge
+                  className={cluster.status === 'healthy' ? 'bg-emerald-500' : 'bg-amber-500'}
+                >
+                  {cluster.status}
+                </Badge>
+              </div>
+              <p className="text-xs text-muted-foreground">{cluster.location}</p>
+              <p className="text-xs text-muted-foreground mt-1">{cluster.nodes} nodes</p>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
 
       {/* Top Row - Cluster and Node Operations */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">

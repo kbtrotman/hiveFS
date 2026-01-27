@@ -118,6 +118,45 @@ void init_hive_link(void);
 void close_hive_link(void);
 int get_hive_vers(void);
 MYSQL_RES *hifs_get_hive_host_data(char *machine_id);
+
+/*
+ * Filesystem stats (storage_node_fs_stats)
+ * Insert one row per filesystem per sampling interval.
+ */
+bool hifs_store_fs_stat(uint64_t node_id,
+			 uint64_t ts_unix,
+			 const char *fs_name,
+			 const char *fs_path,
+			 const char *fs_type,
+			 uint64_t fs_total_bytes,
+			 uint64_t fs_used_bytes,
+			 uint64_t fs_avail_bytes,
+			 double fs_used_pct,
+			 uint64_t in_total,
+			 uint64_t in_used,
+			 uint64_t in_avail,
+			 double in_used_pct,
+			 const char *health);
+
+/*
+ * Physical disk stats (storage_node_disk_stats)
+ * Insert one row per block device per sampling interval.
+ */
+bool hifs_store_disk_stat(uint64_t node_id,
+			  uint64_t ts_unix,
+			  const char *disk_name,
+			  const char *disk_path,
+			  uint64_t disk_size_bytes,
+			  unsigned int disk_rotational,
+			  uint64_t reads_completed,
+			  uint64_t writes_completed,
+			  uint64_t read_bytes,
+			  uint64_t write_bytes,
+			  uint64_t io_in_progress,
+			  uint64_t io_ms,
+			  const char *fs_path,
+			  const char *health);
+
 MYSQL *hg_sql_get_db(void);
 int get_host_info(void);
 char *hifs_get_quoted_value(const char *in_str);

@@ -11,6 +11,11 @@
 #include <pthread.h>
 #include <errno.h>
 
+#include <dirent.h>
+#include <sys/statvfs.h>
+#include <sys/stat.h>
+#include <limits.h>
+
 #include "hive_guard_stats.h"
 #include "hive_guard_sql.h"
 #include "hive_guard.h"
@@ -34,6 +39,316 @@ static atomic_bool g_stats_thread_stop    = ATOMIC_VAR_INIT(false);
 /* -------------------------
  * Small helpers
  * ------------------------- */
+
+typedef struct {
+	char mount_point[PATH_MAX];
+	char source[PATH_MAX];
+	char fstype[64];
+} mountinfo_entry_t;
+
+static size_t hg_split_csv_paths(char *buf, const char *csv, char *out[], size_t out_cap)
+{
+	if (!buf || !csv || !out || out_cap == 0)
+		return 0;
+
+	size_t n = 0;
+	strncpy(buf, csv, 4095);
+	buf[4095] = '\0';
+
+	char *save = NULL;
+	for (char *tok = strtok_r(buf, ",", &save); tok && n < out_cap;
+	     tok = strtok_r(NULL, ",", &save)) {
+
+		while (*tok == ' ' || *tok == '\t')
+			++tok;
+		char *end = tok + strlen(tok);
+		while (end > tok && (end[-1] == ' ' || end[-1] == '\t' || end[-1] == '\n'))
+			*--end = '\0';
+
+		if (*tok)
+			out[n++] = tok;
+	}
+	return n;
+}
+
+/* Read /proc/self/mountinfo into a small array for lookups. */
+static int hg_read_mountinfo(mountinfo_entry_t *out, size_t cap, size_t *count_out)
+{
+	FILE *f = fopen("/proc/self/mountinfo", "r");
+	if (!f)
+		return -1;
+
+	size_t n = 0;
+	char line[4096];
+
+	while (fgets(line, sizeof(line), f) && n < cap) {
+		/* Find the separator " - " */
+		char *sep = strstr(line, " - ");
+		if (!sep)
+			continue;
+
+		*sep = '\0';
+		char *rest = sep + 3;
+
+		/* Tokenize first half to get mount point (field 5) */
+		char *save = NULL;
+		char *tok = strtok_r(line, " ", &save);
+		int field = 0;
+		char *mount_point = NULL;
+
+		while (tok) {
+			++field;
+			if (field == 5) {
+				mount_point = tok;
+				break;
+			}
+			tok = strtok_r(NULL, " ", &save);
+		}
+		if (!mount_point)
+			continue;
+
+		/* Tokenize rest: fstype source superopts... */
+		char *save2 = NULL;
+		char *fstype = strtok_r(rest, " ", &save2);
+		char *source = strtok_r(NULL, " ", &save2);
+
+		if (!fstype || !source)
+			continue;
+
+		strncpy(out[n].mount_point, mount_point, sizeof(out[n].mount_point) - 1);
+		out[n].mount_point[sizeof(out[n].mount_point) - 1] = '\0';
+
+		strncpy(out[n].fstype, fstype, sizeof(out[n].fstype) - 1);
+		out[n].fstype[sizeof(out[n].fstype) - 1] = '\0';
+
+		strncpy(out[n].source, source, sizeof(out[n].source) - 1);
+		out[n].source[sizeof(out[n].source) - 1] = '\0';
+
+		/* strip trailing newline from source/fstype/mount_point if present */
+		for (char *p = out[n].mount_point; *p; ++p) if (*p == '\n') *p = '\0';
+		for (char *p = out[n].fstype; *p; ++p) if (*p == '\n') *p = '\0';
+		for (char *p = out[n].source; *p; ++p) if (*p == '\n') *p = '\0';
+
+		++n;
+	}
+
+	fclose(f);
+	if (count_out)
+		*count_out = n;
+	return 0;
+}
+
+static const mountinfo_entry_t *hg_find_mount_by_path(const mountinfo_entry_t *mi, size_t n, const char *path)
+{
+	if (!mi || !path)
+		return NULL;
+
+	for (size_t i = 0; i < n; ++i) {
+		if (strcmp(mi[i].mount_point, path) == 0)
+			return &mi[i];
+	}
+	return NULL;
+}
+
+/* Best-effort: find a mount whose source path begins with /dev/<disk_name> */
+static const mountinfo_entry_t *hg_find_mount_for_disk(const mountinfo_entry_t *mi, size_t n, const char *disk_name)
+{
+	if (!mi || !disk_name)
+		return NULL;
+
+	char prefix[256];
+	snprintf(prefix, sizeof(prefix), "/dev/%s", disk_name);
+	size_t plen = strlen(prefix);
+
+	for (size_t i = 0; i < n; ++i) {
+		if (strncmp(mi[i].source, prefix, plen) == 0)
+			return &mi[i];
+	}
+	return NULL;
+}
+
+static const char *hg_health_from_pcts(double fs_used_pct, double in_used_pct, unsigned long f_flag)
+{
+	/* Default thresholds: warn >=80, crit >=90 */
+	bool warn = (fs_used_pct >= 80.0) || (in_used_pct >= 80.0);
+	bool crit = (fs_used_pct >= 90.0) || (in_used_pct >= 90.0);
+
+#ifdef ST_RDONLY
+	if (f_flag & ST_RDONLY)
+		crit = true;
+#endif
+
+	if (crit) return "crit";
+	if (warn) return "warn";
+	return "ok";
+}
+
+static void hg_collect_filesystem_stats(uint64_t node_id)
+{
+	/* Default mount list matches prior Python collector */
+	const char *default_csv =
+		"/hive/hive_kv,/hive/metadata,/hive/containers,/hive/logs,/hive/cache,/hive";
+
+	const char *csv = getenv("HG_FS_STATS_MOUNTS");
+	if (!csv || !csv[0])
+		csv = default_csv;
+
+	char csv_buf[4096];
+	char *paths[64];
+	size_t npaths = hg_split_csv_paths(csv_buf, csv, paths, 64);
+
+	mountinfo_entry_t mi[256];
+	size_t mi_n = 0;
+	(void)hg_read_mountinfo(mi, 256, &mi_n);
+
+	uint64_t ts_unix = (uint64_t)time(NULL);
+
+	for (size_t i = 0; i < npaths; ++i) {
+		const char *p = paths[i];
+		if (!p || !p[0])
+			continue;
+
+		struct statvfs v;
+		if (statvfs(p, &v) != 0) {
+			continue;
+		}
+
+		uint64_t bsize = (uint64_t)(v.f_frsize ? v.f_frsize : v.f_bsize);
+
+		uint64_t total = bsize * (uint64_t)v.f_blocks;
+		uint64_t avail = bsize * (uint64_t)v.f_bavail;
+		uint64_t used  = (total >= avail) ? (total - avail) : 0;
+
+		double used_pct = (total > 0) ? ((double)used * 100.0 / (double)total) : 0.0;
+
+		uint64_t in_total = (uint64_t)v.f_files;
+		uint64_t in_avail = (uint64_t)v.f_favail;
+		uint64_t in_used  = (in_total >= in_avail) ? (in_total - in_avail) : 0;
+
+		double in_used_pct = (in_total > 0) ? ((double)in_used * 100.0 / (double)in_total) : 0.0;
+
+		const mountinfo_entry_t *m = hg_find_mount_by_path(mi, mi_n, p);
+		const char *fs_type = m ? m->fstype : "";
+		const char *fs_name = m ? m->source : "";
+
+		const char *health = hg_health_from_pcts(used_pct, in_used_pct, v.f_flag);
+
+		(void)hifs_store_fs_stat(node_id, ts_unix,
+					 fs_name, p, fs_type,
+					 total, used, avail, used_pct,
+					 in_total, in_used, in_avail, in_used_pct,
+					 health);
+	}
+}
+
+static int hg_read_sysfs_u64(const char *path, uint64_t *out)
+{
+	if (!path || !out)
+		return -1;
+
+	FILE *f = fopen(path, "r");
+	if (!f)
+		return -1;
+
+	unsigned long long v = 0;
+	int rc = fscanf(f, "%llu", &v);
+	fclose(f);
+	if (rc != 1)
+		return -1;
+
+	*out = (uint64_t)v;
+	return 0;
+}
+
+static void hg_collect_disk_stats(uint64_t node_id)
+{
+	DIR *d = opendir("/sys/block");
+	if (!d)
+		return;
+
+	mountinfo_entry_t mi[256];
+	size_t mi_n = 0;
+	(void)hg_read_mountinfo(mi, 256, &mi_n);
+
+	uint64_t ts_unix = (uint64_t)time(NULL);
+
+	struct dirent *de;
+	while ((de = readdir(d)) != NULL) {
+		const char *dev = de->d_name;
+		if (!dev || dev[0] == '.')
+			continue;
+
+		/* Skip obvious virtual/ephemeral devices */
+		if (!strncmp(dev, "loop", 4) || !strncmp(dev, "ram", 3) ||
+		    !strncmp(dev, "zram", 4) || !strncmp(dev, "dm-", 3) ||
+		    !strncmp(dev, "md", 2) || !strncmp(dev, "sr", 2))
+			continue;
+
+		char p_size[PATH_MAX];
+		char p_sectsz[PATH_MAX];
+		char p_rot[PATH_MAX];
+		char p_stat[PATH_MAX];
+
+		snprintf(p_size, sizeof(p_size), "/sys/block/%s/size", dev);
+		snprintf(p_sectsz, sizeof(p_sectsz), "/sys/block/%s/queue/hw_sector_size", dev);
+		snprintf(p_rot, sizeof(p_rot), "/sys/block/%s/queue/rotational", dev);
+		snprintf(p_stat, sizeof(p_stat), "/sys/block/%s/stat", dev);
+
+		uint64_t sectors = 0, sectsz = 512, rotational = 0;
+		if (hg_read_sysfs_u64(p_size, &sectors) != 0)
+			continue;
+		(void)hg_read_sysfs_u64(p_sectsz, &sectsz);
+		(void)hg_read_sysfs_u64(p_rot, &rotational);
+
+		uint64_t disk_size_bytes = sectors * sectsz;
+
+		/* Parse /sys/block/<dev>/stat */
+		FILE *f = fopen(p_stat, "r");
+		if (!f)
+			continue;
+
+		unsigned long long reads_completed = 0, reads_merged = 0, sectors_read = 0, ms_reading = 0;
+		unsigned long long writes_completed = 0, writes_merged = 0, sectors_written = 0, ms_writing = 0;
+		unsigned long long io_in_progress = 0, io_ms = 0, weighted_io_ms = 0;
+
+		int n = fscanf(f, "%llu %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu",
+			       &reads_completed, &reads_merged, &sectors_read, &ms_reading,
+			       &writes_completed, &writes_merged, &sectors_written, &ms_writing,
+			       &io_in_progress, &io_ms, &weighted_io_ms);
+		fclose(f);
+		if (n < 10)
+			continue;
+
+		uint64_t read_bytes = (uint64_t)sectors_read * sectsz;
+		uint64_t write_bytes = (uint64_t)sectors_written * sectsz;
+
+		char disk_path[256];
+		snprintf(disk_path, sizeof(disk_path), "/dev/%s", dev);
+
+		const mountinfo_entry_t *m = hg_find_mount_for_disk(mi, mi_n, dev);
+		const char *fs_path = m ? m->mount_point : NULL;
+
+		const char *health = "ok";
+		if (io_in_progress >= 64)
+			health = "crit";
+		else if (io_in_progress >= 16)
+			health = "warn";
+
+		(void)hifs_store_disk_stat(node_id, ts_unix,
+					   dev, disk_path,
+					   disk_size_bytes,
+					   (unsigned int)rotational,
+					   (uint64_t)reads_completed,
+					   (uint64_t)writes_completed,
+					   read_bytes, write_bytes,
+					   (uint64_t)io_in_progress,
+					   (uint64_t)io_ms,
+					   fs_path,
+					   health);
+	}
+
+	closedir(d);
+}
 static inline uint64_t bytes_per_sec_to_mbps(uint64_t bps)
 {
     // Mbps = (bytes/sec)*8 / 1,000,000

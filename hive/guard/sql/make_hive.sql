@@ -9,9 +9,11 @@ CREATE DATABASE IF NOT EXISTS hive_meta;
 -- META SCHEMA (hive_meta)
 -- =========================
 
-USE hive_api;
+USE hive_meta;
 
--- Virtual Entities only in the API DB.
+-- Physical representations only in the meta layer. This is a security layer.
+-- These entities should be read-only from the web API side of things.
+
 CREATE TABLE IF NOT EXISTS cluster (
   cluster_id          INT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
   cluster_name        VARCHAR(100) NOT NULL UNIQUE,
@@ -43,11 +45,6 @@ CREATE TABLE IF NOT EXISTS cluster (
 ) ENGINE=InnoDB;
 
 
-USE hive_meta;
-
--- Physical representations only in the meta layer. This is a security layer.
--- These entities should be read-only from the web API side of things. We only
--- want limited views there.
 CREATE TABLE IF NOT EXISTS storage_nodes (
   node_id          INT UNSIGNED PRIMARY KEY,
   cluster_id       INT UNSIGNED DEFAULT NULL,
@@ -147,6 +144,43 @@ CREATE TABLE IF NOT EXISTS storage_node_stats (
   KEY idx_ts (s_ts)
 ) ENGINE=InnoDB;
 
+CREATE TABLE IF NOT EXISTS storage_node_fs_stats (
+  node_id        INT UNSIGNED NOT NULL,
+  fs_ts          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  fs_name        VARCHAR(255) NOT NULL,
+  fs_path        VARCHAR(255) NOT NULL,
+  fs_type        VARCHAR(64) NOT NULL,
+  fs_total_bytes BIGINT UNSIGNED NOT NULL,
+  fs_used_bytes  BIGINT UNSIGNED NOT NULL,
+  fs_avail_bytes BIGINT UNSIGNED NOT NULL,
+  fs_used_pct    DECIMAL(5,2) NOT NULL,
+  in_total_bytes BIGINT UNSIGNED NOT NULL,
+  in_used_bytes  BIGINT UNSIGNED NOT NULL,
+  in_avail_bytes BIGINT UNSIGNED NOT NULL,
+  in_used_pct    DECIMAL(5,2) NOT NULL,
+  health       ENUM('ok', 'warn', 'crit') NOT NULL DEFAULT 'ok',
+  PRIMARY KEY (node_id, fs_path, fs_ts),
+  KEY idx_fs_ts (fs_ts)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS storage_node_disk_stats (
+  node_id        INT UNSIGNED NOT NULL,
+  disk_ts        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  disk_name      VARCHAR(64) NOT NULL,        -- sda, nvme0n1
+  disk_path      VARCHAR(128) NOT NULL,       -- /dev/sda
+  disk_size_bytes BIGINT UNSIGNED NOT NULL,
+  disk_rotational TINYINT(1) NOT NULL,        -- 0=SSD, 1=HDD
+  reads_completed BIGINT UNSIGNED NOT NULL,
+  writes_completed BIGINT UNSIGNED NOT NULL,
+  read_bytes      BIGINT UNSIGNED NOT NULL,
+  write_bytes     BIGINT UNSIGNED NOT NULL,
+  io_in_progress  BIGINT UNSIGNED NOT NULL,
+  io_ms           BIGINT UNSIGNED NOT NULL,
+  fs_path         VARCHAR(255) NULL,          -- best-effort mapping
+  health          ENUM('ok','warn','crit') NOT NULL DEFAULT 'ok',
+  PRIMARY KEY (node_id, disk_name, disk_ts),
+  KEY idx_disk_ts (disk_ts)
+) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS alerts (
   id               INT UNSIGNED KEY,
@@ -191,7 +225,9 @@ CREATE TABLE IF NOT EXISTS host (
   fenced               BOOLEAN NOT NULL,
   last_heartbeat       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   date_added_to_cluster TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  ldap_member          BOOLEAN,
+  ldap_member          BOOLEAN,    class Meta:
+        managed = False
+        db_table = 'v_stats'
   tags                 JSON NULL
 ) ENGINE=InnoDB;
 
@@ -208,7 +244,9 @@ CREATE TABLE IF NOT EXISTS host_auth (
   revoked_by     VARCHAR(128) NULL,
   revocation_reason VARCHAR(255) NULL,
   intended_ip    VARBINARY(16) NULL,
-  claims         JSON,
+  claims         JSON,    class Meta:
+        managed = False
+        db_table = 'v_stats'
   status         ENUM('pending','approved','revoked') NOT NULL DEFAULT 'pending',
   created_at     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
@@ -415,6 +453,8 @@ CREATE TABLE IF NOT EXISTS meta_snapshots (
 -- =========================
 USE hive_api;
 
+-- Virtual Entities only in the API DB.
+
 CREATE OR REPLACE VIEW v_meta_snapshots AS SELECT * FROM hive_meta.meta_snapshots;
 CREATE OR REPLACE VIEW v_dentries AS SELECT * FROM hive_meta.volume_dentries;
 CREATE OR REPLACE VIEW v_inodes   AS SELECT * FROM hive_meta.volume_inodes;
@@ -422,6 +462,20 @@ CREATE OR REPLACE VIEW v_roots    AS SELECT * FROM hive_meta.volume_root_dentrie
 CREATE OR REPLACE VIEW v_nodes    AS SELECT * FROM hive_meta.storage_nodes;
 CREATE OR REPLACE VIEW v_vstats    AS SELECT * FROM hive_meta.volume_stats;
 CREATE OR REPLACE VIEW v_stats    AS SELECT * FROM hive_meta.storage_node_stats;
+CREATE OR REPLACE VIEW hive_api.v_alerts AS SELECT * FROM hive_meta.alerts;
+CREATE OR REPLACE VIEW hive_api.v_clusters AS SELECT * FROM hive_api.cluster;
+CREATE OR REPLACE VIEW hive_api.v_shard_map AS SELECT * FROM hive_meta.shard_map;
+CREATE OR REPLACE VIEW hive_api.v_hosts AS SELECT * FROM hive_meta.host;
+CREATE OR REPLACE VIEW hive_api.v_host_auth AS SELECT * FROM hive_meta.host_auth;
+CREATE OR REPLACE VIEW hive_api.v_host_tokens AS SELECT * FROM hive_meta.host_tokens;
+CREATE OR REPLACE VIEW hive_api.v_volume_superblocks AS SELECT * FROM hive_meta.volume_superblocks;
+CREATE OR REPLACE VIEW hive_api.v_volume_xattrs AS SELECT * FROM hive_meta.volume_xattrs;
+CREATE OR REPLACE VIEW hive_api.v_block_stripe_locations AS SELECT * FROM hive_meta.block_stripe_locations;
+CREATE OR REPLACE VIEW hive_api.v_storage_nodes AS SELECT * FROM hive_meta.storage_nodes;
+CREATE OR REPLACE VIEW hive_api.v_storage_node_stats AS SELECT * FROM hive_meta.storage_node_stats;
+CREATE OR REPLACE VIEW hive_api.v_volume_stats AS SELECT * FROM hive_meta.volume_stats;
+CREATE OR REPLACE VIEW hive_api.v_sn_fs_stats AS SELECT * FROM hive_meta.storage_node_fs_stats;
+CREATE OR REPLACE VIEW hive_api.v_sn_disk_stats AS SELECT * FROM hive_meta.storage_node_disk_stats;
 
 -- Virtual nodes for GUI
 CREATE TABLE IF NOT EXISTS ui_virtual_node (

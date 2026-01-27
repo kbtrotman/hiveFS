@@ -4,10 +4,12 @@ from django.shortcuts import render
 from rest_framework.response import Response
 from rest_framework.viewsets import ReadOnlyModelViewSet, ViewSet
 
-from .models import Storage_Nodes, Storage_Node_Stats
-from .serializers import StorageNodeSerializer, StorageNodeStatSerializer
+from django.utils.dateparse import parse_datetime
+from rest_framework.generics import ListAPIView
+from rest_framework.permissions import IsAuthenticated 
 
-
+from .models import Storage_Nodes, Storage_Node_Stats, StorageNodeFsStats, StorageNodeDiskStats
+from .serializers import StorageNodeSerializer, StorageNodeStatSerializer, StorageNodeFsStatsSerializer, StorageNodeDiskStatsSerializer
 class DiskNodeViewSet(ViewSet):
     """
     Gets the HiveFS Disk Capacities View (all nodes or by node_id).
@@ -117,4 +119,88 @@ class DiskNodeStatViewSet(ViewSet):
             for stats in qs
         ]
         return Response(payload)
-    
+
+
+def _apply_common_filters(qs, request, ts_field: str):
+    node_id = request.query_params.get("node_id")
+    if node_id:
+        try:
+            qs = qs.filter(node_id=int(node_id))
+        except ValueError:
+            pass
+
+    since = request.query_params.get("since")
+    if since:
+        dt = parse_datetime(since)
+        if dt:
+            qs = qs.filter(**{f"{ts_field}__gte": dt})
+
+    until = request.query_params.get("until")
+    if until:
+        dt = parse_datetime(until)
+        if dt:
+            qs = qs.filter(**{f"{ts_field}__lte": dt})
+
+    # Default: newest first
+    qs = qs.order_by(f"-{ts_field}")
+
+    # Simple safety cap
+    limit = request.query_params.get("limit")
+    if limit:
+        try:
+            limit_int = max(1, min(int(limit), 5000))
+            qs = qs[:limit_int]
+        except ValueError:
+            pass
+    else:
+        qs = qs[:500]
+
+    return qs
+
+
+class StorageNodeFsStatsListView(ListAPIView):
+    permission_classes = [IsAuthenticated]  # adjust
+    serializer_class = StorageNodeFsStatsSerializer
+
+    def get_queryset(self):
+        qs = StorageNodeFsStats.objects.all()
+
+        fs_path = self.request.query_params.get("fs_path")
+        if fs_path:
+            qs = qs.filter(fs_path=fs_path)
+
+        fs_type = self.request.query_params.get("fs_type")
+        if fs_type:
+            qs = qs.filter(fs_type=fs_type)
+
+        health = self.request.query_params.get("health")
+        if health:
+            qs = qs.filter(health=health)
+
+        return _apply_common_filters(qs, self.request, ts_field="fs_ts")
+
+
+class StorageNodeDiskStatsListView(ListAPIView):
+    permission_classes = [IsAuthenticated]  # adjust
+    serializer_class = StorageNodeDiskStatsSerializer
+
+    def get_queryset(self):
+        qs = StorageNodeDiskStats.objects.all()
+
+        disk_name = self.request.query_params.get("disk_name")
+        if disk_name:
+            qs = qs.filter(disk_name=disk_name)
+
+        fs_path = self.request.query_params.get("fs_path")
+        if fs_path:
+            qs = qs.filter(fs_path=fs_path)
+
+        rotational = self.request.query_params.get("rotational")
+        if rotational in ("0", "1"):
+            qs = qs.filter(disk_rotational=(rotational == "1"))
+
+        health = self.request.query_params.get("health")
+        if health:
+            qs = qs.filter(health=health)
+
+        return _apply_common_filters(qs, self.request, ts_field="disk_ts")

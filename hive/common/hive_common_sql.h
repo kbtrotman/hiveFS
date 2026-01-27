@@ -311,6 +311,21 @@ extern struct SQLDB sqldb;
 	"cont1_isok, cont2_isok, cont1_message, cont2_message, clients) " \
 	"VALUES (%llu, FROM_UNIXTIME(%llu), %u, %u, %u, %u, %u, %u, %u, %u, %u, %u, %u, %u, %u, %u, %u, %u, %u, %u, %u, %u, '%s', %u, %u, '%s', %u, %u, '%s', '%s', %u)"
 
+#define SQL_STORAGE_NODE_FS_STATS_INSERT \
+	"INSERT INTO storage_node_fs_stats " \
+	"(node_id, fs_ts, fs_name, fs_path, fs_type, " \
+	"fs_total_bytes, fs_used_bytes, fs_avail_bytes, fs_used_pct, " \
+	"in_total_bytes, in_used_bytes, in_avail_bytes, in_used_pct, health) " \
+	"VALUES (%llu, FROM_UNIXTIME(%llu), %s, %s, %s, %llu, %llu, %llu, %.2f, %llu, %llu, %llu, %.2f, %s)"
+
+#define SQL_STORAGE_NODE_DISK_STATS_INSERT \
+	"INSERT INTO storage_node_disk_stats " \
+	"(node_id, disk_ts, disk_name, disk_path, disk_size_bytes, disk_rotational, " \
+	"reads_completed, writes_completed, read_bytes, write_bytes, " \
+	"io_in_progress, io_ms, fs_path, health) " \
+	"VALUES (%llu, FROM_UNIXTIME(%llu), %s, %s, %llu, %u, %llu, %llu, %llu, %llu, %llu, %llu, %s, %s)"
+
+
 
 /* Prototypes */
 
@@ -342,3 +357,9 @@ struct stripe_location {
 	uint64_t estripe_id;
 	uint64_t block_offset;
 };
+bool hifs_get_stripe_locations(uint64_t inode,
+				struct stripe_location **locations_out,
+				size_t *num_locations_out);
+void hifs_free_stripe_locations(struct stripe_location *locations, size_t num_locations);
+bool hifs_init_sql_connection(void);
+void hifs_close_sql_connection(void);

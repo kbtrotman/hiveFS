@@ -417,6 +417,128 @@ bool hifs_insert_data(const char *q_string)
 	return true;
 }
 
+bool hifs_store_fs_stat(uint64_t node_id,
+			 uint64_t ts_unix,
+			 const char *fs_name,
+			 const char *fs_path,
+			 const char *fs_type,
+			 uint64_t fs_total_bytes,
+			 uint64_t fs_used_bytes,
+			 uint64_t fs_avail_bytes,
+			 double fs_used_pct,
+			 uint64_t in_total,
+			 uint64_t in_used,
+			 uint64_t in_avail,
+			 double in_used_pct,
+			 const char *health)
+{
+	if (!sqldb.sql_init || !sqldb.conn)
+		return false;
+
+	char *name_sql = hifs_get_quoted_value(fs_name ? fs_name : "");
+	char *path_sql = hifs_get_quoted_value(fs_path ? fs_path : "");
+	char *type_sql = hifs_get_quoted_value(fs_type ? fs_type : "");
+	char *health_sql = hifs_get_quoted_value(health ? health : "ok");
+
+	const char *name_use = name_sql ? name_sql : "";
+	const char *path_use = path_sql ? path_sql : "";
+	const char *type_use = type_sql ? type_sql : "";
+	const char *health_use = health_sql ? health_sql : "ok";
+
+	char sql_query[MAX_QUERY_SIZE];
+	int written = snprintf(sql_query, sizeof(sql_query),
+				 SQL_STORAGE_NODE_FS_STATS_INSERT,
+				 (unsigned long long)node_id,
+				 (unsigned long long)ts_unix,
+				 name_use,
+				 path_use,
+				 type_use,
+				 (unsigned long long)fs_total_bytes,
+				 (unsigned long long)fs_used_bytes,
+				 (unsigned long long)fs_avail_bytes,
+				 fs_used_pct,
+				 (unsigned long long)in_total,
+				 (unsigned long long)in_used,
+				 (unsigned long long)in_avail,
+				 in_used_pct,
+				 health_use);
+
+	free(name_sql);
+	free(path_sql);
+	free(type_sql);
+	free(health_sql);
+
+	if (written <= 0 || written >= (int)sizeof(sql_query))
+		return false;
+
+	return hifs_insert_data(sql_query);
+}
+
+
+bool hifs_store_disk_stat(uint64_t node_id,
+			  uint64_t ts_unix,
+			  const char *disk_name,
+			  const char *disk_path,
+			  uint64_t disk_size_bytes,
+			  unsigned int disk_rotational,
+			  uint64_t reads_completed,
+			  uint64_t writes_completed,
+			  uint64_t read_bytes,
+			  uint64_t write_bytes,
+			  uint64_t io_in_progress,
+			  uint64_t io_ms,
+			  const char *fs_path,
+			  const char *health)
+{
+	if (!sqldb.sql_init || !sqldb.conn)
+		return false;
+
+	char *name_sql   = hifs_get_quoted_value(disk_name ? disk_name : "");
+	char *path_sql   = hifs_get_quoted_value(disk_path ? disk_path : "");
+	char *fsp_sql    = hifs_get_quoted_value(fs_path ? fs_path : "");
+	char *health_sql = hifs_get_quoted_value(health ? health : "ok");
+
+	const char *name_use   = name_sql ? name_sql : "";
+	const char *path_use   = path_sql ? path_sql : "";
+	const char *fsp_use    = fsp_sql ? fsp_sql : "NULL";
+	const char *health_use = health_sql ? health_sql : "ok";
+
+	/* If fs_path is NULL/empty, write SQL NULL (not quoted empty string) */
+	char fs_path_buf[512];
+	if (!fs_path || fs_path[0] == '\0') {
+		snprintf(fs_path_buf, sizeof(fs_path_buf), "NULL");
+		fsp_use = fs_path_buf;
+	}
+
+	char sql_query[MAX_QUERY_SIZE];
+	int written = snprintf(sql_query, sizeof(sql_query),
+			       SQL_STORAGE_NODE_DISK_STATS_INSERT,
+			       (unsigned long long)node_id,
+			       (unsigned long long)ts_unix,
+			       name_use,
+			       path_use,
+			       (unsigned long long)disk_size_bytes,
+			       (unsigned int)disk_rotational,
+			       (unsigned long long)reads_completed,
+			       (unsigned long long)writes_completed,
+			       (unsigned long long)read_bytes,
+			       (unsigned long long)write_bytes,
+			       (unsigned long long)io_in_progress,
+			       (unsigned long long)io_ms,
+			       fsp_use,
+			       health_use);
+
+	free(name_sql);
+	free(path_sql);
+	free(fsp_sql);
+	free(health_sql);
+
+	if (written <= 0 || written >= (int)sizeof(sql_query))
+		return false;
+
+	return hifs_insert_data(sql_query);
+}
+
 int hifs_get_hive_host_sbs(void)
 {
 	char sql_query[MAX_QUERY_SIZE];

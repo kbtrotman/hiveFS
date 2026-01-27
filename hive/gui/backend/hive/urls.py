@@ -23,7 +23,7 @@ from audit.views import AuditRootView
 from monitor.views import MonitorRootView
 from tenant.views import TenantRootView
 from nodes.views import StorageNodeViewSet, StorageNodeStatViewSet
-from disk.views import DiskNodeViewSet, DiskNodeStatViewSet
+from disk.views import DiskNodeViewSet, DiskNodeStatViewSet, StorageNodeFsStatsListView, StorageNodeDiskStatsListView
 from api.views import BootstrapError, BootstrapInitView, BootstrapStatusView, AddNodeView, AddForeignerView
 from accounts.views import (
     GroupMembershipViewSet,
@@ -44,14 +44,15 @@ router.register(r'monitor', MonitorRootView, basename='monitor')
 router.register(r'tenant', TenantRootView, basename='tenant')
 router.register(r'nodes', StorageNodeViewSet, basename='nodes')
 router.register(r'snstats', StorageNodeViewSet, basename='snstats')
-router.register(r'disk', DiskNodeViewSet, basename='disk')
-router.register(r'stats', DiskNodeStatViewSet, basename='stats')
+router.register(r'health/capacity', DiskNodeViewSet, basename='disk')
+router.register(r'health/stats', DiskNodeStatViewSet, basename='stats')
 router.register(r"accounts", UserViewSet, basename="account")
 router.register(r"groups", GroupViewSet, basename="group")
 router.register(r"roles", RoleViewSet, basename="role")
 router.register(r"ldap", LDAPViewSet, basename="ldap")
 router.register(r"saml", SAMLViewSet, basename="saml")
 router.register(r"mfa", MFAViewSet, basename="mfa")
+
 router.register(
     r"group-memberships", GroupMembershipViewSet, basename="group-membership"
 )
@@ -67,5 +68,7 @@ urlpatterns = [
     path("api/v1/bootstrap/init", BootstrapInitView.as_view()),
     path("api/v1/bootstrap/addnode", AddNodeView.as_view()),
     path("api/v1/bootstrap/addforeigner", AddForeignerView.as_view()),
+    path("api/v1/health/fs", StorageNodeFsStatsListView.as_view(), name="fs-stats"),
+    path("api/v1/health/disks", StorageNodeDiskStatsListView.as_view(), name="disk-stats"), 
     path('admin/', admin.site.urls),
 ]
