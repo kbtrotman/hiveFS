@@ -351,7 +351,7 @@ export function SecurityAuditTab() {
       </div>
 
       {/* Statistics Cards */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
         <Card className="border-primary/10 bg-gradient-to-b from-background/80 to-background shadow-lg shadow-primary/10">
           <CardContent className="pt-4">
             <div className="flex items-center justify-between">
@@ -410,8 +410,8 @@ export function SecurityAuditTab() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-6 gap-4">
-            <div>
+          <div className="flex flex-wrap items-end gap-4 xl:flex-nowrap">
+            <div className="flex min-w-[160px] flex-1 flex-col">
               <Label htmlFor="filter-event-type" className="text-xs text-muted-foreground">
                 Event Type
               </Label>
@@ -455,7 +455,7 @@ export function SecurityAuditTab() {
               </Select>
             </div>
 
-            <div>
+            <div className="flex min-w-[140px] flex-1 flex-col">
               <Label htmlFor="filter-severity" className="text-xs text-muted-foreground">
                 Severity
               </Label>
@@ -474,7 +474,7 @@ export function SecurityAuditTab() {
               </Select>
             </div>
 
-            <div>
+            <div className="flex min-w-[140px] flex-1 flex-col">
               <Label htmlFor="filter-user" className="text-xs text-muted-foreground">
                 User
               </Label>
@@ -493,7 +493,7 @@ export function SecurityAuditTab() {
               </Select>
             </div>
 
-            <div>
+            <div className="flex min-w-[140px] flex-1 flex-col">
               <Label htmlFor="filter-success" className="text-xs text-muted-foreground">
                 Status
               </Label>
@@ -519,7 +519,7 @@ export function SecurityAuditTab() {
               </Select>
             </div>
 
-            <div>
+            <div className="flex min-w-[140px] flex-1 flex-col">
               <Label htmlFor="date-range" className="text-xs text-muted-foreground">
                 Date Range
               </Label>
@@ -537,7 +537,7 @@ export function SecurityAuditTab() {
               </Select>
             </div>
 
-            <div>
+            <div className="flex min-w-[220px] flex-1 flex-col">
               <Label htmlFor="search" className="text-xs text-muted-foreground">
                 Search
               </Label>

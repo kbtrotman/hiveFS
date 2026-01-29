@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Input } from './ui/input';
@@ -9,6 +9,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from './ui/table';
 import { Badge } from './ui/badge';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from './ui/dialog';
 
 type TabKey = 'users' | 'groups' | 'roles';
 
@@ -985,5 +993,56 @@ function PermissionEditor({ value, onChange }: PermissionEditorProps) {
         <Plus className="mr-1 size-4" /> Add Permission
       </Button>
     </div>
+  );
+}
+
+type PermissionsSetupDialogProps = {
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  initialTab?: TabKey;
+  trigger?: ReactNode;
+  triggerLabel?: string;
+};
+
+export function PermissionsSetupDialog({
+  open,
+  onOpenChange,
+  initialTab = 'users',
+  trigger,
+  triggerLabel = 'Manage Permissions',
+}: PermissionsSetupDialogProps) {
+  const [internalOpen, setInternalOpen] = useState(false);
+  const isControlled = typeof open === 'boolean';
+  const dialogOpen = isControlled ? open : internalOpen;
+
+  const handleOpenChange = (next: boolean) => {
+    if (!isControlled) {
+      setInternalOpen(next);
+    }
+    onOpenChange?.(next);
+  };
+
+  const triggerNode =
+    trigger === undefined ? (
+      <Button size="sm" variant="outline">
+        {triggerLabel}
+      </Button>
+    ) : (
+      trigger
+    );
+
+  return (
+    <Dialog open={dialogOpen} onOpenChange={handleOpenChange}>
+      {triggerNode ? <DialogTrigger asChild>{triggerNode}</DialogTrigger> : null}
+      <DialogContent className="max-h-[calc(100vh-3rem)] w-[min(1200px,calc(100vw-2rem))] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Permissions &amp; Access Control</DialogTitle>
+          <DialogDescription>
+            Create users, bundle them into groups, and assign roles across the HiveFS control plane.
+          </DialogDescription>
+        </DialogHeader>
+        <PermissionsSetupScreen initialTab={initialTab} className="pt-2" />
+      </DialogContent>
+    </Dialog>
   );
 }

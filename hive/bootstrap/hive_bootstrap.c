@@ -32,6 +32,8 @@
 
 struct hive_bootstrap_config hbc;
 
+static const unsigned int MAX_STAGE_ATTEMPTS = 3;
+
 __attribute__((weak)) void hicomm_log(int level, const char *fmt, ...)
 {
 	va_list ap;
@@ -150,9 +152,180 @@ static bool parse_json_u64_value(const char *json, const char *key,
 	return true;
 }
 
+static bool equals_ignore_case(const char *lhs, const char *rhs)
+{
+	if (!lhs || !rhs)
+		return false;
+	while (*lhs && *rhs) {
+		if (tolower((unsigned char)*lhs) != tolower((unsigned char)*rhs))
+			return false;
+		++lhs;
+		++rhs;
+	}
+	return *lhs == '\0' && *rhs == '\0';
+}
+
+static bool parse_json_boolish(const char *json, const char *key, bool *out)
+{
+	char buf[16];
+
+	if (!out)
+		return false;
+	if (parse_json_string_value(json, key, buf, sizeof(buf))) {
+		size_t len = strlen(buf);
+
+		for (size_t i = 0; i < len; ++i)
+			buf[i] = (char)tolower((unsigned char)buf[i]);
+		if (strcmp(buf, "yes") == 0 || strcmp(buf, "true") == 0 ||
+		    strcmp(buf, "ready") == 0 || strcmp(buf, "1") == 0) {
+			*out = true;
+			return true;
+		}
+		if (strcmp(buf, "no") == 0 || strcmp(buf, "false") == 0 ||
+		    strcmp(buf, "0") == 0 || strcmp(buf, "null") == 0 ||
+		    buf[0] == '\0') {
+			*out = false;
+			return true;
+		}
+	}
+	uint64_t num;
+
+	if (parse_json_u64_value(json, key, &num)) {
+		*out = (num != 0);
+		return true;
+	}
+	return false;
+}
+
+static bool replace_json_value(const char *key, const char *replacement,
+			       bool quoted)
+{
+	FILE *fp;
+	char *buf = NULL;
+	char *new_buf = NULL;
+	long sz;
+
+	if (!key || !replacement)
+		return false;
+	fp = fopen(HIVE_NODE_CONF_PATH, "r");
+	if (!fp) {
+		fprintf(stderr, "bootstrap: unable to open %s: %s\n",
+			HIVE_NODE_CONF_PATH, strerror(errno));
+		return false;
+	}
+	if (fseek(fp, 0, SEEK_END) != 0) {
+		fclose(fp);
+		return false;
+	}
+	sz = ftell(fp);
+	if (sz < 0) {
+		fclose(fp);
+		return false;
+	}
+	rewind(fp);
+	buf = malloc((size_t)sz + 1);
+	if (!buf) {
+		fclose(fp);
+		return false;
+	}
+	size_t len = fread(buf, 1, (size_t)sz, fp);
+	fclose(fp);
+	buf[len] = '\0';
+	size_t needle_len = 0;
+	const char *key_pos = find_json_key(buf, key, &needle_len);
+
+	if (!key_pos) {
+		free(buf);
+		return false;
+	}
+	const char *value_pos = skip_ws(key_pos + needle_len);
+
+	if (*value_pos != ':') {
+		free(buf);
+		return false;
+	}
+	value_pos = skip_ws(value_pos + 1);
+	if (!*value_pos) {
+		free(buf);
+		return false;
+	}
+
+	const char *scan = value_pos;
+
+	if (*scan == '"') {
+		++scan;
+		while (*scan) {
+			if (*scan == '"' && scan[-1] != '\\')
+				break;
+			++scan;
+		}
+		if (*scan == '"')
+			++scan;
+	} else {
+		while (*scan && *scan != ',' && *scan != '}' &&
+		       *scan != '\n' && *scan != '\r')
+			++scan;
+	}
+
+	const char *suffix = scan;
+	size_t prefix_len = (size_t)(value_pos - buf);
+	size_t suffix_len = len - (size_t)(suffix - buf);
+	size_t repl_len = strlen(replacement);
+	size_t total = prefix_len + suffix_len + repl_len + (quoted ? 2 : 0);
+
+	new_buf = malloc(total + 1);
+	if (!new_buf) {
+		free(buf);
+		return false;
+	}
+
+	memcpy(new_buf, buf, prefix_len);
+	size_t pos = prefix_len;
+
+	if (quoted)
+		new_buf[pos++] = '"';
+	memcpy(new_buf + pos, replacement, repl_len);
+	pos += repl_len;
+	if (quoted)
+		new_buf[pos++] = '"';
+	memcpy(new_buf + pos, suffix, suffix_len);
+	pos += suffix_len;
+	new_buf[pos] = '\0';
+
+	fp = fopen(HIVE_NODE_CONF_PATH, "w");
+	if (!fp) {
+		free(buf);
+		free(new_buf);
+		return false;
+	}
+	bool ok = fwrite(new_buf, 1, pos, fp) == pos;
+
+	fclose(fp);
+	free(buf);
+	free(new_buf);
+	return ok;
+}
+
+bool hive_bootstrap_update_string_field(const char *key, const char *value)
+{
+	if (!value)
+		value = "";
+	return replace_json_value(key, value, true);
+}
+
+bool hive_bootstrap_update_number_field(const char *key, uint64_t value)
+{
+	char buffer[32];
+
+	snprintf(buffer, sizeof(buffer), "%llu",
+		 (unsigned long long)value);
+	return replace_json_value(key, buffer, false);
+}
+
 static void apply_node_config(const char *json)
 {
 	uint64_t val;
+	bool ready_flag;
 
 	if (parse_json_u64_value(json, "storage_node_id", &val))
 		hbc.storage_node_id = (unsigned int)val;
@@ -219,6 +392,12 @@ static void apply_node_config(const char *json)
 		hbc.storage_node_client_connect_timeout_ms = (uint32_t)val;
 	if (parse_json_u64_value(json, "storage_node_storage_node_connect_timeout_ms", &val))
 		hbc.storage_node_storage_node_connect_timeout_ms = (uint32_t)val;
+	if (parse_json_u64_value(json, "stage_of_config", &val))
+		hbc.stage_of_config = (uint32_t)val;
+	if (parse_json_u64_value(json, "num_of_attempts_this_stage", &val))
+		hbc.num_attempts_this_stage = (uint32_t)val;
+	if (parse_json_boolish(json, "ready_4_web_conf", &ready_flag))
+		hbc.ready_for_web_conf = ready_flag;
 }
 
 static bool load_node_config(void)
@@ -250,6 +429,185 @@ static bool load_node_config(void)
 	free(buf);
 	return true;
 }
+
+static bool is_state_configured(const char *state)
+{
+	return state && equals_ignore_case(state, "configured");
+}
+
+static bool containers_configured(void)
+{
+	return is_state_configured(hbc.cont1_state) &&
+	       is_state_configured(hbc.cont2_state);
+}
+
+static bool set_stage_field(uint32_t stage)
+{
+	if (stage > HIVE_STAGE_COMPLETE)
+		stage = HIVE_STAGE_COMPLETE;
+	if (!hive_bootstrap_update_number_field("stage_of_config", stage))
+		return false;
+	hbc.stage_of_config = stage;
+	return true;
+}
+
+static bool set_stage_attempts_field(uint32_t attempts)
+{
+	if (!hive_bootstrap_update_number_field("num_of_attempts_this_stage", attempts))
+		return false;
+	hbc.num_attempts_this_stage = attempts;
+	return true;
+}
+
+static bool set_ready_flag(bool ready)
+{
+	const char *value = ready ? "yes" : "no";
+
+	if (!hive_bootstrap_update_string_field("ready_4_web_conf", value))
+		return false;
+	hbc.ready_for_web_conf = ready;
+	return true;
+}
+
+static bool ensure_ready_flag_for_stage(uint32_t stage)
+{
+	bool should_be_ready =
+		(stage == HIVE_STAGE_WEB_READY &&
+		 hbc.stage_of_config < HIVE_STAGE_COMPLETE);
+
+	if (hbc.ready_for_web_conf == should_be_ready)
+		return true;
+	return set_ready_flag(should_be_ready);
+}
+
+static bool normalize_stage_from_states(void)
+{
+	uint32_t desired_stage;
+
+	if (!is_state_configured(hbc.database_state))
+		desired_stage = HIVE_STAGE_DATABASE;
+	else if (!is_state_configured(hbc.kv_state))
+		desired_stage = HIVE_STAGE_KV;
+	else if (!containers_configured())
+		desired_stage = HIVE_STAGE_CONTAINERS;
+	else if (hbc.cluster_state[0] != '\0' &&
+		 !equals_ignore_case(hbc.cluster_state, "unconfigured"))
+		desired_stage = HIVE_STAGE_COMPLETE;
+	else
+		desired_stage = HIVE_STAGE_WEB_READY;
+
+	if (desired_stage != hbc.stage_of_config) {
+		if (!set_stage_field(desired_stage))
+			return false;
+		if (!set_stage_attempts_field(0))
+			return false;
+	}
+	return ensure_ready_flag_for_stage(hbc.stage_of_config);
+}
+
+static bool ensure_stage_marker(uint32_t stage)
+{
+	if (hbc.stage_of_config != stage) {
+		if (!set_stage_field(stage))
+			return false;
+		if (!set_stage_attempts_field(0))
+			return false;
+	}
+	return ensure_ready_flag_for_stage(stage);
+}
+
+static bool increment_stage_attempts(void)
+{
+	uint32_t next = hbc.num_attempts_this_stage + 1;
+
+	if (!set_stage_attempts_field(next))
+		return false;
+	return true;
+}
+
+static bool advance_to_stage(uint32_t next_stage)
+{
+	if (!set_stage_field(next_stage))
+		return false;
+	if (!set_stage_attempts_field(0))
+		return false;
+	return ensure_ready_flag_for_stage(next_stage);
+}
+
+bool hive_bootstrap_set_stage(enum hive_bootstrap_stage stage, bool reset_attempts)
+{
+	if (!set_stage_field((uint32_t)stage))
+		return false;
+	if (reset_attempts) {
+		if (!set_stage_attempts_field(0))
+			return false;
+	}
+	return ensure_ready_flag_for_stage((uint32_t)stage);
+}
+
+bool hive_bootstrap_reset_stage_attempts(void)
+{
+	return set_stage_attempts_field(0);
+}
+
+bool hive_bootstrap_increment_stage_attempts(void)
+{
+	return increment_stage_attempts();
+}
+
+static bool reload_node_config_and_normalize(void)
+{
+	if (!load_node_config()) {
+		fprintf(stderr,
+			"bootstrap: failed to reload %s\n",
+			HIVE_NODE_CONF_PATH);
+		return false;
+	}
+	return normalize_stage_from_states();
+}
+
+typedef bool (*stage_is_complete_fn)(void);
+typedef int (*stage_executor_fn)(void);
+
+static bool run_simple_stage(uint32_t stage_id, uint32_t next_stage,
+			     const char *label,
+			     stage_is_complete_fn is_complete,
+			     stage_executor_fn executor)
+{
+	if (!ensure_stage_marker(stage_id))
+		return false;
+
+	while (hbc.stage_of_config == stage_id) {
+		if (is_complete && is_complete()) {
+			if (!advance_to_stage(next_stage))
+				return false;
+			return reload_node_config_and_normalize();
+		}
+		if (hbc.num_attempts_this_stage >= MAX_STAGE_ATTEMPTS) {
+			fprintf(stderr,
+				"bootstrap: %s stage failed after %u attempts; please contact support\n",
+				label, MAX_STAGE_ATTEMPTS);
+			return false;
+		}
+		if (!increment_stage_attempts())
+			return false;
+		unsigned int attempt = hbc.num_attempts_this_stage;
+
+		fprintf(stderr, "bootstrap: %s stage (attempt %u)\n",
+			label, attempt);
+		if (executor && executor() != 0)
+			fprintf(stderr,
+				"bootstrap: %s stage attempt %u did not complete cleanly\n",
+				label, attempt);
+		if (!reload_node_config_and_normalize())
+			return false;
+	}
+	return true;
+}
+
+static bool run_database_stage(void);
+static bool run_kv_stage(void);
+static bool run_container_stage(void);
 
 static bool mysql_execute_statement(const char *stmt, size_t len)
 {
@@ -443,93 +801,13 @@ static bool run_mariadb_schema(void)
 
 static bool update_database_state_flag(const char *state)
 {
-	FILE *fp;
-	char *buf = NULL;
-	char *value_start;
-	char *value_end;
-	char *key;
-	size_t len;
-
 	if (!state || !*state)
 		return false;
-	fp = fopen(HIVE_NODE_CONF_PATH, "r");
-	if (!fp) {
-		fprintf(stderr, "db_config: unable to open %s: %s\n",
-			HIVE_NODE_CONF_PATH, strerror(errno));
+	if (!hive_bootstrap_update_string_field("database_state", state))
 		return false;
-	}
-	if (fseek(fp, 0, SEEK_END) != 0) {
-		fclose(fp);
-		return false;
-	}
-	long sz = ftell(fp);
-	if (sz < 0) {
-		fclose(fp);
-		return false;
-	}
-	rewind(fp);
-	buf = malloc((size_t)sz + 1);
-	if (!buf) {
-		fclose(fp);
-		return false;
-	}
-	len = fread(buf, 1, (size_t)sz, fp);
-	fclose(fp);
-	buf[len] = '\0';
-	key = strstr(buf, "\"database_state\"");
-	if (!key) {
-		free(buf);
-		return false;
-	}
-	key += strlen("\"database_state\"");
-	while (*key && isspace((unsigned char)*key))
-		++key;
-	if (*key != ':') {
-		free(buf);
-		return false;
-	}
-	++key;
-	while (*key && isspace((unsigned char)*key))
-		++key;
-	if (*key != '"') {
-		free(buf);
-		return false;
-	}
-	++key;
-	value_start = key;
-	while (*key && *key != '"')
-		++key;
-	if (*key != '"') {
-		free(buf);
-		return false;
-	}
-	value_end = key;
-	size_t prefix_len = (size_t)(value_start - buf);
-	size_t suffix_len = len - (size_t)(value_end - buf);
-	size_t state_len = strlen(state);
-	char *new_buf = malloc(prefix_len + state_len + suffix_len + 1);
-	if (!new_buf) {
-		free(buf);
-		return false;
-	}
-	memcpy(new_buf, buf, prefix_len);
-	memcpy(new_buf + prefix_len, state, state_len);
-	memcpy(new_buf + prefix_len + state_len, value_end, suffix_len);
-	size_t new_len = prefix_len + state_len + suffix_len;
-	free(buf);
-	fp = fopen(HIVE_NODE_CONF_PATH, "w");
-	if (!fp) {
-		free(new_buf);
-		return false;
-	}
-	bool ok = fwrite(new_buf, 1, new_len, fp) == new_len;
-	fclose(fp);
-	free(new_buf);
-	if (ok) {
-		strncpy(hbc.database_state, state, sizeof(hbc.database_state));
-		hbc.database_state[sizeof(hbc.database_state) - 1] = '\0';
-	}
-	return ok;
+	strncpy(hbc.database_state, state, sizeof(hbc.database_state));
+	hbc.database_state[sizeof(hbc.database_state) - 1] = '\0';
+	return true;
 }
 
 int db_config (void)
@@ -721,79 +999,137 @@ int ui_config(void)
 	return 0;
 }
 
-static void kv_config(void)
+static int kv_config(void)
 {
 	/* Placeholder for KV store configuration hook. */
+	return 0;
+}
+
+static bool is_database_stage_complete(void)
+{
+	return is_state_configured(hbc.database_state);
+}
+
+static bool is_kv_stage_complete(void)
+{
+	return is_state_configured(hbc.kv_state);
+}
+
+static bool run_database_stage(void)
+{
+	return run_simple_stage(HIVE_STAGE_DATABASE, HIVE_STAGE_KV,
+				"database", is_database_stage_complete,
+				db_config);
+}
+
+static bool run_kv_stage(void)
+{
+	return run_simple_stage(HIVE_STAGE_KV, HIVE_STAGE_CONTAINERS, "kv",
+				is_kv_stage_complete, kv_config);
+}
+
+static bool mark_containers_configured(void)
+{
+	static const char configured[] = "configured";
+
+	if (!hive_bootstrap_update_string_field("cont1_state", configured))
+		return false;
+	strncpy(hbc.cont1_state, configured, sizeof(hbc.cont1_state));
+	hbc.cont1_state[sizeof(hbc.cont1_state) - 1] = '\0';
+
+	if (!hive_bootstrap_update_string_field("cont2_state", configured))
+		return false;
+	strncpy(hbc.cont2_state, configured, sizeof(hbc.cont2_state));
+	hbc.cont2_state[sizeof(hbc.cont2_state) - 1] = '\0';
+
+	return true;
+}
+
+static bool run_container_stage(void)
+{
+	if (!ensure_stage_marker(HIVE_STAGE_CONTAINERS))
+		return false;
+
+	while (hbc.stage_of_config == HIVE_STAGE_CONTAINERS) {
+		if (containers_configured()) {
+			if (!advance_to_stage(HIVE_STAGE_WEB_READY))
+				return false;
+			return reload_node_config_and_normalize();
+		}
+		if (hbc.num_attempts_this_stage >= MAX_STAGE_ATTEMPTS) {
+			fprintf(stderr,
+				"bootstrap: container stage failed after %u attempts; please contact support\n",
+				MAX_STAGE_ATTEMPTS);
+			return false;
+		}
+		if (!increment_stage_attempts())
+			return false;
+		unsigned int attempt = hbc.num_attempts_this_stage;
+
+		fprintf(stderr, "bootstrap: container stage (attempt %u)\n",
+			attempt);
+		int rc = ui_config();
+
+		if (rc == 0) {
+			if (!mark_containers_configured())
+				return false;
+		} else {
+			fprintf(stderr,
+				"bootstrap: ui_config attempt %u failed\n",
+				attempt);
+		}
+		if (!reload_node_config_and_normalize())
+			return false;
+	}
+	return true;
 }
 
 int main(void)
 {
 
 	load_node_config();
-	bool bootstrap_needed =
-		strcmp(hbc.cluster_state, "unconfigured") == 0 &&
-		(strcmp(hbc.database_state, "configured") != 0 ||
-		 strcmp(hbc.kv_state, "configured") != 0);
-	bool node_init_needed = false;
+	if (!normalize_stage_from_states())
+		return 1;
 
 	fprintf(stderr, "main: starting\n");
 	fflush(stderr);
 
-	if (bootstrap_needed) {
-		for (unsigned int attempt = 0;
-		     attempt < 3 && strcmp(hbc.database_state, "configured") != 0;
-		     ++attempt) {
-			fprintf(stderr,
-				"bootstrap: configuring database (attempt %u)\n",
-				attempt + 1);
-			if (db_config() != 0)
-				fprintf(stderr,
-					"bootstrap: db_config attempt %u failed\n",
-					attempt + 1);
-			load_node_config();
+	while (hbc.stage_of_config < HIVE_STAGE_WEB_READY) {
+		switch (hbc.stage_of_config) {
+		case HIVE_STAGE_INITIAL:
+			if (!advance_to_stage(HIVE_STAGE_DATABASE))
+				return 1;
+			if (!reload_node_config_and_normalize())
+				return 1;
+			break;
+		case HIVE_STAGE_DATABASE:
+			if (!run_database_stage())
+				return 1;
+			break;
+		case HIVE_STAGE_KV:
+			if (!run_kv_stage())
+				return 1;
+			break;
+		case HIVE_STAGE_CONTAINERS:
+			if (!run_container_stage())
+				return 1;
+			break;
+		default:
+			if (!normalize_stage_from_states())
+				return 1;
+			break;
 		}
-		if (strcmp(hbc.database_state, "configured") != 0) {
-			fprintf(stderr,
-				"bootstrap: database configuration failed after 3 attempts; please contact support\n");
-			return 1;
-		}
-
-		for (unsigned int attempt = 0;
-		     attempt < 3 && strcmp(hbc.kv_state, "configured") != 0;
-		     ++attempt) {
-			fprintf(stderr,
-				"bootstrap: configuring KV store (attempt %u)\n",
-				attempt + 1);
-			kv_config();
-			load_node_config();
-		}
-		if (strcmp(hbc.kv_state, "configured") != 0) {
-			fprintf(stderr,
-				"bootstrap: KV configuration failed after 3 attempts; please contact support\n");
-			return 1;
-		}
-
-		if (strcmp(hbc.cluster_state, "unconfigured") != 0) {
-			fprintf(stderr,
-				"bootstrap: unexpected cluster state after configuration; please contact support\n");
-			return 1;
-		}
-		node_init_needed = true;
-	} else if (strcmp(hbc.cluster_state, "unconfigured") == 0 &&
-		   strcmp(hbc.database_state, "configured") == 0 &&
-		   strcmp(hbc.kv_state, "configured") == 0) {
-		node_init_needed = true;
-	} else if (strcmp(hbc.database_state, "configured") != 0 ||
-		   strcmp(hbc.kv_state, "configured") != 0) {
-		fprintf(stderr,
-			"bootstrap: invalid configuration state detected; please contact support\n");
-		return 1;
 	}
 
-	if (node_init_needed) {
+	if (!ensure_ready_flag_for_stage(hbc.stage_of_config))
+		return 1;
+
+	if (hbc.stage_of_config >= HIVE_STAGE_WEB_READY &&
+	    hbc.stage_of_config < HIVE_STAGE_COMPLETE) {
 		int rc = -1;
 
-		for (unsigned int attempt = 0; attempt < 3; ++attempt) {
+		for (unsigned int attempt = 0; attempt < MAX_STAGE_ATTEMPTS;
+		     ++attempt) {
 			fprintf(stderr,
 				"bootstrap: listening for cluster/node requests (attempt %u)\n",
 				attempt + 1);
@@ -802,6 +1138,8 @@ int main(void)
 			if (rc == 0) {
 				fprintf(stderr,
 					"bootstrap: request handled, continuing startup\n");
+				if (!reload_node_config_and_normalize())
+					return 1;
 				break;
 			}
 			fprintf(stderr,
@@ -811,20 +1149,11 @@ int main(void)
 
 		if (rc != 0) {
 			fprintf(stderr,
-				"bootstrap: failed to initialize cluster/node after 3 attempts; please contact support\n");
+				"bootstrap: failed to initialize cluster/node after %u attempts; please contact support\n",
+				MAX_STAGE_ATTEMPTS);
 			return 1;
 		}
 	}
-
- 
-//	if (storage_node_id == 0)
-//		storage_node_id = (unsigned int)self_id;
-
-
-	/* Now start the existing epoll-based TCP server.
-	 * Raft is running in its own thread; both will make progress.
-	 */
-
 
 	return 0;
 }

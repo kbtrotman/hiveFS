@@ -161,23 +161,26 @@ export default function App() {
       }
       setBootstrapStatusData(data);
 
-      const statusValue =
-        typeof data?.config_status === 'string'
-          ? data.config_status.toUpperCase()
-          : typeof data?.status === 'string'
-            ? data.status.toUpperCase()
-            : '';
-      const toLower = (value: unknown) =>
-        typeof value === 'string' ? value.toLowerCase() : '';
-      const awaitingConfiguration =
-        response.ok &&
-        data?.ok === true &&
-        BOOTSTRAP_READY_STATUSES.has(statusValue) &&
-        toLower(data?.cluster_state) === 'unconfigured' &&
-        toLower(data?.database_state) === 'configured' &&
-        toLower(data?.kv_state) === 'configured' &&
-        toLower(data?.cont1_state) === 'configured' &&
-        toLower(data?.cont2_state) === 'configured';
+      const toLower = (value: unknown) => (typeof value === 'string' ? value.toLowerCase() : '');
+      const readyFlagRaw = data?.ready_4_web_conf;
+      const hasReadyFlag = readyFlagRaw !== undefined && readyFlagRaw !== null;
+      let readyForWeb = false;
+      if (typeof readyFlagRaw === 'boolean') {
+        readyForWeb = readyFlagRaw;
+      } else if (typeof readyFlagRaw === 'number') {
+        readyForWeb = readyFlagRaw === 1;
+      } else if (typeof readyFlagRaw === 'string') {
+        const normalized = readyFlagRaw.trim().toLowerCase();
+        readyForWeb = ['yes', 'true', '1', 'ready'].includes(normalized);
+      }
+      const stageValueRaw = data?.stage_of_config;
+      const stageOfConfig =
+        typeof stageValueRaw === 'number'
+          ? stageValueRaw
+          : Number.isFinite(parseInt(stageValueRaw, 10))
+            ? parseInt(stageValueRaw, 10)
+            : 0;
+      const awaitingConfiguration = readyForWeb && stageOfConfig !== 5;
       setShowClusterInitScreen(awaitingConfiguration);
     } catch {
       setShowClusterInitScreen(false);
@@ -229,41 +232,6 @@ export default function App() {
     );
   }
 
-  if (showClusterInitScreen) {
-    return (
-      <div className={theme === 'dark' ? 'dark' : ''}>
-        <div className="flex h-screen flex-col bg-background text-foreground">
-          <TopBar
-            theme={theme}
-            onThemeToggle={toggleTheme}
-            activeTab={activeTab}
-            onTabChange={setActiveTab}
-            activeSidebarItem={activeSidebarItem}
-            user={user}
-            onLogout={handleLogout}
-            onNavigateToFavorite={(sidebarId, tabId) => {
-              setActiveSidebarItem(sidebarId);
-              setActiveTab(tabId);
-            }}
-            showTabs={false}
-            favoritesEnabled={false}
-            settingsEnabled={false}
-            onOpenPermissionsSettings={openPermissionsSettings}
-          />
-          <main className="flex-1 overflow-y-auto">
-            <ClusterInitializationScreen
-              statusData={bootstrapStatusData}
-              onActionComplete={() => fetchBootstrapStatus(authToken)}
-            />
-          </main>
-          {networkingDialog}
-          {filesystemDialog}
-          {permissionsDialog}
-        </div>
-      </div>
-    );
-  }
-
   // Show dashboard if authenticated
   return (
     <div className={theme === 'dark' ? 'dark' : ''}>
@@ -291,7 +259,14 @@ export default function App() {
             settingsEnabled
           />
           <main className="flex-1 overflow-y-auto bg-muted/20">
-            <DashboardContent activeTab={activeTab} activeSidebarItem={activeSidebarItem} />
+            {showClusterInitScreen ? (
+              <ClusterInitializationScreen
+                statusData={bootstrapStatusData}
+                onActionComplete={() => fetchBootstrapStatus(authToken)}
+              />
+            ) : (
+              <DashboardContent activeTab={activeTab} activeSidebarItem={activeSidebarItem} />
+            )}
           </main>
           {networkingDialog}
           {filesystemDialog}
