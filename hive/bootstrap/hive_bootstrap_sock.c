@@ -61,6 +61,104 @@ char g_config_state[16] = "IDLE";
 
 static char g_socket_path[sizeof(((struct sockaddr_un *)0)->sun_path)] =
 	HIVE_BOOTSTRAP_SOCK_PATH;
+
+static void log_tracking_field_error(const char *field)
+{
+	fprintf(stderr,
+		"bootstrap: failed to update %s in %s\n",
+		field ? field : "(unknown)",
+		HIVE_NODE_CONF_PATH);
+}
+
+static void log_stage_counter_error(const char *context, const char *action)
+{
+	const char *ctx = (context && *context) ? context : "web-config";
+	const char *act = (action && *action) ? action : "update attempts";
+
+	fprintf(stderr,
+		"bootstrap: unable to %s (stage=%u context=%s)\n",
+		act, hbc.stage_of_config, ctx);
+}
+
+static void begin_web_config_stage_attempt(const char *context)
+{
+	if (hbc.stage_of_config >= HIVE_STAGE_COMPLETE)
+		return;
+	if (hbc.stage_of_config > HIVE_STAGE_WEB_READY)
+		return;
+	if (hbc.stage_of_config != HIVE_STAGE_WEB_READY) {
+		if (!hive_bootstrap_set_stage(HIVE_STAGE_WEB_READY, true)) {
+			log_stage_counter_error(context, "set stage to web-ready");
+			return;
+		}
+	}
+	if (!hive_bootstrap_increment_stage_attempts())
+		log_stage_counter_error(context, "increment attempts");
+}
+
+static void record_stage_attempt_error(const char *context)
+{
+	if (hbc.stage_of_config >= HIVE_STAGE_COMPLETE)
+		return;
+	if (!hive_bootstrap_increment_stage_attempts())
+		log_stage_counter_error(context, "increment attempts (error)");
+	char buf[128];
+	const char *ctx = (context && *context) ? context : "attempt";
+
+	snprintf(buf, sizeof(buf), "error: %s", ctx);
+	persist_last_attempt_fields("IN_ERROR", 0, buf);
+}
+
+static void mark_stage_complete_if_needed(const char *context)
+{
+	if (hbc.stage_of_config >= HIVE_STAGE_COMPLETE)
+		return;
+	if (!hive_bootstrap_set_stage(HIVE_STAGE_COMPLETE, true))
+		log_stage_counter_error(context, "mark stage complete");
+	else {
+		char buf[128];
+		const char *ctx = (context && *context) ? context : "stage";
+
+		snprintf(buf, sizeof(buf), "complete: %s", ctx);
+		persist_last_attempt_fields("IDLE", 100, buf);
+	}
+}
+
+static void persist_status_block(const char *status, unsigned int percent,
+				 const char *message,
+				 const char *status_key,
+				 const char *progress_key,
+				 const char *message_key)
+{
+	const char *safe_status = (status && *status) ? status : "IDLE";
+	const char *safe_message = (message && *message) ? message : "";
+	unsigned int bounded = percent > 100 ? 100 : percent;
+	char progress_buf[16];
+
+	snprintf(progress_buf, sizeof(progress_buf), "%u%%", bounded);
+	if (!hive_bootstrap_update_string_field(status_key, safe_status))
+		log_tracking_field_error(status_key);
+	if (!hive_bootstrap_update_string_field(progress_key, progress_buf))
+		log_tracking_field_error(progress_key);
+	if (!hive_bootstrap_update_string_field(message_key, safe_message))
+		log_tracking_field_error(message_key);
+}
+
+static void persist_config_status_fields(const char *status, unsigned int percent,
+					 const char *message)
+{
+	persist_status_block(status, percent, message,
+			     "config_status", "config_progress", "config_msg");
+}
+
+static void persist_last_attempt_fields(const char *status, unsigned int percent,
+					const char *message)
+{
+	persist_status_block(status, percent, message,
+			     "last_attempt_status", "last_attempt_progress",
+			     "last_attempt_msg");
+}
+
 static const char *configure_status(void);
 static void set_invalid_node_join_state(void);
 static bool parse_bootstrap_request(const char *json,
@@ -485,6 +583,8 @@ static void update_local_status_cache(const char *message,
 	hifs_safe_strcpy(g_status_message, sizeof(g_status_message), msg);
 	g_status_percent = percent;
 	hifs_safe_strcpy(g_config_state, sizeof(g_config_state), st);
+	persist_config_status_fields(st, percent, msg);
+	persist_last_attempt_fields(st, percent, msg);
 }
 
 static bool apply_guard_status_response(const char *json)
@@ -551,6 +651,7 @@ static void push_guard_status_update(const char *message,
 					 unsigned int percent,
 					 const char *state)
 {
+	persist_config_status_fields(state, percent, message);
 	if (!send_guard_status_packet(message, percent, state))
 		update_local_status_cache(message, percent, state);
 }
@@ -727,10 +828,15 @@ static void poll_guard_status_updates(const struct hive_bootstrap_request *req)
 	const unsigned int max_attempts = 10;
 
 	for (unsigned int attempt = 0; attempt < max_attempts; ++attempt) {
-		if (!request_guard_status(req))
+		if (!request_guard_status(req)) {
+			record_stage_attempt_error("status-request");
 			break;
-		if (strcmp(g_config_state, "IDLE") == 0 ||
-		    strcmp(g_config_state, "IN_ERROR") == 0)
+		}
+		if (strcmp(g_config_state, "IN_ERROR") == 0) {
+			record_stage_attempt_error("status-in-error");
+			break;
+		}
+		if (strcmp(g_config_state, "IDLE") == 0)
 			break;
 		sleep(30);
 	}
@@ -1130,6 +1236,7 @@ enum {
 
 static void configure_cluster(const struct hive_bootstrap_request *req)
 {
+	begin_web_config_stage_attempt("cluster_config");
 	push_guard_status_update("cluster_config: processing", 25,
 				 "OP_PENDING");
 	hbc.cluster_id = req->cluster_id;
@@ -1217,11 +1324,13 @@ static void configure_cluster(const struct hive_bootstrap_request *req)
 
     
 	push_guard_status_update("cluster_config: complete", 100, "IDLE");
+	mark_stage_complete_if_needed("cluster_config");
 	fprintf(stdout, "bootstrap: cluster metadata persisted in hive_api.cluster\n");
 }
 
 static void configure_node(const struct hive_bootstrap_request *req)
 {
+	begin_web_config_stage_attempt("node_join");
 	push_guard_status_update("node_join: processing", 25, "OP_PENDING");
 	hbc.cluster_id = req->cluster_id;
 	hbc.storage_node_id = (uint32_t)req->node_id;
@@ -1265,6 +1374,7 @@ static void configure_node(const struct hive_bootstrap_request *req)
 
 
 	push_guard_status_update("node_join: complete", 100, "IDLE");
+	mark_stage_complete_if_needed("node_join");
 }
 
 static void configure_foreigner(const struct hive_bootstrap_request *req)

@@ -230,7 +230,10 @@ export function SecurityApiAccessTab() {
   };
 
   const activeKeys = apiKeys.filter((k) => k.status === 'active').length;
-  const expiringKeys = apiKeys.filter((k) => k.status === 'active' && isExpiringSoon(k.expiresAt)).length;
+  const expiringKeys = apiKeys.filter(
+    (k) => k.status === 'active' && isExpiringSoon(k.expiresAt)
+  ).length;
+  const revokedKeys = apiKeys.filter((k) => k.status === 'revoked').length;
 
   return (
     <div className="flex h-full w-full flex-col gap-6 overflow-auto bg-gradient-to-br from-background via-primary/5 to-background p-8">
@@ -243,7 +246,7 @@ export function SecurityApiAccessTab() {
       </div>
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-4">
         <Card className="border-primary/10 bg-gradient-to-b from-background/80 to-background shadow-lg shadow-primary/10">
           <CardContent className="pt-4">
             <div className="flex items-center justify-between">
@@ -276,6 +279,17 @@ export function SecurityApiAccessTab() {
                 <p className="text-2xl font-semibold mt-1">{apiKeys.length}</p>
               </div>
               <Shield className="w-8 h-8 text-muted-foreground opacity-50" />
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="border-primary/10 bg-gradient-to-b from-background/80 to-background shadow-lg shadow-primary/10">
+          <CardContent className="pt-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs text-muted-foreground">Revoked Keys</p>
+                <p className="text-2xl font-semibold mt-1 text-red-500">{revokedKeys}</p>
+              </div>
+              <XCircle className="w-8 h-8 text-red-500 opacity-50" />
             </div>
           </CardContent>
         </Card>
