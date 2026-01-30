@@ -286,6 +286,7 @@ int update_node_for_add(struct hive_storage_node *local)
 		.cont1_state = hbc.cont1_state,
 		.cont2_state = hbc.cont2_state,
 		.min_nodes_required = hbc.min_nodes_req,
+		.flags = 0,
 		.first_boot_ts = hbc.first_boot_ts,
 		.config_status = g_config_state,
 		.config_progress = progress_pct,

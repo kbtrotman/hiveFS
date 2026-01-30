@@ -70,9 +70,27 @@ enum hg_op_type {
     HG_OP_PUT_BLOCK = 1,
     HG_OP_PUT_INODE = 2,
     HG_OP_PUT_DIRENT = 3,
+    HG_OP_PUT_SETTING = 4,
+    HG_OP_PUT_CLUSTER_CERT = 5,
+    HG_OP_PUT_CLUSTER_AUDIT = 6,
+    HG_OP_ATOMIC_INODE_UPDATE = 7,
+    HG_OP_DELETE_BLOCK = 8,
+    HG_OP_DELETE_INODE = 9,
+    HG_OP_ATOMIC_RENAME = 9,
+    HG_OP_PUT_SESSION = 10,
+    HG_OP_SESSION_CLEANUP = 11,
     HG_OP_SNAPSHOT_MARK = 50,
     HG_OP_PUT_JOIN_SEC = 60,
+    HG_OP_CLUSTER_MAKE_SEC = 61,
     HG_OP_STORAGE_NODE_UPDATE = 61,
+    HG_OP_LEASE_MAKE = 70,
+    HG_OP_LEASE_RENEW = 71,
+    HG_OP_LEASE_RELEASE = 72,
+    HG_OP_LEASE_CLAIM = 73,
+    HG_OP_CACHE_CHECK = 80,
+    HG_OP_CACHE_CLEAR = 81,
+    HG_OP_CACHE_EVICTION = 82,
+    HG_OP_CACHE_PURGE = 83,
     /* later: other read/write routines, etc. */
 };
 
@@ -104,6 +122,169 @@ struct RaftPutDirent {
     uint16_t  reserved;
 };
 
+#define HG_CLUSTER_SETTING_KEY_MAX   64
+#define HG_CLUSTER_SETTING_VALUE_MAX 256
+struct RaftClusterSetting {
+    uint64_t cluster_id;
+    uint32_t flags;
+    uint32_t reserved;
+    char     key[HG_CLUSTER_SETTING_KEY_MAX];
+    char     value[HG_CLUSTER_SETTING_VALUE_MAX];
+};
+
+#define HG_CLUSTER_CERT_FPR_LEN 32
+#define HG_CLUSTER_CERT_LABEL_MAX 64
+struct RaftClusterCert {
+    uint64_t cluster_id;
+    uint64_t node_id;
+    uint32_t version;
+    uint32_t reserved;
+    uint8_t  fingerprint[HG_CLUSTER_CERT_FPR_LEN];
+    char     label[HG_CLUSTER_CERT_LABEL_MAX];
+};
+
+#define HG_CLUSTER_AUDIT_MSG_MAX 256
+struct RaftClusterAudit {
+    uint64_t cluster_id;
+    uint64_t node_id;
+    uint64_t timestamp_ns;
+    uint32_t severity;
+    uint32_t reserved;
+    char     message[HG_CLUSTER_AUDIT_MSG_MAX];
+};
+
+struct RaftAtomicInodeUpdate {
+    uint64_t volume_id;
+    uint64_t inode_id;
+    uint64_t expect_version;
+    uint64_t new_version;
+    uint64_t field_mask;
+    uint16_t fp_index;
+    uint16_t reserved;
+    struct hifs_inode_wire inode;
+};
+
+struct RaftDeleteBlock {
+    uint64_t volume_id;
+    uint64_t block_no;
+    uint64_t version;
+    uint8_t  hash_algo;
+    uint8_t  reserved8[7];
+    uint8_t  hash[HIFS_BLOCK_HASH_SIZE];
+};
+
+struct RaftDeleteInode {
+    uint64_t volume_id;
+    uint64_t inode_id;
+    uint64_t version;
+    uint32_t flags;
+    uint32_t reserved;
+};
+
+struct RaftAtomicRename {
+    uint64_t volume_id;
+    uint64_t src_parent_inode;
+    uint64_t dst_parent_inode;
+    uint64_t src_inode;
+    uint64_t dst_inode;
+    uint32_t flags;
+    uint32_t reserved;
+    uint32_t src_name_len;
+    uint32_t dst_name_len;
+    char     src_name[HIFS_MAX_NAME_SIZE];
+    char     dst_name[HIFS_MAX_NAME_SIZE];
+};
+
+#define HG_SESSION_USER_MAX     64
+#define HG_SESSION_TOKEN_MAX    256
+#define HG_SESSION_CONTEXT_MAX  256
+
+struct RaftPutSession {
+    uint64_t session_id;
+    uint64_t node_id;
+    uint64_t owner_uid;
+    uint64_t created_ns;
+    uint64_t expires_ns;
+    uint32_t flags;
+    uint32_t reserved;
+    char     user_name[HG_SESSION_USER_MAX];
+    char     token[HG_SESSION_TOKEN_MAX];
+    char     context[HG_SESSION_CONTEXT_MAX];
+};
+
+struct RaftSessionCleanup {
+    uint64_t session_id;
+    uint64_t node_id;
+    uint64_t timestamp_ns;
+    uint32_t reason;
+    uint32_t reserved;
+};
+
+struct RaftJoinSec {
+    uint64_t cluster_id;
+    uint64_t node_id;
+    uint64_t min_nodes_req;
+    uint32_t flags;
+    uint32_t reserved;
+    char     cluster_state[GUARD_SOCK_STATE_LEN];
+    char     database_state[GUARD_SOCK_STATE_LEN];
+    char     kv_state[GUARD_SOCK_STATE_LEN];
+    char     cont1_state[GUARD_SOCK_STATE_LEN];
+    char     cont2_state[GUARD_SOCK_STATE_LEN];
+    char     bootstrap_token[GUARD_SOCK_TOKEN_LEN];
+    char     first_boot_ts[GUARD_SOCK_TS_LEN];
+    char     config_status[GUARD_SOCK_STATUS_LEN];
+    char     config_progress[GUARD_SOCK_STATUS_LEN];
+    char     config_msg[GUARD_SOCK_MSG_LEN];
+    char     hive_version[GUARD_SOCK_STATUS_LEN];
+    char     hive_patch_level[GUARD_SOCK_STATUS_LEN];
+    char     pub_key[GUARD_SOCK_PUBKEY_LEN];
+    char     machine_uid[GUARD_SOCK_UID_LEN];
+    char     action[GUARD_SOCK_STATUS_LEN];
+    int32_t  raft_replay;
+    int32_t  reserved_i32;
+};
+
+struct RaftClusterMakeSec {
+    uint64_t cluster_id;
+    uint64_t request_id;
+    uint64_t timestamp_ns;
+    uint32_t min_nodes_required;
+    uint32_t flags;
+    char     cluster_state[GUARD_SOCK_STATE_LEN];
+    char     config_status[GUARD_SOCK_STATUS_LEN];
+    char     description[HIFS_CLUSTER_DESC_MAX];
+    char     initiator_uid[GUARD_SOCK_UID_LEN];
+};
+
+#define HG_LEASE_KEY_MAX 192
+
+struct RaftLeaseCommand {
+    char     key[HG_LEASE_KEY_MAX];
+    uint64_t token;
+    uint64_t ttl_ms;
+    uint64_t timestamp_ms;
+    uint32_t owner_node_id;
+    uint32_t requester_node_id;
+    uint32_t flags;
+    uint8_t  mode;
+    uint8_t  reserved[7];
+};
+
+#define HG_CACHE_TAG_MAX 128
+
+struct RaftCacheCommand {
+    uint64_t cluster_id;
+    uint64_t node_id;
+    uint64_t shard_id;
+    uint64_t volume_id;
+    uint64_t inode_id;
+    uint64_t block_no;
+    uint32_t flags;
+    uint32_t reserved;
+    char     tag[HG_CACHE_TAG_MAX];
+};
+
 #define SNAPSHOT_MAGIC 0x534E4150u  // 'SNAP'
 
 struct RaftSnapshotMeta {
@@ -123,8 +304,20 @@ struct RaftCmd {
         struct RaftPutBlock block;   // current fields
         struct RaftPutInode inode;   // e.g., hifs_inode_wire + fp_index info
         struct RaftPutDirent dirent; // hifs_dir_entry
+        struct RaftAtomicInodeUpdate atomic_inode;
+        struct RaftDeleteBlock delete_block;
+        struct RaftDeleteInode delete_inode;
+        struct RaftAtomicRename atomic_rename;
+        struct RaftPutSession session_put;
+        struct RaftSessionCleanup session_cleanup;
+        struct RaftClusterSetting setting;
+        struct RaftClusterCert  cluster_cert;
+        struct RaftClusterAudit cluster_audit;
+        struct RaftJoinSec join_sec;
+        struct RaftClusterMakeSec cluster_make_sec;
+        struct RaftLeaseCommand lease;
+        struct RaftCacheCommand cache;
         struct RaftSnapshotMeta snapshot;
-        struct hive_guard_join_context join_sec;
         struct hive_guard_storage_update_cmd storage_update;
     } u;
 };

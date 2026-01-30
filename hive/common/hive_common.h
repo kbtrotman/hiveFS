@@ -50,6 +50,10 @@
 #define HIVE_API_CERT_DIR     HIVE_PKI_DIR "/api"     // if we want a seperate identity for the backend api connections
 #define HIVE_CERT_DIR         HIVE_PKI_DIR "/requests"   // cert request copies
 
+#define HIVE_GUARD_SNAPSHOT_BASE_DIR HIVE_DATA_DIR "/snapshots"
+#define HIVE_GUARD_SNAPSHOT_DIR_FMT  "snap-%llu-idx-%llu"
+#define HIVE_GUARD_SNAPSHOT_FILE_FMT "meta-snap-%llu-idx-%llu.sql"
+#define HIVE_GUARD_SNAPSHOT_META_FILE HIVE_GUARD_SNAPSHOT_BASE_DIR "/hive_guard_snapshot.data"
 
 #ifndef HIVE_GUARD_SOCK_PATH
 #define HIVE_GUARD_SOCK_PATH "/run/hive_guard.sock"
@@ -60,11 +64,6 @@
 #ifndef HIVE_GUARD_SOCK_BACKLOG
 #define HIVE_GUARD_SOCK_BACKLOG 8
 #endif
-
-
-#define HIVE_GUARD_SNAPSHOT_BASE_DIR HIVE_DATA_DIR "/meta/snapshots"
-#define HIVE_GUARD_SNAPSHOT_DIR_FMT  "snap-%llu-idx-%llu"
-#define HIVE_GUARD_SNAPSHOT_FILE_FMT "meta-snap-%llu-idx-%llu.sql"
 
 #define HIVE_BOOTSTRAP_BIN    "hive_bootstrap"
 

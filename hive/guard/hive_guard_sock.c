@@ -887,6 +887,7 @@ static int guard_sock_handle_join_sec(const struct hive_guard_sock_join_sec *req
 		.cont1_state = req->cont1_state[0] ? req->cont1_state : NULL,
 		.cont2_state = req->cont2_state[0] ? req->cont2_state : NULL,
 		.min_nodes_required = req->min_nodes_req,
+		.flags = 0,
 		.first_boot_ts = req->first_boot_ts[0]
 			? req->first_boot_ts : NULL,
 		.config_status = req->config_status[0]
@@ -914,6 +915,13 @@ static int guard_sock_handle_join_sec(const struct hive_guard_sock_join_sec *req
 	fflush(stdout);
 	(void)ctx;
 	return 0;
+}
+
+int hive_guard_apply_join_sec(const struct hive_guard_sock_join_sec *req)
+{
+	if (!req)
+		return -EINVAL;
+	return guard_sock_handle_join_sec(req);
 }
 
 static void guard_sock_send_status_response(int fd)
