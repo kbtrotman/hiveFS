@@ -61,6 +61,7 @@ struct hive_guard_join_context {
 	const char *cont1_state;
 	const char *cont2_state;
 	uint64_t min_nodes_required;
+	uint32_t flags;
 	const char *first_boot_ts;
 	const char *config_status;
 	const char *config_progress;

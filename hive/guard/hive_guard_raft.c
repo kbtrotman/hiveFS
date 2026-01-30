@@ -17,10 +17,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
+
+#include <openssl/sha.h>
 
 
 #include "../../hifs_shared_defs.h"
+#include "../common/hive_common.h"
 #include "hive_guard_erasure_code.h"
 #include "hive_guard_raft.h"
 #include "hive_guard_sql.h"
@@ -82,6 +86,164 @@ extern const char *g_mysqldump_path;       // e.g. "/usr/bin/mysqldump"
 extern const char *g_mysql_defaults_file;  // e.g. "/etc/hivefs/mysql-backup.cnf"
 extern const char *g_mysql_db_name;        // e.g. "hive_meta"
 
+static const char *hg_snapshot_base_dir_path(void)
+{
+    if (g_snapshot_dir && *g_snapshot_dir)
+        return g_snapshot_dir;
+    return HIVE_GUARD_SNAPSHOT_BASE_DIR;
+}
+
+static const char *hg_snapshot_meta_filename(void)
+{
+    const char *slash = strrchr(HIVE_GUARD_SNAPSHOT_META_FILE, '/');
+    return slash ? slash + 1 : HIVE_GUARD_SNAPSHOT_META_FILE;
+}
+
+static int hg_snapshot_meta_path(char *buf, size_t buf_sz)
+{
+    if (!buf || buf_sz == 0)
+        return -EINVAL;
+    const char *base = hg_snapshot_base_dir_path();
+    size_t base_len = strlen(base);
+    bool has_sep = (base_len > 0 && base[base_len - 1] == '/');
+    int written = snprintf(buf,
+                           buf_sz,
+                           "%s%s%s",
+                           base,
+                           has_sep ? "" : "/",
+                           hg_snapshot_meta_filename());
+    if (written < 0 || (size_t)written >= buf_sz)
+        return -ENAMETOOLONG;
+    return 0;
+}
+
+static int hg_snapshot_ensure_dir(const char *dir, mode_t mode)
+{
+    if (!dir || !*dir)
+        return -EINVAL;
+    if (mkdir(dir, mode) != 0 && errno != EEXIST)
+        return -errno;
+    return 0;
+}
+
+static int hg_snapshot_sha256_hex(const char *path, char *out_hex, size_t out_len)
+{
+    if (!path || !out_hex || out_len < (SHA256_DIGEST_LENGTH * 2 + 1))
+        return -EINVAL;
+
+    FILE *fp = fopen(path, "rb");
+    if (!fp)
+        return -errno;
+
+    SHA256_CTX ctx;
+    if (SHA256_Init(&ctx) != 1) {
+        fclose(fp);
+        return -EIO;
+    }
+
+    unsigned char buf[256 * 1024];
+    size_t n = 0;
+    while ((n = fread(buf, 1, sizeof(buf), fp)) > 0) {
+        if (SHA256_Update(&ctx, buf, n) != 1) {
+            fclose(fp);
+            return -EIO;
+        }
+    }
+    if (ferror(fp)) {
+        int err = -errno;
+        fclose(fp);
+        return err;
+    }
+    fclose(fp);
+
+    unsigned char digest[SHA256_DIGEST_LENGTH];
+    if (SHA256_Final(digest, &ctx) != 1)
+        return -EIO;
+    bytes_to_hex(digest, SHA256_DIGEST_LENGTH, out_hex);
+    return 0;
+}
+
+static int hg_snapshot_write_meta(const struct hg_local_snapshot_info *snap,
+                                  char *out_path,
+                                  size_t out_path_sz)
+{
+    if (!snap || !out_path || out_path_sz == 0)
+        return -EINVAL;
+
+    int rc = hg_snapshot_meta_path(out_path, out_path_sz);
+    if (rc != 0)
+        return rc;
+
+    const char *base_dir = hg_snapshot_base_dir_path();
+    rc = hg_snapshot_ensure_dir(base_dir, 0755);
+    if (rc != 0)
+        return rc;
+
+    char checksum[SHA256_DIGEST_LENGTH * 2 + 1];
+    rc = hg_snapshot_sha256_hex(snap->path, checksum, sizeof(checksum));
+    if (rc != 0)
+        return rc;
+
+    const char *relative = snap->path;
+    size_t base_len = strlen(base_dir);
+    if (base_len > 0 &&
+        strncmp(snap->path, base_dir, base_len) == 0) {
+        relative = snap->path + base_len;
+        if (*relative == '/')
+            ++relative;
+    }
+    if (!relative || !*relative) {
+        const char *slash = strrchr(snap->path, '/');
+        relative = slash ? slash + 1 : snap->path;
+    }
+
+    char tmp_template[PATH_MAX];
+    rc = snprintf(tmp_template, sizeof(tmp_template), "%s.tmpXXXXXX", out_path);
+    if (rc < 0 || (size_t)rc >= sizeof(tmp_template))
+        return -ENAMETOOLONG;
+
+    int fd = mkstemp(tmp_template);
+    if (fd < 0)
+        return -errno;
+
+    FILE *fp = fdopen(fd, "w");
+    if (!fp) {
+        int err = -errno;
+        close(fd);
+        unlink(tmp_template);
+        return err;
+    }
+
+    int write_rc = 0;
+    if (fprintf(fp,
+                "{\"relative_path\":\"%s\",\"snapshot_id\":%llu,"
+                "\"raft_index\":%llu,\"sha256\":\"%s\"}\n",
+                relative,
+                (unsigned long long)snap->snap_id,
+                (unsigned long long)snap->raft_index,
+                checksum) < 0) {
+        write_rc = -EIO;
+    } else if (fflush(fp) != 0) {
+        write_rc = -errno;
+    }
+
+    if (write_rc == 0 && fsync(fileno(fp)) != 0)
+        write_rc = -errno;
+
+    if (fclose(fp) != 0 && write_rc == 0)
+        write_rc = -errno;
+
+    if (write_rc == 0) {
+        if (rename(tmp_template, out_path) != 0)
+            write_rc = -errno;
+    }
+
+    if (write_rc != 0)
+        unlink(tmp_template);
+
+    return write_rc;
+}
+
 /* Convert binary to hex string; out must be at least 2*len + 1 bytes. */
 /* This helper function seems tyo be going everywhere since we sending */
 /* and recieving in a lot of places.  */
@@ -93,6 +255,62 @@ static void __attribute__((unused)) bytes_to_hex(const uint8_t *in, size_t len, 
         out[2 * i + 1] = hex_chars[in[i] & 0x0F];
     }
     out[2 * len] = '\0';
+}
+
+static void hg_raft_copy_str(char *dst, size_t len, const char *src)
+{
+    if (!dst || len == 0)
+        return;
+    if (!src) {
+        dst[0] = '\0';
+        return;
+    }
+    strncpy(dst, src, len - 1);
+    dst[len - 1] = '\0';
+}
+
+static const char *hg_raft_op_name(uint8_t op_type)
+{
+    switch (op_type) {
+    case HG_OP_PUT_BLOCK: return "HG_OP_PUT_BLOCK";
+    case HG_OP_PUT_INODE: return "HG_OP_PUT_INODE";
+    case HG_OP_PUT_DIRENT: return "HG_OP_PUT_DIRENT";
+    case HG_OP_PUT_SETTING: return "HG_OP_PUT_SETTING";
+    case HG_OP_PUT_CLUSTER_CERT: return "HG_OP_PUT_CLUSTER_CERT";
+    case HG_OP_PUT_CLUSTER_AUDIT: return "HG_OP_PUT_CLUSTER_AUDIT";
+    case HG_OP_ATOMIC_INODE_UPDATE: return "HG_OP_ATOMIC_INODE_UPDATE";
+    case HG_OP_DELETE_BLOCK: return "HG_OP_DELETE_BLOCK";
+    case HG_OP_DELETE_INODE: return "HG_OP_DELETE_INODE/HG_OP_ATOMIC_RENAME";
+    case HG_OP_PUT_SESSION: return "HG_OP_PUT_SESSION";
+    case HG_OP_SESSION_CLEANUP: return "HG_OP_SESSION_CLEANUP";
+    case HG_OP_SNAPSHOT_MARK: return "HG_OP_SNAPSHOT_MARK";
+    case HG_OP_PUT_JOIN_SEC: return "HG_OP_PUT_JOIN_SEC";
+    case HG_OP_CLUSTER_MAKE_SEC: return "HG_OP_CLUSTER_MAKE_SEC";
+    case HG_OP_STORAGE_NODE_UPDATE: return "HG_OP_STORAGE_NODE_UPDATE";
+    case HG_OP_LEASE_MAKE: return "HG_OP_LEASE_MAKE";
+    case HG_OP_LEASE_RENEW: return "HG_OP_LEASE_RENEW";
+    case HG_OP_LEASE_RELEASE: return "HG_OP_LEASE_RELEASE";
+    case HG_OP_LEASE_CLAIM: return "HG_OP_LEASE_CLAIM";
+    case HG_OP_CACHE_CHECK: return "HG_OP_CACHE_CHECK";
+    case HG_OP_CACHE_CLEAR: return "HG_OP_CACHE_CLEAR";
+    case HG_OP_CACHE_EVICTION: return "HG_OP_CACHE_EVICTION";
+    case HG_OP_CACHE_PURGE: return "HG_OP_CACHE_PURGE";
+    default:
+        break;
+    }
+    return "HG_OP_UNKNOWN";
+}
+
+static int hg_raft_handle_unimplemented(const struct RaftCmd *cmd)
+{
+    if (!cmd)
+        return -EINVAL;
+
+    const char *name = hg_raft_op_name(cmd->op_type);
+    hifs_warning("hive_guard_raft: unimplemented raft op %s (%u)",
+                 name,
+                 (unsigned)cmd->op_type);
+    return -ENOSYS;
 }
 
 static void free_ctx(struct raft_thread_ctx *ctx)
@@ -354,6 +572,65 @@ commitCb(struct uv_raft *raft,
             return -EIO;
         return 0;
     }
+    case HG_OP_PUT_SETTING:
+
+    case HG_OP_PUT_CLUSTER_CERT:
+
+    case HG_OP_PUT_CLUSTER_AUDIT:
+
+    case HG_OP_ATOMIC_INODE_UPDATE:
+
+    case HG_OP_DELETE_BLOCK:
+
+    case HG_OP_DELETE_INODE:
+
+    case HG_OP_PUT_SESSION:
+
+    case HG_OP_SESSION_CLEANUP:
+
+    case HG_OP_PUT_JOIN_SEC: {
+        const struct RaftJoinSec *src = &cmd.u.join_sec;
+        struct hive_guard_sock_join_sec req = {0};
+
+        req.cluster_id = src->cluster_id;
+        req.node_id = src->node_id;
+        req.min_nodes_req = src->min_nodes_req;
+        req.raft_replay = src->raft_replay;
+        hg_raft_copy_str(req.cluster_state, sizeof(req.cluster_state), src->cluster_state);
+        hg_raft_copy_str(req.database_state, sizeof(req.database_state), src->database_state);
+        hg_raft_copy_str(req.kv_state, sizeof(req.kv_state), src->kv_state);
+        hg_raft_copy_str(req.cont1_state, sizeof(req.cont1_state), src->cont1_state);
+        hg_raft_copy_str(req.cont2_state, sizeof(req.cont2_state), src->cont2_state);
+        hg_raft_copy_str(req.bootstrap_token, sizeof(req.bootstrap_token), src->bootstrap_token);
+        hg_raft_copy_str(req.first_boot_ts, sizeof(req.first_boot_ts), src->first_boot_ts);
+        hg_raft_copy_str(req.config_status, sizeof(req.config_status), src->config_status);
+        hg_raft_copy_str(req.config_progress, sizeof(req.config_progress), src->config_progress);
+        hg_raft_copy_str(req.config_msg, sizeof(req.config_msg), src->config_msg);
+        hg_raft_copy_str(req.hive_version, sizeof(req.hive_version), src->hive_version);
+        hg_raft_copy_str(req.hive_patch_level, sizeof(req.hive_patch_level), src->hive_patch_level);
+        hg_raft_copy_str(req.pub_key, sizeof(req.pub_key), src->pub_key);
+        hg_raft_copy_str(req.machine_uid, sizeof(req.machine_uid), src->machine_uid);
+        hg_raft_copy_str(req.action, sizeof(req.action), src->action);
+        return hive_guard_apply_join_sec(&req);
+    }
+
+    case HG_OP_LEASE_MAKE:
+
+    case HG_OP_LEASE_RENEW:
+
+    case HG_OP_LEASE_RELEASE:
+
+    case HG_OP_LEASE_CLAIM:
+
+    case HG_OP_CACHE_CHECK:
+
+    case HG_OP_CACHE_CLEAR:
+    
+    case HG_OP_CACHE_EVICTION:
+
+    case HG_OP_CACHE_PURGE:
+
+    
     case HG_OP_SNAPSHOT_MARK: {
         MYSQL *db = hg_sql_get_db();
         if (!db) return -EIO;
@@ -389,7 +666,6 @@ commitCb(struct uv_raft *raft,
         strncpy(g_last_snap.path, path, sizeof(g_last_snap.path)-1);
         g_last_snap.path[sizeof(g_last_snap.path)-1] = '\0';
         g_last_snap.size_bytes = 0; 
-        // (optional: stat() the file and store size)
         pthread_cond_broadcast(&g_snap_cv);
         pthread_mutex_unlock(&g_snap_mu);
 
@@ -415,7 +691,7 @@ commitCb(struct uv_raft *raft,
     }
 
     default:
-        break;
+        return hg_raft_handle_unimplemented(&cmd);
     }
     return 0;
 }
@@ -568,6 +844,54 @@ int hifs_raft_submit_put_dirent(const struct RaftPutDirent *cmd)
     return raft_log_commit_up_to(idx);
 }
 
+int hifs_raft_submit_join_sec(const struct hive_guard_join_context *ctx)
+{
+    if (!ctx)
+        return -EINVAL;
+    if (!hg_guard_local_can_write())
+        return -EAGAIN;
+
+    struct RaftCmd entry = {0};
+    entry.op_type = HG_OP_PUT_JOIN_SEC;
+    struct RaftJoinSec *dst = &entry.u.join_sec;
+
+    dst->cluster_id = ctx->cluster_id;
+    dst->node_id = ctx->node_id;
+    dst->min_nodes_req = ctx->min_nodes_required;
+    dst->flags = ctx->flags;
+    dst->reserved = 0;
+
+    hg_raft_copy_str(dst->cluster_state, sizeof(dst->cluster_state), ctx->cluster_state);
+    hg_raft_copy_str(dst->database_state, sizeof(dst->database_state), ctx->database_state);
+    hg_raft_copy_str(dst->kv_state, sizeof(dst->kv_state), ctx->kv_state);
+    hg_raft_copy_str(dst->cont1_state, sizeof(dst->cont1_state), ctx->cont1_state);
+    hg_raft_copy_str(dst->cont2_state, sizeof(dst->cont2_state), ctx->cont2_state);
+    hg_raft_copy_str(dst->bootstrap_token, sizeof(dst->bootstrap_token), NULL);
+    hg_raft_copy_str(dst->first_boot_ts, sizeof(dst->first_boot_ts), ctx->first_boot_ts);
+    hg_raft_copy_str(dst->config_status, sizeof(dst->config_status), ctx->config_status);
+    hg_raft_copy_str(dst->config_progress, sizeof(dst->config_progress), ctx->config_progress);
+    hg_raft_copy_str(dst->config_msg, sizeof(dst->config_msg), ctx->config_message);
+    hg_raft_copy_str(dst->hive_version, sizeof(dst->hive_version), ctx->hive_version);
+    hg_raft_copy_str(dst->hive_patch_level, sizeof(dst->hive_patch_level), ctx->hive_patch_level);
+    hg_raft_copy_str(dst->pub_key, sizeof(dst->pub_key), NULL);
+
+    const char *machine_uid = ctx->machine_uid;
+    if ((!machine_uid || !machine_uid[0]) &&
+        ctx->node_record && ctx->node_record->uid[0])
+        machine_uid = ctx->node_record->uid;
+    hg_raft_copy_str(dst->machine_uid, sizeof(dst->machine_uid), machine_uid);
+    hg_raft_copy_str(dst->action, sizeof(dst->action), ctx->action);
+
+    dst->raft_replay = ctx->raft_replay;
+    dst->reserved_i32 = 0;
+
+    uint64_t idx = 0;
+    int rc = raft_log_append_entry(&entry, &idx);
+    if (rc != 0)
+        return rc;
+    return raft_log_commit_up_to(idx);
+}
+
 // raft snapshot instance:
 int hifs_raft_submit_snapshot_mark(uint64_t snap_id)
 {
@@ -677,6 +1001,17 @@ int hg_prepare_snapshot_for_new_node(const struct hg_raft_config *cfg,
     out_src->local_path[sizeof(out_src->local_path)-1] = '\0';
     strncpy(out_src->source_addr, cfg->self_address, sizeof(out_src->source_addr)-1);
     out_src->source_addr[sizeof(out_src->source_addr)-1] = '\0';
+
+    char meta_path[PATH_MAX];
+    rc = hg_snapshot_write_meta(&local, meta_path, sizeof(meta_path));
+    if (rc != 0)
+        return rc;
+
+    rc = tcp_send_file_to_new_node(out_src->source_addr,
+                                   meta_path,
+                                   new_node_addr);
+    if (rc != 0)
+        return rc;
 
     // 4) Ready to transfer:
     return tcp_send_file_to_new_node(out_src->source_addr,

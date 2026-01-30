@@ -18,11 +18,13 @@
 #include "hive_guard_sql.h"
 #include "hive_guard_sock.h"
 #include "hive_guard_raft.h"
+#include "../common/hive_common.h"
 
 #include <arpa/inet.h>
 #include <ctype.h>
 #include <errno.h>
 #include <limits.h>
+#include <poll.h>
 #include <netdb.h>
 #include <pthread.h>
 #include <stdbool.h>
@@ -32,8 +34,11 @@
 #include <sys/socket.h>
 #include <sys/sendfile.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <sys/types.h>
 #include <unistd.h>
+
+#include <openssl/sha.h>
 
 #define HIFS_STRIPE_TCP_BACKLOG      8
 
@@ -103,6 +108,28 @@ static ssize_t read_full(int fd, void *buf, size_t len)
 	return (ssize_t)total;
 }
 
+static int hg_wait_for_fd(int fd, short events, int timeout_ms)
+{
+	struct pollfd pfd = {
+		.fd = fd,
+		.events = events,
+	};
+	for (;;) {
+		int rc = poll(&pfd, 1, timeout_ms);
+		if (rc < 0) {
+			if (errno == EINTR)
+				continue;
+			int err = errno;
+			return err ? -err : -EIO;
+		}
+		if (rc == 0)
+			return -ETIMEDOUT;
+		if (pfd.revents & (POLLERR | POLLHUP | POLLNVAL))
+			return -EIO;
+		return 0;
+	}
+}
+
 #define SNAPSHOT_XFER_MAGIC 0x53584652u
 
 struct snapshot_xfer_header {
@@ -115,12 +142,17 @@ struct snapshot_xfer_header {
 } __attribute__((packed));
 
 #define HG_JOIN_CLUSTER_MAGIC 0x48474A4Eu
+#define HG_JOIN_CLUSTER_FLAG_NEW_NODE    0x1u
+#define HG_JOIN_CLUSTER_FLAG_LEARNER     0x2u
+#define HG_JOIN_CLUSTER_TIMEOUT_MS       3000
+#define HG_JOIN_CLUSTER_MAX_ATTEMPTS     3
 
 struct hg_join_cluster_request_wire {
 	uint32_t magic;
 	uint16_t version;
 	uint16_t reserved;
 	uint32_t storage_node_id;
+	uint32_t flags;
 } __attribute__((packed));
 
 struct hg_join_cluster_response_wire {
@@ -130,9 +162,11 @@ struct hg_join_cluster_response_wire {
 
 static void handle_join_cluster_request(int fd);
 static int hg_send_join_request_to_peer(const struct hive_storage_node *peer,
-					unsigned int storage_node_id);
-int hg_ask_to_join_cluster(unsigned int storage_node_id);
-int hg_acept_request_to_join_cluster(unsigned int storage_node_id);
+					unsigned int storage_node_id,
+					uint32_t join_flags);
+int hg_ask_to_join_cluster(unsigned int storage_node_id, uint32_t join_flags);
+int hg_acept_request_to_join_cluster(unsigned int storage_node_id,
+				     uint32_t join_flags);
 
 static int parse_host_port_string(const char *addr,
 				  char *host_out,
@@ -217,6 +251,184 @@ static bool snapshot_rel_path_invalid(const char *path)
 		}
 	}
 	return false;
+}
+
+struct snapshot_meta_record {
+	char relative_path[PATH_MAX];
+	char sha256[SHA256_DIGEST_LENGTH * 2 + 1];
+	uint64_t snap_id;
+	uint64_t raft_index;
+};
+
+static const char *snapshot_meta_filename(void)
+{
+	const char *slash = strrchr(HIVE_GUARD_SNAPSHOT_META_FILE, '/');
+	return slash ? slash + 1 : HIVE_GUARD_SNAPSHOT_META_FILE;
+}
+
+static int snapshot_meta_path_from_base(const char *base_dir,
+					char *out_path,
+					size_t out_len)
+{
+	if (!out_path || out_len == 0)
+		return -EINVAL;
+	const char *dir = base_dir ? base_dir : "";
+	size_t dir_len = strlen(dir);
+	bool has_sep = dir_len > 0 && dir[dir_len - 1] == '/';
+	int written = snprintf(out_path,
+			       out_len,
+			       "%s%s%s",
+			       dir,
+			       has_sep ? "" : "/",
+			       snapshot_meta_filename());
+	if (written < 0 || (size_t)written >= out_len)
+		return -ENAMETOOLONG;
+	return 0;
+}
+
+static void snapshot_digest_to_hex(const uint8_t *in, size_t len, char *out)
+{
+	static const char hex[] = "0123456789abcdef";
+	for (size_t i = 0; i < len; ++i) {
+		out[2 * i] = hex[(in[i] >> 4) & 0x0F];
+		out[2 * i + 1] = hex[in[i] & 0x0F];
+	}
+	out[2 * len] = '\0';
+}
+
+static int snapshot_sha256_file_hex(const char *path, char *out_hex, size_t out_len)
+{
+	if (!path || !out_hex || out_len < (SHA256_DIGEST_LENGTH * 2 + 1))
+		return -EINVAL;
+
+	FILE *fp = fopen(path, "rb");
+	if (!fp)
+		return -errno;
+
+	SHA256_CTX ctx;
+	if (SHA256_Init(&ctx) != 1) {
+		fclose(fp);
+		return -EIO;
+	}
+
+	unsigned char buf[256 * 1024];
+	size_t n = 0;
+	while ((n = fread(buf, 1, sizeof(buf), fp)) > 0) {
+		if (SHA256_Update(&ctx, buf, n) != 1) {
+			fclose(fp);
+			return -EIO;
+		}
+	}
+	if (ferror(fp)) {
+		int err = -errno;
+		fclose(fp);
+		return err;
+	}
+	fclose(fp);
+
+	unsigned char digest[SHA256_DIGEST_LENGTH];
+	if (SHA256_Final(digest, &ctx) != 1)
+		return -EIO;
+	snapshot_digest_to_hex(digest, SHA256_DIGEST_LENGTH, out_hex);
+	return 0;
+}
+
+static int snapshot_meta_parse_string(const char *json,
+				      const char *key,
+				      char *out,
+				      size_t out_len)
+{
+	if (!json || !key || !out || out_len == 0)
+		return -EINVAL;
+
+	char needle[64];
+	int written = snprintf(needle, sizeof(needle), "\"%s\":\"", key);
+	if (written < 0 || (size_t)written >= sizeof(needle))
+		return -EINVAL;
+
+	const char *start = strstr(json, needle);
+	if (!start)
+		return -EINVAL;
+	start += written;
+	const char *end = strchr(start, '"');
+	if (!end)
+		return -EINVAL;
+	size_t len = (size_t)(end - start);
+	if (len >= out_len)
+		return -ENAMETOOLONG;
+	memcpy(out, start, len);
+	out[len] = '\0';
+	return 0;
+}
+
+static int snapshot_meta_parse_u64(const char *json,
+				   const char *key,
+				   uint64_t *out_val)
+{
+	if (!json || !key || !out_val)
+		return -EINVAL;
+
+	char needle[64];
+	int written = snprintf(needle, sizeof(needle), "\"%s\":", key);
+	if (written < 0 || (size_t)written >= sizeof(needle))
+		return -EINVAL;
+
+	const char *start = strstr(json, needle);
+	if (!start)
+		return -EINVAL;
+	start += written;
+
+	errno = 0;
+	char *endptr = NULL;
+	unsigned long long val = strtoull(start, &endptr, 10);
+	if (start == endptr || errno != 0)
+		return -EINVAL;
+	*out_val = (uint64_t)val;
+	return 0;
+}
+
+static int snapshot_meta_load(const char *base_dir,
+			      struct snapshot_meta_record *out)
+{
+	if (!out)
+		return -EINVAL;
+
+	char meta_path[PATH_MAX];
+	int rc = snapshot_meta_path_from_base(base_dir, meta_path, sizeof(meta_path));
+	if (rc != 0)
+		return rc;
+
+	FILE *fp = fopen(meta_path, "rb");
+	if (!fp)
+		return -errno;
+
+	char buf[2048];
+	size_t total = fread(buf, 1, sizeof(buf) - 1, fp);
+	if (ferror(fp)) {
+		rc = -errno;
+		fclose(fp);
+		return rc;
+	}
+	int c = fgetc(fp);
+	if (c != EOF) {
+		fclose(fp);
+		return -EOVERFLOW;
+	}
+	buf[total] = '\0';
+	fclose(fp);
+
+	rc = snapshot_meta_parse_string(buf, "relative_path", out->relative_path, sizeof(out->relative_path));
+	if (rc != 0)
+		return rc;
+	rc = snapshot_meta_parse_string(buf, "sha256", out->sha256, sizeof(out->sha256));
+	if (rc != 0)
+		return rc;
+	if (strlen(out->sha256) != SHA256_DIGEST_LENGTH * 2)
+		return -EINVAL;
+	rc = snapshot_meta_parse_u64(buf, "snapshot_id", &out->snap_id);
+	if (rc != 0)
+		return rc;
+	return snapshot_meta_parse_u64(buf, "raft_index", &out->raft_index);
 }
 
 static int snapshot_ids_from_path(const char *path,
@@ -415,8 +627,9 @@ static void handle_join_cluster_request(int fd)
 	unsigned int node_id = ntohl(req.storage_node_id);
 	int rc = -EAGAIN;
 
+	uint32_t join_flags = ntohl(req.flags);
 	if (hg_guard_local_can_write())
-		rc = hg_acept_request_to_join_cluster(node_id);
+		rc = hg_acept_request_to_join_cluster(node_id, join_flags);
 
 	resp.status = htonl(rc);
 	write_full(fd, &resp, sizeof(resp));
@@ -858,6 +1071,9 @@ static int tcp_recv_file_on_new_node(int sock_fd)
 		goto done;
 	}
 
+	const char *meta_name = snapshot_meta_filename();
+	bool is_meta_file = (relative && strcmp(relative, meta_name) == 0);
+
 	size_t rel_len = strlen(relative);
 	bool base_has_sep = base_len > 0 && base_dir[base_len - 1] == '/';
 	size_t final_len = base_len + (base_has_sep ? 0 : 1) + rel_len + 1;
@@ -887,14 +1103,18 @@ static int tcp_recv_file_on_new_node(int sock_fd)
 	}
 	*last_slash = '\0';
 
-	if (mkdir(snap_dir, 0700) != 0) {
-		rc = (errno == EEXIST) ? -EEXIST : -errno;
-		hifs_warning("tcp_recv_file_on_new_node: mkdir %s failed rc=%d",
-			     snap_dir,
-			     rc);
-		goto done;
+	mode_t dir_mode = is_meta_file ? 0755 : 0700;
+	if (mkdir(snap_dir, dir_mode) != 0) {
+		if (!(is_meta_file && errno == EEXIST)) {
+			rc = (errno == EEXIST) ? -EEXIST : -errno;
+			hifs_warning("tcp_recv_file_on_new_node: mkdir %s failed rc=%d",
+				     snap_dir,
+				     rc);
+			goto done;
+		}
+	} else if (!is_meta_file) {
+		snap_dir_created = true;
 	}
-	snap_dir_created = true;
 
 	int written = snprintf(tmp_template,
 			       sizeof(tmp_template),
@@ -942,6 +1162,13 @@ static int tcp_recv_file_on_new_node(int sock_fd)
 	tmp_valid = false;
 	final_ready = true;
 
+	if (is_meta_file) {
+		hifs_notice("tcp_recv_file_on_new_node: received snapshot metadata from %s into %s",
+			    source ? source : "(unknown)",
+			    final_path);
+		goto done;
+	}
+
 	uint64_t snap_id = 0;
 	uint64_t snap_index = 0;
 	rc = snapshot_ids_from_path(final_path, &snap_id, &snap_index);
@@ -949,6 +1176,52 @@ static int tcp_recv_file_on_new_node(int sock_fd)
 		hifs_warning("tcp_recv_file_on_new_node: unable to decode snap ids from %s rc=%d",
 			     final_path,
 			     rc);
+		goto done;
+	}
+
+	struct snapshot_meta_record meta = {0};
+	rc = snapshot_meta_load(base_dir, &meta);
+	if (rc != 0) {
+		hifs_warning("tcp_recv_file_on_new_node: missing snapshot metadata rc=%d",
+			     rc);
+		unlink(final_path);
+		final_ready = false;
+		goto done;
+	}
+	if (strcmp(meta.relative_path, relative) != 0 ||
+	    meta.snap_id != snap_id ||
+	    meta.raft_index != snap_index) {
+		hifs_warning("tcp_recv_file_on_new_node: metadata mismatch rel=%s meta_rel=%s snap_id=%llu meta_id=%llu idx=%llu meta_idx=%llu",
+			     relative,
+			     meta.relative_path,
+			     (unsigned long long)snap_id,
+			     (unsigned long long)meta.snap_id,
+			     (unsigned long long)snap_index,
+			     (unsigned long long)meta.raft_index);
+		rc = -EINVAL;
+		unlink(final_path);
+		final_ready = false;
+		goto done;
+	}
+
+	char calc_sha[SHA256_DIGEST_LENGTH * 2 + 1];
+	rc = snapshot_sha256_file_hex(final_path, calc_sha, sizeof(calc_sha));
+	if (rc != 0) {
+		hifs_warning("tcp_recv_file_on_new_node: unable to checksum %s rc=%d",
+			     final_path,
+			     rc);
+		unlink(final_path);
+		final_ready = false;
+		goto done;
+	}
+	if (strcmp(calc_sha, meta.sha256) != 0) {
+		hifs_warning("tcp_recv_file_on_new_node: checksum mismatch for %s expected=%s got=%s",
+			     final_path,
+			     meta.sha256,
+			     calc_sha);
+		rc = -EBADMSG;
+		unlink(final_path);
+		final_ready = false;
 		goto done;
 	}
 
@@ -974,7 +1247,9 @@ static int tcp_recv_file_on_new_node(int sock_fd)
 		    (unsigned long long)snap_index,
 		    final_path);
 	
-	hg_ask_to_join_cluster(storage_node_id);
+	hg_ask_to_join_cluster(storage_node_id,
+			       HG_JOIN_CLUSTER_FLAG_NEW_NODE |
+			       HG_JOIN_CLUSTER_FLAG_LEARNER);
 
 done:
 	if (file_fd >= 0)
@@ -992,7 +1267,8 @@ done:
 }
 
 static int hg_send_join_request_to_peer(const struct hive_storage_node *peer,
-					unsigned int storage_node_id)
+					unsigned int storage_node_id,
+					uint32_t join_flags)
 {
 	if (!peer || storage_node_id == 0)
 		return -EINVAL;
@@ -1021,33 +1297,78 @@ static int hg_send_join_request_to_peer(const struct hive_storage_node *peer,
 		snprintf(host, sizeof(host), "%s", fallback);
 	}
 
-	int fd = connect_to_host_port(host, port);
-	if (fd < 0)
-		return -ECONNREFUSED;
-
 	struct hg_join_cluster_request_wire req = {
 		.magic = htonl(HG_JOIN_CLUSTER_MAGIC),
 		.version = htons(1),
 		.storage_node_id = htonl(storage_node_id),
+		.flags = htonl(join_flags),
 	};
 
-	if (write_full(fd, &req, sizeof(req)) != (ssize_t)sizeof(req)) {
+	for (int attempt = 0; attempt < HG_JOIN_CLUSTER_MAX_ATTEMPTS; ++attempt) {
+		int fd = connect_to_host_port(host, port);
+		if (fd < 0)
+			return -ECONNREFUSED;
+
+		if (write_full(fd, &req, sizeof(req)) != (ssize_t)sizeof(req)) {
+			close(fd);
+			return -EIO;
+		}
+
+		int wait_rc = hg_wait_for_fd(fd, POLLIN, HG_JOIN_CLUSTER_TIMEOUT_MS);
+		if (wait_rc != 0) {
+			close(fd);
+			if (wait_rc == -ETIMEDOUT &&
+			    attempt + 1 < HG_JOIN_CLUSTER_MAX_ATTEMPTS)
+				continue;
+			return (wait_rc == -ETIMEDOUT) ? -EAGAIN : wait_rc;
+		}
+
+		struct hg_join_cluster_response_wire resp;
+		if (read_full(fd, &resp, sizeof(resp)) != (ssize_t)sizeof(resp)) {
+			close(fd);
+			return -EIO;
+		}
 		close(fd);
-		return -EIO;
+
+		if (ntohl(resp.magic) != HG_JOIN_CLUSTER_MAGIC)
+			return -EPROTO;
+
+		uint32_t raw = ntohl((uint32_t)resp.status);
+		return (int)((int32_t)raw);
 	}
 
-	struct hg_join_cluster_response_wire resp;
-	if (read_full(fd, &resp, sizeof(resp)) != (ssize_t)sizeof(resp)) {
-		close(fd);
-		return -EIO;
+	return -EAGAIN;
+}
+
+int hg_ask_to_join_cluster(unsigned int storage_node_id, uint32_t join_flags)
+{
+	if (storage_node_id == 0)
+		return -EINVAL;
+
+	if (hg_guard_local_can_write())
+		return hg_acept_request_to_join_cluster(storage_node_id,
+							join_flags);
+
+	size_t count = 0;
+	const struct hive_storage_node *nodes = hifs_get_storage_nodes(&count);
+	if ((!nodes || count == 0) && hifs_load_storage_nodes())
+		nodes = hifs_get_storage_nodes(&count);
+	if (!nodes || count == 0)
+		return -ENOENT;
+
+	int rc = -EHOSTUNREACH;
+	for (size_t i = 0; i < count; ++i) {
+		if (nodes[i].id == storage_node_id)
+			continue;
+		rc = hg_send_join_request_to_peer(&nodes[i],
+						  storage_node_id,
+						  join_flags);
+		if (rc == -EAGAIN)
+			continue;
+		if (rc == 0)
+			return 0;
 	}
-	close(fd);
-
-	if (ntohl(resp.magic) != HG_JOIN_CLUSTER_MAGIC)
-		return -EPROTO;
-
-	uint32_t raw = ntohl((uint32_t)resp.status);
-	return (int)((int32_t)raw);
+	return rc;
 }
 
 static const struct hive_storage_node *
@@ -1067,35 +1388,50 @@ hg_find_storage_node(unsigned int storage_node_id)
 	return NULL;
 }
 
-int hg_ask_to_join_cluster(unsigned int storage_node_id)
+static int hg_submit_join_sec_for_new_node(const struct hive_storage_node *node,
+					   uint32_t join_flags)
 {
-	if (storage_node_id == 0)
+	if (!node)
 		return -EINVAL;
 
-	if (hg_guard_local_can_write())
-		return hg_acept_request_to_join_cluster(storage_node_id);
+	char progress[8];
+	char patch_level[16];
+	snprintf(progress, sizeof(progress), "0%%");
+	snprintf(patch_level,
+		 sizeof(patch_level),
+		 "%u",
+		 (unsigned int)node->hive_patch_level);
 
-	size_t count = 0;
-	const struct hive_storage_node *nodes = hifs_get_storage_nodes(&count);
-	if ((!nodes || count == 0) && hifs_load_storage_nodes())
-		nodes = hifs_get_storage_nodes(&count);
-	if (!nodes || count == 0)
-		return -ENOENT;
+	const char *machine_uid = node->uid[0] ? node->uid : NULL;
 
-	int rc = -EHOSTUNREACH;
-	for (size_t i = 0; i < count; ++i) {
-		if (nodes[i].id == storage_node_id)
-			continue;
-		rc = hg_send_join_request_to_peer(&nodes[i], storage_node_id);
-		if (rc == -EAGAIN)
-			continue;
-		if (rc == 0)
-			return 0;
-	}
-	return rc;
+	struct hive_guard_join_context ctx = {
+		.cluster_id = 0,
+		.node_id = node->id,
+		.machine_uid = machine_uid,
+		.node_record = node,
+		.cluster_state = "configuring",
+		.database_state = "configured",
+		.kv_state = "configured",
+		.cont1_state = "configured",
+		.cont2_state = "configured",
+		.min_nodes_required = 1,
+		.flags = join_flags,
+		.first_boot_ts = NULL,
+		.config_status = "node_join",
+		.config_progress = progress,
+		.config_message = "join-as-learner",
+		.hive_version = HIFS_VERSION,
+		.hive_patch_level = patch_level,
+		.action = "node_join",
+		.node_version = node->hive_version,
+		.node_patch_level = node->hive_patch_level,
+		.raft_replay = 0,
+	};
+	return hifs_raft_submit_join_sec(&ctx);
 }
 
-int hg_acept_request_to_join_cluster(unsigned int storage_node_id)
+int hg_acept_request_to_join_cluster(unsigned int storage_node_id,
+				     uint32_t join_flags)
 {
 	if (storage_node_id == 0)
 		return -EINVAL;
@@ -1122,6 +1458,17 @@ int hg_acept_request_to_join_cluster(unsigned int storage_node_id)
 		hifs_warning("failed to submit storage node %u join rc=%d",
 			     storage_node_id,
 			     rc);
+		return rc;
 	}
-	return rc;
+
+	if (join_flags & HG_JOIN_CLUSTER_FLAG_NEW_NODE) {
+		int join_rc = hg_submit_join_sec_for_new_node(node, join_flags);
+		if (join_rc != 0) {
+			hifs_warning("failed to submit learner join for node %u rc=%d",
+				     storage_node_id,
+				     join_rc);
+			return join_rc;
+		}
+	}
+	return 0;
 }
