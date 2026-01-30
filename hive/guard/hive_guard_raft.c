@@ -30,6 +30,7 @@
 #include "hive_guard_sql.h"
 #include "hive_guard_kv.h"
 #include "hive_guard.h"
+#include "hive_guard_leasing.h"
 #include "hive_guard_sn_tcp.h"
 
 struct uv_raft;
@@ -615,12 +616,14 @@ commitCb(struct uv_raft *raft,
     }
 
     case HG_OP_LEASE_MAKE:
+        return hg_leasing_apply_lease_make(&cmd.u.lease);
 
     case HG_OP_LEASE_RENEW:
+        return hg_leasing_apply_lease_renew(&cmd.u.lease);
 
     case HG_OP_LEASE_RELEASE:
+        return hg_leasing_apply_lease_release(&cmd.u.lease);
 
-    case HG_OP_LEASE_CLAIM:
 
     case HG_OP_CACHE_CHECK:
 
@@ -630,7 +633,6 @@ commitCb(struct uv_raft *raft,
 
     case HG_OP_CACHE_PURGE:
 
-    
     case HG_OP_SNAPSHOT_MARK: {
         MYSQL *db = hg_sql_get_db();
         if (!db) return -EIO;
