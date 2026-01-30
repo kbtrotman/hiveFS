@@ -15,7 +15,7 @@ USE hive_meta;
 -- These entities should be read-only from the web API side of things.
 
 CREATE TABLE IF NOT EXISTS cluster (
-  cluster_id          INT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  cluster_uid          INT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
   cluster_name        VARCHAR(100) NOT NULL UNIQUE,
   cluster_description TEXT NULL,
   cluster_created     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -46,8 +46,9 @@ CREATE TABLE IF NOT EXISTS cluster (
 
 
 CREATE TABLE IF NOT EXISTS storage_nodes (
-  node_id          INT UNSIGNED PRIMARY KEY,
-  cluster_id       INT UNSIGNED DEFAULT NULL,
+  node_uid         INT UNSIGNED PRIMARY KEY,
+  node_cduid       INT UNSIGNED PRIMARY KEY,
+  cluster_uid      INT UNSIGNED DEFAULT NULL,
   node_name        VARCHAR(100) NOT NULL,
   node_address     VARCHAR(64) NOT NULL,
   node_uid         VARCHAR(128) NOT NULL,
@@ -96,7 +97,7 @@ CREATE TABLE IF NOT EXISTS storage_nodes (
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS storage_node_stats (
-  node_id        INT UNSIGNED NOT NULL,
+  node_uid       INT UNSIGNED NOT NULL,
   s_ts           TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
   cpu            INT UNSIGNED,
@@ -145,7 +146,7 @@ CREATE TABLE IF NOT EXISTS storage_node_stats (
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS storage_node_fs_stats (
-  node_id        INT UNSIGNED NOT NULL,
+  node_uid       INT UNSIGNED NOT NULL,
   fs_ts          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   fs_name        VARCHAR(255) NOT NULL,
   fs_path        VARCHAR(255) NOT NULL,
@@ -164,7 +165,7 @@ CREATE TABLE IF NOT EXISTS storage_node_fs_stats (
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS storage_node_disk_stats (
-  node_id        INT UNSIGNED NOT NULL,
+  node_uid       INT UNSIGNED NOT NULL,
   disk_ts        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   disk_name      VARCHAR(64) NOT NULL,        -- sda, nvme0n1
   disk_path      VARCHAR(128) NOT NULL,       -- /dev/sda
@@ -207,9 +208,10 @@ CREATE TABLE IF NOT EXISTS shard_map (
     REFERENCES storage_nodes(node_id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
-CREATE TABLE IF NOT EXISTS host (
+CREATE TABLE IF NOT EXISTS clients (
   serial               VARCHAR(100) NOT NULL PRIMARY KEY,
-  host_id              VARCHAR(50),
+  host_uid             VARCHAR(50),
+  host_mid             VARCHAR(50),
   name                 VARCHAR(100),
   host_address         VARCHAR(255) NOT NULL,
   os_name              VARCHAR(50),
@@ -232,12 +234,16 @@ CREATE TABLE IF NOT EXISTS host (
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS host_auth (
-  id             BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
-  serial         VARCHAR(255),
-  machine_uid    VARCHAR(128) NOT NULL UNIQUE,
+  serial         VARCHAR(100) NOT NULL PRIMARY KEY,
+  host_uid       VARCHAR(50),
+  host_mid       VARCHAR(50),
   name           VARCHAR(255),
+  key_id         VARCHAR(64) NOT NULL,
+  key_use        ENUM('cluster','node','client', 'foreign') NOT NULL DEFAULT 'client',
   priv_key_pem   TEXT,
   pub_key_pem    TEXT,
+  signed_by      VARCHAR(128) NULL,
+  signed_cert    TEXT,
   issued_on      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   expires_at     DATETIME NOT NULL,
   revoked_at     TIMESTAMP NULL,
@@ -252,9 +258,11 @@ CREATE TABLE IF NOT EXISTS host_auth (
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS host_tokens (
+  tid            BIGINT UNSIGNED NOT NULL,
   token          CHAR(64) PRIMARY KEY,
   t_type         ENUM('cluster_join', 'node_join', 'client_join')
-  machine_uid    VARCHAR(128) NOT NULL,
+  host_uid       VARCHAR(50),
+  host_mid       VARCHAR(50),
   issued_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   expires_at     DATETIME NOT NULL,
   used           BOOLEAN NOT NULL DEFAULT 0,
@@ -273,6 +281,7 @@ CREATE TABLE IF NOT EXISTS host_tokens (
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS volume_superblocks (
+  owner_uid              INT UNSIGNED NOT NULL,
   volume_id              BIGINT UNSIGNED NOT NULL PRIMARY KEY,
   s_magic                INT UNSIGNED NOT NULL,
   s_blocksize            INT UNSIGNED NOT NULL,

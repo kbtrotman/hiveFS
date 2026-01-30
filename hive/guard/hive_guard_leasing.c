@@ -18,6 +18,7 @@
  */
 
 #include "hive_guard_leasing.h"
+#include "hive_guard_raft.h"
 #include "hive_guard.h"
 
 #include <netdb.h>
@@ -235,6 +236,28 @@ static bool jparse(const char *json, JVal *out)
     return *s == '\0';
 }
 
+static bool parse_host_from_addr(const char *addr,
+                                 char *host,
+                                 size_t host_sz,
+                                 int *port_out)
+{
+    if (!addr || !host || host_sz == 0) return false;
+    host[0] = '\0';
+    const char *colon = strrchr(addr, ':');
+    int port = 0;
+    if (colon) {
+        size_t len = (size_t)(colon - addr);
+        if (len >= host_sz) len = host_sz - 1;
+        memcpy(host, addr, len);
+        host[len] = '\0';
+        port = atoi(colon + 1);
+    } else {
+        snprintf(host, host_sz, "%s", addr);
+    }
+    if (port_out) *port_out = port;
+    return host[0] != '\0';
+}
+
 static void jfree(JVal *v)
 {
     if (!v) return;
@@ -296,9 +319,6 @@ static int send_frame_json(int fd, const char *json)
     rc = write_full(fd, json, len);
     return (rc < 0) ? rc : 0;
 }
-
-#define HG_LEASE_FORWARD_TIMEOUT_MS 3000
-#define HG_LEASE_FORWARD_RESP_MAX   (1024 * 1024)
 
 static const struct hive_storage_node *lease_find_owner_node(uint32_t node_id)
 {
@@ -490,6 +510,72 @@ static int forward_lease_renew_remote(int client_fd,
     }
     resp[len] = '\0';
 
+    rc = send_frame_json(client_fd, resp);
+    free(resp);
+    return rc;
+}
+
+static int send_forwarded_error(int fd, const char *op, const char *key, const char *error)
+{
+    char out[512];
+    snprintf(out, sizeof(out),
+             "{\"ok\":false,\"op\":\"%s\",\"key\":\"%s\",\"error\":\"%s\"}",
+             op ? op : "", key ? key : "", error ? error : "forward_failed");
+    return send_frame_json(fd, out);
+}
+
+static int forward_to_leader_json(int client_fd,
+                                  const char *leader,
+                                  const char *json,
+                                  size_t len,
+                                  const char *op,
+                                  const char *key)
+{
+    if (!leader) return send_forwarded_error(client_fd, op, key, "leader_unknown");
+
+    char host[128];
+    int port = 0;
+    if (!parse_host_from_addr(leader, host, sizeof(host), &port))
+        return send_forwarded_error(client_fd, op, key, "leader_addr_bad");
+    if (port <= 0)
+        port = get_env_int("HIVE_LEASE_LISTEN_PORT", 7400);
+
+    int sock = lease_connect_peer(host, port);
+    if (sock < 0)
+        return send_forwarded_error(client_fd, op, key, "leader_unreachable");
+
+    uint32_t be = htonl((uint32_t)len);
+    int rc = write_full(sock, &be, sizeof(be));
+    if (rc >= 0)
+        rc = write_full(sock, json, len);
+    if (rc < 0) {
+        close(sock);
+        return send_forwarded_error(client_fd, op, key, "leader_send_failed");
+    }
+
+    uint32_t resp_len_be = 0;
+    rc = read_full(sock, &resp_len_be, sizeof(resp_len_be));
+    if (rc <= 0) {
+        close(sock);
+        return send_forwarded_error(client_fd, op, key, "leader_recv_len");
+    }
+    uint32_t resp_len = ntohl(resp_len_be);
+    if (resp_len == 0 || resp_len > HG_LEASE_FORWARD_RESP_MAX) {
+        close(sock);
+        return send_forwarded_error(client_fd, op, key, "leader_resp_invalid");
+    }
+    char *resp = (char *)calloc(1, (size_t)resp_len + 1);
+    if (!resp) {
+        close(sock);
+        return send_frame_json(client_fd, "{\"ok\":false,\"error\":\"oom\"}");
+    }
+    rc = read_full(sock, resp, resp_len);
+    close(sock);
+    if (rc <= 0) {
+        free(resp);
+        return send_forwarded_error(client_fd, op, key, "leader_resp_short");
+    }
+    resp[resp_len] = '\0';
     rc = send_frame_json(client_fd, resp);
     free(resp);
     return rc;
@@ -794,6 +880,89 @@ static int handle_lease_release(int fd, const char *key, uint64_t token, uint32_
     return send_frame_json(fd, out);
 }
 
+int hg_leasing_apply_lease_make(const struct RaftLeaseCommand *cmd)
+{
+    if (!cmd || cmd->key[0] == '\0')
+        return -EINVAL;
+
+    pthread_mutex_lock(&g_lease_mu);
+    hg_lease_entry_t *e = lease_upsert_locked(cmd->key);
+    if (!e) {
+        pthread_mutex_unlock(&g_lease_mu);
+        return -ENOSPC;
+    }
+
+    hg_lease_mode_t mode = (cmd->mode == HG_LEASE_EXCLUSIVE) ?
+                           HG_LEASE_EXCLUSIVE : HG_LEASE_SHARED;
+    e->mode = mode;
+
+    uint32_t owner = cmd->owner_node_id ?
+                     cmd->owner_node_id : cmd->requester_node_id;
+    e->owner_node_id = owner;
+
+    uint64_t token = cmd->token;
+    if (token == 0)
+        token = (e->token == 0) ? 1 : (e->token + 1);
+    e->token = token;
+
+    uint64_t base = cmd->timestamp_ms;
+    if (base == 0)
+        base = now_ms();
+    e->expires_at_ms = cmd->ttl_ms ? base + cmd->ttl_ms : 0;
+
+    pthread_mutex_unlock(&g_lease_mu);
+    return 0;
+}
+
+int hg_leasing_apply_lease_renew(const struct RaftLeaseCommand *cmd)
+{
+    if (!cmd || cmd->key[0] == '\0')
+        return -EINVAL;
+
+    pthread_mutex_lock(&g_lease_mu);
+    hg_lease_entry_t *e = lease_find_locked(cmd->key);
+    if (!e) {
+        pthread_mutex_unlock(&g_lease_mu);
+        return -ENOENT;
+    }
+
+    if (cmd->token == 0 || e->token != cmd->token) {
+        pthread_mutex_unlock(&g_lease_mu);
+        return -ESTALE;
+    }
+
+    uint64_t base = cmd->timestamp_ms ? cmd->timestamp_ms : now_ms();
+    uint64_t ttl_ms = cmd->ttl_ms ? cmd->ttl_ms : 30000;
+    e->expires_at_ms = base + ttl_ms;
+    pthread_mutex_unlock(&g_lease_mu);
+    return 0;
+}
+
+int hg_leasing_apply_lease_release(const struct RaftLeaseCommand *cmd)
+{
+    if (!cmd || cmd->key[0] == '\0')
+        return -EINVAL;
+
+    pthread_mutex_lock(&g_lease_mu);
+    hg_lease_entry_t *e = lease_find_locked(cmd->key);
+    if (!e) {
+        pthread_mutex_unlock(&g_lease_mu);
+        return -ENOENT;
+    }
+
+    if (cmd->token != 0 && e->token != cmd->token) {
+        pthread_mutex_unlock(&g_lease_mu);
+        return -ESTALE;
+    }
+
+    size_t idx = (size_t)(e - g_leases);
+    g_leases[idx] = g_leases[g_lease_count - 1];
+    memset(&g_leases[g_lease_count - 1], 0, sizeof(g_leases[0]));
+    g_lease_count--;
+    pthread_mutex_unlock(&g_lease_mu);
+    return 0;
+}
+
 /* -------------------------------------------------------------------------- */
 /* Connection loop                                                             */
 /* -------------------------------------------------------------------------- */
@@ -887,7 +1056,6 @@ static void *conn_thread(void *arg)
             send_frame_json(fd, "{\"ok\":false,\"error\":\"oom\"}");
             break;
         }
-
         rr = read_full(fd, json, len);
         if (rr <= 0) {
             free(json);
@@ -934,6 +1102,60 @@ static void *conn_thread(void *arg)
             jfree(&root);
             free(json);
             continue;
+        }
+
+        if (op == HG_LEASE_RENEW && self_node_id != 0 && token != 0) {
+            uint32_t owner_node = 0;
+            pthread_mutex_lock(&g_lease_mu);
+            const hg_lease_entry_t *lease = lease_find_locked(key);
+            if (lease)
+                owner_node = lease->owner_node_id;
+            pthread_mutex_unlock(&g_lease_mu);
+
+            if (owner_node != 0 && owner_node != self_node_id) {
+                int frc;
+                if (forwarded) {
+                    char out[512];
+                    snprintf(out, sizeof(out),
+                             "{\"ok\":false,\"op\":\"LEASE_RENEW\",\"key\":\"%s\","
+                             "\"error\":\"owner_redirect_failed\",\"owner\":%u}",
+                             key, (unsigned)owner_node);
+                    frc = send_frame_json(fd, out);
+                } else {
+                    frc = forward_lease_renew_remote(fd, key, token, ttl_ms, owner_node, self_node_id);
+                }
+
+                jfree(&root);
+                free(json);
+                if (frc != 0) {
+                    lease_log("WARN", "fd=%d renew_forward rc=%d", fd, frc);
+                    break;
+                }
+                continue;
+            }
+        }
+
+        if (op == HG_LEASE_ACQUIRE) {
+            bool is_leader = true;
+            if (g_hooks.is_leader)
+                is_leader = g_hooks.is_leader(g_hooks.ctx);
+            if (!is_leader) {
+                int frc;
+                if (forwarded) {
+                    frc = send_forwarded_error(fd, op_s, key, "leader_redirect_failed");
+                } else {
+                    const char *leader = g_hooks.leader_addr ?
+                                         g_hooks.leader_addr(g_hooks.ctx) : NULL;
+                    frc = forward_to_leader_json(fd, leader, json, len, op_s, key);
+                }
+                jfree(&root);
+                free(json);
+                if (frc != 0) {
+                    lease_log("WARN", "fd=%d forward rc=%d", fd, frc);
+                    break;
+                }
+                continue;
+            }
         }
 
         int rc = 0;

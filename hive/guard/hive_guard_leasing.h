@@ -17,6 +17,8 @@
 #include <time.h>
 #include <unistd.h>
 
+struct RaftLeaseCommand;
+
 /* -------------------------------------------------------------------------- */
 /* Lease Op Types (wire-visible)                                              */
 /* -------------------------------------------------------------------------- */
@@ -32,6 +34,9 @@ typedef enum hg_lease_mode {
     HG_LEASE_SHARED   = 1,
     HG_LEASE_EXCLUSIVE= 2,
 } hg_lease_mode_t;
+
+#define HG_LEASE_FORWARD_TIMEOUT_MS 3000
+#define HG_LEASE_FORWARD_RESP_MAX   (1024 * 1024)
 
 /* -------------------------------------------------------------------------- */
 /* Hooks: let the leasing server consult raft layer without coupling      */
@@ -75,3 +80,8 @@ void hg_leasing_stop(void);
 
 /* Debug helper: dump lease table to stdout (optional for debug purposes, add define or switch). */
 void hg_leasing_debug_dump(void);
+
+int hg_leasing_apply_lease_make(const struct RaftLeaseCommand *cmd);
+int hg_leasing_apply_lease_renew(const struct RaftLeaseCommand *cmd);
+int hg_leasing_apply_lease_release(const struct RaftLeaseCommand *cmd);
+int hg_leasing_apply_lease_release(const struct RaftLeaseCommand *cmd);
