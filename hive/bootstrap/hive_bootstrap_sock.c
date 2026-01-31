@@ -348,6 +348,9 @@ static const char *json_string_or_default(const char *src, const char *fallback,
 	return json_string_or_null(value, buf, buf_sz);
 }
 
+
+static bool ensure_uuid_file(const char *path, char *uuid, size_t uuid_sz);
+
 static bool prepare_local_node(struct hive_storage_node *node)
 {
 	if (!ensure_hive_guard_service()) {
@@ -487,8 +490,38 @@ out:
 	return ok;
 }
 
+static bool build_join_payload_prefix(char *buf, size_t buf_sz,
+				       const char *command,
+				       uint64_t cluster_id,
+				       uint64_t node_id,
+				       uint64_t min_nodes_req,
+				       const char *cluster_state_json,
+				       size_t *written)
+{
+	if (!buf || buf_sz == 0 || !command || !cluster_state_json)
+		return false;
+	uint64_t min_nodes = min_nodes_req ? min_nodes_req : 1;
+	int n = snprintf(
+		buf, buf_sz,
+		"{\"command\":\"%s\"," 
+		"\"cluster_id\":%llu,"
+		"\"node_id\":%llu,"
+		"\"min_nodes_req\":%llu,"
+		"\"cluster_state\":%s,",
+		command,
+		(unsigned long long)cluster_id,
+		(unsigned long long)node_id,
+		(unsigned long long)min_nodes,
+		cluster_state_json);
+	if (n < 0 || (size_t)n >= buf_sz)
+		return false;
+	if (written)
+		*written = (size_t)n;
+	return true;
+}
+
 static bool build_cluster_join_payload(const struct hive_bootstrap_request *req,
-				       char *buf, size_t buf_sz)
+			       char *buf, size_t buf_sz)
 {
 	if (!req || !buf || buf_sz == 0)
 		return false;
@@ -499,47 +532,46 @@ static bool build_cluster_join_payload(const struct hive_bootstrap_request *req,
 	char raw_payload_buf[HIVE_BOOTSTRAP_MSG_MAX * 2];
 	const char *cluster_name_json =
 		json_string_or_null(req->cluster_name, cluster_name_buf,
-				    sizeof(cluster_name_buf));
+			    sizeof(cluster_name_buf));
 	const char *cluster_desc_json =
 		json_string_or_null(req->cluster_desc, cluster_desc_buf,
-				    sizeof(cluster_desc_buf));
+			    sizeof(cluster_desc_buf));
 	const char *node_name_json =
 		json_string_or_null(req->node_name, node_name_buf,
-				    sizeof(node_name_buf));
+			    sizeof(node_name_buf));
 	const char *join_token_json =
 		json_string_or_null(req->join_token, join_token_buf,
-				    sizeof(join_token_buf));
+			    sizeof(join_token_buf));
 	const char *raw_payload_json =
 		json_string_or_null(req->raw_payload, raw_payload_buf,
-				    sizeof(raw_payload_buf));
-	const char *cluster_state_src =
-		(req->cluster_state[0] ? req->cluster_state : "configuring");
+			    sizeof(raw_payload_buf));
+	const char *cluster_state_ptr =
+		req->cluster_state[0] ? req->cluster_state : NULL;
 	char cluster_state_buf[32];
-
-	json_escape_string(cluster_state_src, cluster_state_buf,
-			   sizeof(cluster_state_buf));
+	const char *cluster_state_json =
+		json_string_or_default(cluster_state_ptr, "configuring",
+			     cluster_state_buf, sizeof(cluster_state_buf));
+	size_t off = 0;
+	if (!build_join_payload_prefix(buf, buf_sz, "cluster_join",
+					req->cluster_id,
+					req->node_id,
+					req->min_nodes_req,
+					cluster_state_json,
+					&off))
+		return false;
 	int n = snprintf(
-		buf, buf_sz,
-		"{\"command\":\"cluster_join\","
-		"\"cluster_id\":%llu,"
-		"\"node_id\":%llu,"
-		"\"min_nodes_req\":%u,"
-		"\"cluster_state\":\"%s\","
+		buf + off, buf_sz - off,
 		"\"cluster_name\":%s,"
 		"\"cluster_desc\":%s,"
 		"\"node_name\":%s,"
 		"\"join_token\":%s,"
 		"\"raw_payload\":%s}",
-		(unsigned long long)req->cluster_id,
-		(unsigned long long)req->node_id,
-		(unsigned int)(req->min_nodes_req ? req->min_nodes_req : 1),
-		cluster_state_buf,
 		cluster_name_json,
 		cluster_desc_json,
 		node_name_json,
 		join_token_json,
 		raw_payload_json);
-	return n >= 0 && (size_t)n < buf_sz;
+	return n >= 0 && (size_t)n < buf_sz - off;
 }
 
 static bool forward_cluster_join_request(const struct hive_bootstrap_request *req)
@@ -712,7 +744,17 @@ static bool build_local_node_join_payload(char *buf, size_t buf_sz)
 	char hive_version_buf[32];
 	char patch_value_buf[8];
 	char patch_json_buf[16];
+	char cduid_value[UUID_BUF_LEN];
+	char cduid_json_buf[UUID_BUF_LEN + 4];
 
+	if (!ensure_uuid_file(HIVE_NODE_ID, cduid_value, sizeof(cduid_value)))
+		return false;
+	hifs_safe_strcpy(hbc.storage_node_cduid,
+			 sizeof(hbc.storage_node_cduid),
+			 cduid_value);
+	const char *cduid_json =
+		json_string_or_null(cduid_value,
+				    cduid_json_buf, sizeof(cduid_json_buf));
 	const char *cluster_state_json =
 		json_string_or_default(hbc.cluster_state,
 				       "unconfigured",
@@ -769,43 +811,42 @@ static bool build_local_node_join_payload(char *buf, size_t buf_sz)
 	const char *patch_level_json =
 		json_string_or_null(patch_value_buf,
 				    patch_json_buf, sizeof(patch_json_buf));
-	uint64_t min_nodes =
-		hbc.min_nodes_req ? hbc.min_nodes_req : 1ULL;
+	size_t off = 0;
 
+	if (!build_join_payload_prefix(buf, buf_sz, "node_join",
+				       hbc.cluster_id,
+				       hbc.storage_node_id,
+				       hbc.min_nodes_req,
+				       cluster_state_json,
+				       &off))
+		return false;
 	int n = snprintf(
-		buf, buf_sz,
-		"{\"command\":\"node_join\","
-		"\"cluster_id\":%llu,"
-		"\"node_id\":%u,"
-		"\"min_nodes_req\":%llu,"
-		"\"cluster_state\":%s,"
+		buf + off, buf_sz - off,
 		"\"database_state\":%s,"
 		"\"kv_state\":%s,"
 		"\"cont1_state\":%s,"
 		"\"cont2_state\":%s,"
 		"\"bootstrap_token\":%s,"
 		"\"first_boot_ts\":%s,"
+		"\"cduid\":%s,"
 		"\"config_status\":%s,"
 		"\"config_progress\":%s,"
 		"\"config_msg\":%s,"
 		"\"hive_version\":%s,"
 		"\"hive_patch_level\":%s}",
-		(unsigned long long)hbc.cluster_id,
-		hbc.storage_node_id,
-		(unsigned long long)min_nodes,
-		cluster_state_json,
 		database_state_json,
 		kv_state_json,
 		cont1_state_json,
 		cont2_state_json,
 		token_json,
 		first_boot_json,
+		cduid_json,
 		status_json,
 		progress_json,
 		message_json,
 		hive_version_json,
 		patch_level_json);
-	return n >= 0 && (size_t)n < buf_sz;
+	return n >= 0 && (size_t)n < buf_sz - off;
 }
 
 static bool forward_node_join_request(void)
@@ -1007,6 +1048,48 @@ static bool read_uuid_from_file(const char *path, char *uuid, size_t uuid_sz)
 		return false;
 	trim_newline(uuid);
 	return strlen(uuid) == UUID_TEXT_LEN;
+}
+
+static bool read_kernel_uuid(char *uuid, size_t uuid_sz);
+static bool write_text_file(const char *path, const char *text);
+
+enum node_uuid_kind {
+	NODE_UUID_CLUSTER_DEPENDENT,
+	NODE_UUID_GLOBAL
+};
+
+static bool ensure_uuid_file(const char *path, char *uuid, size_t uuid_sz)
+{
+	if (!path || !uuid || uuid_sz < UUID_BUF_LEN)
+		return false;
+	if (read_uuid_from_file(path, uuid, uuid_sz))
+		return true;
+	if (!read_kernel_uuid(uuid, uuid_sz))
+		return false;
+	return write_text_file(path, uuid);
+}
+
+static bool ensure_node_uuid_pair(char *cduid, size_t cduid_sz,
+				       char *global_uuid, size_t global_uuid_sz,
+				       enum node_uuid_kind *failure_kind)
+{
+	if (!cduid || cduid_sz < UUID_BUF_LEN ||
+	    !global_uuid || global_uuid_sz < UUID_BUF_LEN) {
+		if (failure_kind)
+			*failure_kind = NODE_UUID_CLUSTER_DEPENDENT;
+		return false;
+	}
+	if (!ensure_uuid_file(HIVE_NODE_ID, cduid, cduid_sz)) {
+		if (failure_kind)
+			*failure_kind = NODE_UUID_CLUSTER_DEPENDENT;
+		return false;
+	}
+	if (!ensure_uuid_file(HW_NODE_UID, global_uuid, global_uuid_sz)) {
+		if (failure_kind)
+			*failure_kind = NODE_UUID_GLOBAL;
+		return false;
+	}
+	return true;
 }
 
 static bool read_kernel_uuid(char *uuid, size_t uuid_sz)
@@ -1255,6 +1338,7 @@ static void configure_cluster(const struct hive_bootstrap_request *req)
 	char cluster_uuid[UUID_BUF_LEN];
 	char node_uuid[UUID_BUF_LEN];
 	char hw_node_uuid[UUID_BUF_LEN];
+	enum node_uuid_kind uuid_failure = NODE_UUID_CLUSTER_DEPENDENT;
 
 	if (!ensure_directory_path(HIVE_BOOTSTRAP_SYS_DIR) ||
 	    !ensure_directory_path(HIVE_CLUSTER_DIR)) {
@@ -1271,24 +1355,15 @@ static void configure_cluster(const struct hive_bootstrap_request *req)
 			return;
 		}
 	}
-	if (!read_uuid_from_file(HIVE_NODE_ID, node_uuid,
-				 sizeof(node_uuid))) {
-		if (!read_kernel_uuid(node_uuid, sizeof(node_uuid)) ||
-		    !write_text_file(HIVE_NODE_ID, node_uuid)) {
-			push_guard_status_update("cluster_config: node uuid failed",\
+	if (!ensure_node_uuid_pair(node_uuid, sizeof(node_uuid),
+				       hw_node_uuid, sizeof(hw_node_uuid),
+				       &uuid_failure)) {
+		const char *err_msg = (uuid_failure == NODE_UUID_GLOBAL) ?
+			"cluster_config: hw node uuid failed" :
+			"cluster_config: node uuid failed";
 
-						 100, "IN_ERROR");
-			return;
-		}
-	}
-	if (!read_uuid_from_file(HW_NODE_UID, hw_node_uuid,
-				 sizeof(hw_node_uuid))) {
-		if (!read_kernel_uuid(hw_node_uuid, sizeof(hw_node_uuid)) ||
-		    !write_text_file(HW_NODE_UID, hw_node_uuid)) {
-			push_guard_status_update("cluster_config: hw node uuid failed",
-						 100, "IN_ERROR");
-			return;
-		}
+		push_guard_status_update(err_msg, 100, "IN_ERROR");
+		return;
 	}
 	if (!ensure_chrony_ready()) {
 		push_guard_status_update("cluster_config: chrony not ready",
@@ -1346,23 +1421,17 @@ static void configure_node(const struct hive_bootstrap_request *req)
 		req->node_name);
 
 	struct hive_storage_node local_node_join;
+	enum node_uuid_kind uuid_failure = NODE_UUID_CLUSTER_DEPENDENT;
 
-	if (!read_uuid_from_file(HIVE_NODE_ID, node_uuid, sizeof(node_uuid))) {
-		if (!read_kernel_uuid(node_uuid, sizeof(node_uuid)) ||
-		    !write_text_file(HIVE_NODE_ID, node_uuid)) {
-			push_guard_status_update("cluster_config: node uuid failed",\
-				
-						 100, "IN_ERROR");
-			return;
-		}
-	}
-	if (!read_uuid_from_file(HW_NODE_UID, hw_node_uuid, sizeof(hw_node_uuid))) {
-		if (!read_kernel_uuid(hw_node_uuid, sizeof(hw_node_uuid)) ||
-		    !write_text_file(HW_NODE_UID, hw_node_uuid)) {
-			push_guard_status_update("cluster_config: hw node uuid failed",
-						 100, "IN_ERROR");
-			return;
-		}
+	if (!ensure_node_uuid_pair(node_uuid, sizeof(node_uuid),
+				       hw_node_uuid, sizeof(hw_node_uuid),
+				       &uuid_failure)) {
+		const char *err_msg = (uuid_failure == NODE_UUID_GLOBAL) ?
+			"cluster_config: hw node uuid failed" :
+			"cluster_config: node uuid failed";
+
+		push_guard_status_update(err_msg, 100, "IN_ERROR");
+		return;
 	}
 
 	if (!prepare_local_node(&local_node_join))

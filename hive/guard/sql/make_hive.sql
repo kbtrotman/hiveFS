@@ -58,10 +58,10 @@ CREATE TABLE IF NOT EXISTS storage_nodes (
   cont1_state      ENUM('unconfigured', 'pending', 'active', 'degraded', 'offline', 'retired', 'blanked', 'configured'),
   cont2_state      ENUM('unconfigured', 'pending', 'active', 'degraded', 'offline', 'retired', 'blanked', 'configured'),
   hg_state         ENUM('unconfigured', 'pending', 'active', 'degraded', 'offline', 'retired', 'blanked', 'configured'),
+  node_state       ENUM('ok', 'warning', 'critical', 'offline', 'learner') NOT NULL DEFAULT 'ok', 
   node_join_ts     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   fenced           BOOLEAN NOT NULL DEFAULT 0,
   down             BOOLEAN NOT NULL DEFAULT 0,
-  node_health      ENUM('ok', 'warning', 'critical', 'offline'), 
   node_guard_port  INT UNSIGNED NOT NULL,
   node_data_port   INT UNSIGNED NOT NULL,
   last_heartbeat   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -181,6 +181,17 @@ CREATE TABLE IF NOT EXISTS storage_node_disk_stats (
   health          ENUM('ok','warn','crit') NOT NULL DEFAULT 'ok',
   PRIMARY KEY (node_id, disk_name, disk_ts),
   KEY idx_disk_ts (disk_ts)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS volume_stats (
+  volume_id      BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+  file_count     BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  dir_count      BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  total_bytes    BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  updated_at     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                         ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_volume_stats FOREIGN KEY (volume_id)
+    REFERENCES volume_superblocks(volume_id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS alerts (
@@ -415,17 +426,6 @@ CREATE TABLE IF NOT EXISTS volume_xattrs (
     REFERENCES volume_inodes(volume_id, inode) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
-CREATE TABLE IF NOT EXISTS volume_stats (
-  volume_id      BIGINT UNSIGNED NOT NULL PRIMARY KEY,
-  file_count     BIGINT UNSIGNED NOT NULL DEFAULT 0,
-  dir_count      BIGINT UNSIGNED NOT NULL DEFAULT 0,
-  total_bytes    BIGINT UNSIGNED NOT NULL DEFAULT 0,
-  updated_at     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-                         ON UPDATE CURRENT_TIMESTAMP,
-  CONSTRAINT fk_volume_stats FOREIGN KEY (volume_id)
-    REFERENCES volume_superblocks(volume_id) ON DELETE CASCADE
-) ENGINE=InnoDB;
-
 CREATE TABLE IF NOT EXISTS meta_snapshots (
   snapshot_id           BIGINT UNSIGNED NOT NULL PRIMARY KEY,
   snapshot_name         VARCHAR(128) DEFAULT NULL,
@@ -455,6 +455,18 @@ CREATE TABLE IF NOT EXISTS meta_snapshots (
   KEY idx_meta_snapshots_container (container, container_ref),
   KEY idx_meta_snapshots_scope (cluster_wide, scope_node_id)
 ) ENGINE=InnoDB;
+-- =========================
+-- PROCEDURES (hive_meta)
+-- =========================
+USE hive_meta;
+DELIMITER //
+
+CREATE PROCEDURE sp_bootstrap_finish(IN p_machine_uid VARCHAR(128))
+BEGIN
+  UPDATE hive_meta.host_auth
+     SET status='approved', approved_at = NOW()
+   WHERE machine_uid = p_machine_uid AND status <> 'revoked';
+END//
 
 
 -- =========================
@@ -550,7 +562,19 @@ SELECT
 FROM hive_api.ui_virtual_node v
 LEFT JOIN hive_api.v_mounts m ON m.mount_id = v.id
 
-UNION ALL
+UNION ALL-- =========================
+-- PROCEDURES (hive_meta)
+-- =========================
+USE hive_meta;
+DELIMITER //
+
+CREATE PROCEDURE sp_bootstrap_finish(IN p_machine_uid VARCHAR(128))
+BEGIN
+  UPDATE hive_meta.host_auth
+     SET status='approved', approved_at = NOW()
+   WHERE machine_uid = p_machine_uid AND status <> 'revoked';
+END//
+
 
 -- B) Physical FS nodes. Parent is resolved by linking the parent inode to its dentry row.
 SELECT
@@ -654,19 +678,5 @@ SELECT
   COALESCE(SUM(dir_count), 0)         AS total_dirs,
   COALESCE(SUM(total_bytes), 0)       AS total_bytes
 FROM hive_meta.volume_stats;
-
-
--- =========================
--- PROCEDURES (hive_meta)
--- =========================
-USE hive_meta;
-DELIMITER //
-
-CREATE PROCEDURE sp_bootstrap_finish(IN p_machine_uid VARCHAR(128))
-BEGIN
-  UPDATE hive_meta.host_auth
-     SET status='approved', approved_at = NOW()
-   WHERE machine_uid = p_machine_uid AND status <> 'revoked';
-END//
 
 DELIMITER ;
