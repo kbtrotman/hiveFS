@@ -238,6 +238,7 @@ struct RaftJoinSec {
     char     hive_version[GUARD_SOCK_STATUS_LEN];
     char     hive_patch_level[GUARD_SOCK_STATUS_LEN];
     char     pub_key[GUARD_SOCK_PUBKEY_LEN];
+    char     cduid[GUARD_SOCK_UID_LEN];
     char     machine_uid[GUARD_SOCK_UID_LEN];
     char     action[GUARD_SOCK_STATUS_LEN];
     int32_t  raft_replay;

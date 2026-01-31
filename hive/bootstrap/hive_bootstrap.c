@@ -355,6 +355,8 @@ static void apply_node_config(const char *json)
 		hbc.storage_node_address, sizeof(hbc.storage_node_address));
 	parse_json_string_value(json, "storage_node_uid",
 		hbc.storage_node_uid, sizeof(hbc.storage_node_uid));
+	parse_json_string_value(json, "storage_node_cduid",
+		hbc.storage_node_cduid, sizeof(hbc.storage_node_cduid));
 	parse_json_string_value(json, "storage_node_serial",
 		hbc.storage_node_serial, sizeof(hbc.storage_node_serial));
 	if (parse_json_u64_value(json, "storage_node_guard_port", &val))

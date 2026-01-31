@@ -610,6 +610,7 @@ commitCb(struct uv_raft *raft,
         hg_raft_copy_str(req.hive_version, sizeof(req.hive_version), src->hive_version);
         hg_raft_copy_str(req.hive_patch_level, sizeof(req.hive_patch_level), src->hive_patch_level);
         hg_raft_copy_str(req.pub_key, sizeof(req.pub_key), src->pub_key);
+        hg_raft_copy_str(req.cduid, sizeof(req.cduid), src->cduid);
         hg_raft_copy_str(req.machine_uid, sizeof(req.machine_uid), src->machine_uid);
         hg_raft_copy_str(req.action, sizeof(req.action), src->action);
         return hive_guard_apply_join_sec(&req);
@@ -876,6 +877,7 @@ int hifs_raft_submit_join_sec(const struct hive_guard_join_context *ctx)
     hg_raft_copy_str(dst->hive_version, sizeof(dst->hive_version), ctx->hive_version);
     hg_raft_copy_str(dst->hive_patch_level, sizeof(dst->hive_patch_level), ctx->hive_patch_level);
     hg_raft_copy_str(dst->pub_key, sizeof(dst->pub_key), NULL);
+    hg_raft_copy_str(dst->cduid, sizeof(dst->cduid), ctx->cduid);
 
     const char *machine_uid = ctx->machine_uid;
     if ((!machine_uid || !machine_uid[0]) &&

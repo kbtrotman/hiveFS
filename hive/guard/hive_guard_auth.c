@@ -279,6 +279,7 @@ int update_node_for_add(struct hive_storage_node *local)
 		.cluster_id = hbc.cluster_id,
 		.node_id = hbc.storage_node_id,
 		.machine_uid = hbc.storage_node_uid,
+		.cduid = hbc.storage_node_cduid,
 		.node_record = local,
 		.cluster_state = hbc.cluster_state,
 		.database_state = hbc.database_state,

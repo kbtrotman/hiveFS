@@ -175,6 +175,18 @@ static void guard_sock_copy_field(char *dst, size_t dst_len,
 	hifs_safe_strcpy(dst, dst_len, src);
 }
 
+static int guard_sock_ensure_directory(const char *path)
+{
+	if (!path || !*path)
+		return -EINVAL;
+	if (mkdir(path, 0755) == 0 || errno == EEXIST)
+		return 0;
+	fprintf(stderr,
+		"hive_guard_sock: mkdir(%s) failed: %s\n",
+		path, strerror(errno));
+	return -errno;
+}
+
 static unsigned int guard_sock_progress_percent(const char *progress)
 {
 	if (!progress || !*progress)
@@ -381,6 +393,7 @@ int hive_guard_distribute_node_tokens(const struct hive_guard_join_context *ctx)
 	char kv_state_buf[32];
 	char cont1_state_buf[32];
 	char cont2_state_buf[32];
+	char cduid_field[GUARD_SOCK_UID_LEN * 2];
 
 	const char *node_id_json =
 		json_number_or_null(node_id_buf, sizeof(node_id_buf),
@@ -409,6 +422,8 @@ int hive_guard_distribute_node_tokens(const struct hive_guard_join_context *ctx)
 	const char *hive_patch_json = json_string_or_null(
 		ctx->hive_patch_level, hive_patch_field,
 		sizeof(hive_patch_field));
+	const char *cduid_json = json_string_or_null(
+		ctx->cduid, cduid_field, sizeof(cduid_field));
 
 	json_escape_string(default_state(ctx->cluster_state, "unconfigured"),
 			   cluster_state_buf, sizeof(cluster_state_buf));
@@ -427,7 +442,8 @@ int hive_guard_distribute_node_tokens(const struct hive_guard_join_context *ctx)
 			  strlen(config_progress_json) +
 			  strlen(config_msg_json) +
 			  strlen(hive_version_json) +
-			  strlen(hive_patch_json);
+			  strlen(hive_patch_json) +
+			  strlen(cduid_json);
 	json = malloc(json_cap);
 	if (!json)
 		goto cleanup;
@@ -450,6 +466,7 @@ int hive_guard_distribute_node_tokens(const struct hive_guard_join_context *ctx)
 		"\"config_status\":%s,"
 		"\"config_progress\":%s,"
 		"\"config_msg\":%s,"
+		"\"cduid\":%s,"
 		"\"pub_key\":%s}\n",
 		hive_version_json,
 		hive_patch_json,
@@ -466,6 +483,7 @@ int hive_guard_distribute_node_tokens(const struct hive_guard_join_context *ctx)
 		config_status_json,
 		config_progress_json,
 		config_msg_json,
+		cduid_json,
 		pub_json);
 	if (json_len < 0 || (size_t)json_len >= json_cap)
 		goto cleanup;
@@ -683,6 +701,9 @@ static bool guard_sock_parse_join_request(const char *json,
 	guard_sock_parse_string_value(json, "pub_key",
 				      out->pub_key,
 				      sizeof(out->pub_key));
+	guard_sock_parse_string_value(json, "cduid",
+				      out->cduid,
+				      sizeof(out->cduid));
 	return true;
 }
 
@@ -792,6 +813,9 @@ static int guard_sock_handle_node_join(const struct hive_guard_sock_join_sec *re
 	guard_sock_copy_field(hbc.storage_node_uid,
 			      sizeof(hbc.storage_node_uid),
 			      local.uid, "");
+	guard_sock_copy_field(hbc.storage_node_cduid,
+			      sizeof(hbc.storage_node_cduid),
+			      req->cduid, "");
 	guard_sock_copy_field(hbc.storage_node_serial,
 			      sizeof(hbc.storage_node_serial),
 			      local.serial, "");
@@ -846,31 +870,115 @@ static int guard_sock_handle_cluster_join(const struct hive_guard_sock_cluster_j
 	return 0;
 }
 
-// TODO:
-// Need to flesh out this func using the comments in the function.
-int guard_sock_handle_cluster_init(const struct hive_guard_sock_join_sec req)
+int guard_sock_handle_cluster_init(const struct hive_guard_sock_join_sec *req)
 {
+	struct hive_storage_node local;
+	char raft_log_path[sizeof(HIVE_GUARD_RAFT_DIR) + 16];
+	int log_fd;
+
 	if (!req)
 		return -EINVAL;
 	uint16_t min_nodes = (uint16_t)(req->min_nodes_req
 						? req->min_nodes_req : 1);
 
-    // Create raft directories if they don't exist and crreate raft log if
-    // it doesn't exist. (HIVE_GUARD_RAFT_DIR)
+	int rc = guard_sock_ensure_directory(HIVE_DATA_DIR);
 
-    // Need to update key pairs (x,509) and cert. Call update_node_for_add()
-    // since the process is the same. Later, this needs to be moved to raft
-    // once testing is done.
+	if (rc != 0)
+		return rc;
+	rc = guard_sock_ensure_directory(HIVE_GUARD_RAFT_DIR);
+	if (rc != 0)
+		return rc;
 
-    // Later: Init cluster in raft also. Leave this comment. It can't be done now.
+	int n = snprintf(raft_log_path, sizeof(raft_log_path),
+			 "%s/raft.log", HIVE_GUARD_RAFT_DIR);
 
-    // Call hifs_persist_cluster_record() from hive_guard_sql.c
-    // NOTE: this would generally be in raft, but for now, we're just
-    // getting the process right.
+	if (n < 0 || (size_t)n >= sizeof(raft_log_path))
+		return -ENAMETOOLONG;
+	log_fd = open(raft_log_path, O_CREAT | O_WRONLY | O_CLOEXEC, 0640);
+	if (log_fd < 0) {
+		fprintf(stderr,
+			"hive_guard_sock: failed to open %s: %s\n",
+			raft_log_path, strerror(errno));
+		return -errno;
+	}
+	close(log_fd);
 
+	if (!hifs_get_local_node_identity(&local))
+		return -EIO;
+	if (!local.guard_port)
+		local.guard_port = hifs_local_guard_port();
+	if (!local.stripe_port)
+		local.stripe_port = local.guard_port;
+	local.last_heartbeat = (uint64_t)time(NULL);
 
-    // Print a successful message in the logs & return.
+	hbc.cluster_id = req->cluster_id;
+	hbc.storage_node_id = req->node_id ? (uint32_t)req->node_id : 1U;
+	hbc.min_nodes_req = min_nodes;
+	guard_sock_copy_field(hbc.cluster_state, sizeof(hbc.cluster_state),
+			      req->cluster_state, "configuring");
+	guard_sock_copy_field(hbc.database_state, sizeof(hbc.database_state),
+			      req->database_state, "configured");
+	guard_sock_copy_field(hbc.kv_state, sizeof(hbc.kv_state),
+			      req->kv_state, "configured");
+	guard_sock_copy_field(hbc.cont1_state, sizeof(hbc.cont1_state),
+			      req->cont1_state, "configured");
+	guard_sock_copy_field(hbc.cont2_state, sizeof(hbc.cont2_state),
+			      req->cont2_state, "configured");
+	guard_sock_copy_field(hbc.bootstrap_token, sizeof(hbc.bootstrap_token),
+			      req->bootstrap_token, "");
+	guard_sock_copy_field(hbc.first_boot_ts, sizeof(hbc.first_boot_ts),
+			      req->first_boot_ts, "");
+	guard_sock_copy_field(hbc.storage_node_name,
+			      sizeof(hbc.storage_node_name),
+			      local.name, "");
+	guard_sock_copy_field(hbc.storage_node_address,
+			      sizeof(hbc.storage_node_address),
+			      local.address, "");
+	guard_sock_copy_field(hbc.storage_node_uid,
+			      sizeof(hbc.storage_node_uid),
+			      local.uid, "");
+	guard_sock_copy_field(hbc.storage_node_cduid,
+			      sizeof(hbc.storage_node_cduid),
+			      req->cduid, "");
+	guard_sock_copy_field(hbc.storage_node_serial,
+			      sizeof(hbc.storage_node_serial),
+			      local.serial, "");
+	hbc.storage_node_guard_port = local.guard_port;
+	hbc.storage_node_stripe_port = local.stripe_port;
+	hbc.storage_node_last_heartbeat = local.last_heartbeat;
+	hbc.storage_node_fenced = 1;
 
+	g_status_percent = guard_sock_progress_percent(req->config_progress);
+	guard_sock_copy_field(g_config_state, sizeof(g_config_state),
+			      req->config_status, "IDLE");
+	guard_sock_copy_field(g_status_message, sizeof(g_status_message),
+			      req->config_msg, "");
+
+	enum bootstrap_request_type prev = g_pending_request_type;
+
+	g_pending_request_type = BOOTSTRAP_REQ_CLUSTER;
+	rc = update_node_for_add(&local);
+	g_pending_request_type = prev;
+	if (rc != 0)
+		return rc;
+    
+    // Add RAFT INIT step here if needed in future
+    // Add any other raft related initialization here
+    bootstrap_status_update("RAFT_INIT", 95, "RAFT initialization complete, persisting record in DB.");
+
+	if (!hifs_persist_cluster_record(req->cluster_id,
+					 NULL, NULL,
+					 min_nodes))
+		return -EIO;
+
+	fprintf(stdout,
+		"hive_guard_sock: cluster_init complete cluster=%llu node=%u\n",
+		(unsigned long long)hbc.cluster_id,
+		hbc.storage_node_id);
+	fflush(stdout);
+
+    bootstrap_status_update("RAFT_INIT", 100, "Cluster initialization complete.");
+	return 0;
 }
 
 static int guard_sock_handle_join_sec(const struct hive_guard_sock_join_sec *req)
@@ -879,6 +987,7 @@ static int guard_sock_handle_join_sec(const struct hive_guard_sock_join_sec *req
 		.cluster_id = req->cluster_id,
 		.node_id = req->node_id,
 		.machine_uid = NULL,
+		.cduid = req->cduid[0] ? req->cduid : NULL,
 		.cluster_state = req->cluster_state[0]
 			? req->cluster_state : NULL,
 		.database_state = req->database_state[0]
