@@ -1,8 +1,18 @@
+-- Bootstrap performance/safety knobs (session-scoped)
+SET SESSION sql_log_bin = 0;
+SET SESSION autocommit = 0;
+SET SESSION unique_checks = 0;
+SET SESSION foreign_key_checks = 0;
+-- Faster initial load (acceptable for bootstrap); keep durability defaults in prod runtime
+SET SESSION innodb_flush_log_at_trx_commit = 2;
+
 -- Optional: strict mode
 -- SET sql_mode='STRICT_ALL_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION';
 
-CREATE DATABASE IF NOT EXISTS hive_api;
-CREATE DATABASE IF NOT EXISTS hive_meta;
+CREATE DATABASE IF NOT EXISTS hive_api
+  CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE DATABASE IF NOT EXISTS hive_meta
+  CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 -- CREATE DATABASE IF NOT EXISTS hive_data;
 
 -- =========================
@@ -141,8 +151,9 @@ CREATE TABLE IF NOT EXISTS storage_node_stats (
 
   clients        INT UNSIGNED,
 
-  PRIMARY KEY (node_id, s_ts),
-  KEY idx_ts (s_ts)
+  PRIMARY KEY (node_uid, s_ts),
+  KEY idx_ts (s_ts),
+  KEY idx_node_ts (node_uid, s_ts)
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS storage_node_fs_stats (
@@ -160,8 +171,10 @@ CREATE TABLE IF NOT EXISTS storage_node_fs_stats (
   in_avail_bytes BIGINT UNSIGNED NOT NULL,
   in_used_pct    DECIMAL(5,2) NOT NULL,
   health       ENUM('ok', 'warn', 'crit') NOT NULL DEFAULT 'ok',
-  PRIMARY KEY (node_id, fs_path, fs_ts),
-  KEY idx_fs_ts (fs_ts)
+  PRIMARY KEY (node_uid, fs_path, fs_ts),
+  KEY idx_fs_ts (fs_ts),
+  KEY idx_node_ts (node_uid, fs_ts),
+  KEY idx_node_path_ts (node_uid, fs_path, fs_ts)
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS storage_node_disk_stats (
@@ -179,8 +192,10 @@ CREATE TABLE IF NOT EXISTS storage_node_disk_stats (
   io_ms           BIGINT UNSIGNED NOT NULL,
   fs_path         VARCHAR(255) NULL,          -- best-effort mapping
   health          ENUM('ok','warn','crit') NOT NULL DEFAULT 'ok',
-  PRIMARY KEY (node_id, disk_name, disk_ts),
-  KEY idx_disk_ts (disk_ts)
+  PRIMARY KEY (node_uid, disk_name, disk_ts),
+  KEY idx_disk_ts (disk_ts),
+  KEY idx_node_ts (node_uid, disk_ts),
+  KEY idx_node_disk_ts (node_uid, disk_name, disk_ts)
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS volume_stats (
@@ -391,9 +406,10 @@ CREATE TABLE IF NOT EXISTS volume_inodes (
   updated_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
                          ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (volume_id, inode),
-  KEY idx_name (i_ino),
   CONSTRAINT fk_volume_inode FOREIGN KEY (volume_id)
-    REFERENCES volume_superblocks(volume_id) ON DELETE CASCADE
+    REFERENCES volume_superblocks(volume_id) ON DELETE CASCADE,
+  KEY idx_ino (volume_id, i_ino),
+  KEY idx_name (volume_id, i_name)
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS block_stripe_locations (
@@ -680,3 +696,9 @@ SELECT
 FROM hive_meta.volume_stats;
 
 DELIMITER ;
+
+COMMIT;
+
+SET SESSION foreign_key_checks = 1;
+SET SESSION unique_checks = 1;
+SET SESSION autocommit = 1;
