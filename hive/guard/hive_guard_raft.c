@@ -20,6 +20,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#define OPENSSL_SUPPRESS_DEPRECATED
 #include <openssl/sha.h>
 
 
@@ -79,6 +80,112 @@ static struct hg_local_snapshot_info g_last_snap = {
     .status = 1
 };
 
+struct hg_guard_session_entry {
+    struct RaftPutSession session;
+};
+
+static pthread_mutex_t g_session_mu = PTHREAD_MUTEX_INITIALIZER;
+static struct hg_guard_session_entry *g_sessions;
+static size_t g_session_count;
+static size_t g_session_capacity;
+
+static int raft_log_append_entry(const struct RaftCmd *cmd, uint64_t *out_idx);
+static int raft_log_commit_up_to(uint64_t idx);
+
+static void hg_guard_session_remove_locked(size_t idx)
+{
+    if (idx >= g_session_count)
+        return;
+    size_t last = g_session_count - 1;
+    if (idx != last)
+        g_sessions[idx] = g_sessions[last];
+    g_session_count--;
+}
+
+int hifs_raft_submit_session(const struct RaftPutSession *session)
+{
+    if (!session)
+        return -EINVAL;
+    if (!hg_guard_local_can_write())
+        return -EAGAIN;
+
+    struct RaftCmd entry = {0};
+    entry.op_type = HG_OP_PUT_SESSION;
+    entry.u.session_put = *session;
+
+    uint64_t idx = 0;
+    int rc = raft_log_append_entry(&entry, &idx);
+    if (rc != 0)
+        return rc;
+    return raft_log_commit_up_to(idx);
+}
+
+static int hg_guard_session_store(const struct RaftPutSession *session)
+{
+    if (!session)
+        return -EINVAL;
+
+    pthread_mutex_lock(&g_session_mu);
+    for (size_t i = 0; i < g_session_count; ++i) {
+        if (g_sessions[i].session.session_id == session->session_id) {
+            g_sessions[i].session = *session;
+            pthread_mutex_unlock(&g_session_mu);
+            return 0;
+        }
+    }
+
+    if (g_session_count == g_session_capacity) {
+        size_t new_cap = g_session_capacity ? g_session_capacity * 2 : 16;
+        struct hg_guard_session_entry *new_entries =
+            realloc(g_sessions, new_cap * sizeof(*new_entries));
+        if (!new_entries) {
+            pthread_mutex_unlock(&g_session_mu);
+            return -ENOMEM;
+        }
+        g_sessions = new_entries;
+        g_session_capacity = new_cap;
+    }
+
+    g_sessions[g_session_count].session = *session;
+    g_session_count++;
+    pthread_mutex_unlock(&g_session_mu);
+    return 0;
+}
+
+static int hg_guard_session_cleanup(const struct RaftSessionCleanup *cleanup)
+{
+    if (!cleanup)
+        return -EINVAL;
+
+    bool have_user = cleanup->user_name[0] != '\0';
+    bool have_session = cleanup->session_id != 0;
+    if (!have_user && !have_session)
+        return -EINVAL;
+
+    pthread_mutex_lock(&g_session_mu);
+    size_t i = 0;
+    while (i < g_session_count) {
+        bool remove = false;
+        const struct RaftPutSession *sess = &g_sessions[i].session;
+
+        if (have_session && sess->session_id == cleanup->session_id)
+            remove = true;
+        if (!remove && have_user &&
+            strncmp(sess->user_name,
+                    cleanup->user_name,
+                    sizeof(sess->user_name)) == 0)
+            remove = true;
+
+        if (remove) {
+            hg_guard_session_remove_locked(i);
+            continue;
+        }
+        ++i;
+    }
+    pthread_mutex_unlock(&g_session_mu);
+    return 0;
+}
+
 extern MYSQL *hg_sql_get_db(void);
 
 // Also provide these from config somewhere:
@@ -125,6 +232,17 @@ static int hg_snapshot_ensure_dir(const char *dir, mode_t mode)
     if (mkdir(dir, mode) != 0 && errno != EEXIST)
         return -errno;
     return 0;
+}
+
+/* Convert binary to hex string; out must be at least 2*len + 1 bytes. */
+static void __attribute__((unused)) bytes_to_hex(const uint8_t *in, size_t len, char *out)
+{
+    static const char hex_chars[] = "0123456789abcdef";
+    for (size_t i = 0; i < len; ++i) {
+        out[2 * i]     = hex_chars[(in[i] >> 4) & 0x0F];
+        out[2 * i + 1] = hex_chars[in[i] & 0x0F];
+    }
+    out[2 * len] = '\0';
 }
 
 static int hg_snapshot_sha256_hex(const char *path, char *out_hex, size_t out_len)
@@ -245,29 +363,22 @@ static int hg_snapshot_write_meta(const struct hg_local_snapshot_info *snap,
     return write_rc;
 }
 
-/* Convert binary to hex string; out must be at least 2*len + 1 bytes. */
-/* This helper function seems tyo be going everywhere since we sending */
-/* and recieving in a lot of places.  */
-static void __attribute__((unused)) bytes_to_hex(const uint8_t *in, size_t len, char *out)
-{
-    static const char hex_chars[] = "0123456789abcdef";
-    for (size_t i = 0; i < len; ++i) {
-        out[2 * i]     = hex_chars[(in[i] >> 4) & 0x0F];
-        out[2 * i + 1] = hex_chars[in[i] & 0x0F];
-    }
-    out[2 * len] = '\0';
-}
-
 static void hg_raft_copy_str(char *dst, size_t len, const char *src)
 {
-    if (!dst || len == 0)
+    if (!dst || len == 0) {
         return;
+    }
     if (!src) {
         dst[0] = '\0';
         return;
     }
-    strncpy(dst, src, len - 1);
-    dst[len - 1] = '\0';
+    size_t copy_len = len - 1;
+    size_t src_len = strlen(src);
+    if (copy_len > src_len)
+        copy_len = src_len;
+    if (copy_len > 0)
+        memcpy(dst, src, copy_len);
+    dst[copy_len] = '\0';
 }
 
 static const char *hg_raft_op_name(uint8_t op_type)
@@ -285,13 +396,10 @@ static const char *hg_raft_op_name(uint8_t op_type)
     case HG_OP_PUT_SESSION: return "HG_OP_PUT_SESSION";
     case HG_OP_SESSION_CLEANUP: return "HG_OP_SESSION_CLEANUP";
     case HG_OP_SNAPSHOT_MARK: return "HG_OP_SNAPSHOT_MARK";
-    case HG_OP_PUT_JOIN_SEC: return "HG_OP_PUT_JOIN_SEC";
-    case HG_OP_CLUSTER_MAKE_SEC: return "HG_OP_CLUSTER_MAKE_SEC";
     case HG_OP_STORAGE_NODE_UPDATE: return "HG_OP_STORAGE_NODE_UPDATE";
     case HG_OP_LEASE_MAKE: return "HG_OP_LEASE_MAKE";
     case HG_OP_LEASE_RENEW: return "HG_OP_LEASE_RENEW";
     case HG_OP_LEASE_RELEASE: return "HG_OP_LEASE_RELEASE";
-    case HG_OP_LEASE_CLAIM: return "HG_OP_LEASE_CLAIM";
     case HG_OP_CACHE_CHECK: return "HG_OP_CACHE_CHECK";
     case HG_OP_CACHE_CLEAR: return "HG_OP_CACHE_CLEAR";
     case HG_OP_CACHE_EVICTION: return "HG_OP_CACHE_EVICTION";
@@ -586,10 +694,17 @@ commitCb(struct uv_raft *raft,
     case HG_OP_DELETE_INODE:
 
     case HG_OP_PUT_SESSION:
+        return hg_guard_session_store(&cmd.u.session_put);
 
     case HG_OP_SESSION_CLEANUP:
+        return hg_guard_session_cleanup(&cmd.u.session_cleanup);
 
-    case HG_OP_PUT_JOIN_SEC: {
+    case HG_OP_SET_NODE_FULL_SYNC: {
+        (void)cmd.u.node_full_sync;
+        return 0;
+    }
+
+    case HG_OP_PUT_JOIN_NODE: {
         const struct RaftJoinSec *src = &cmd.u.join_sec;
         struct hive_guard_sock_join_sec req = {0};
 
@@ -614,6 +729,46 @@ commitCb(struct uv_raft *raft,
         hg_raft_copy_str(req.machine_uid, sizeof(req.machine_uid), src->machine_uid);
         hg_raft_copy_str(req.action, sizeof(req.action), src->action);
         return hive_guard_apply_join_sec(&req);
+    }
+
+    case HG_OP_PUT_NODE_DOWN: {
+        (void)cmd.u.node_down;
+        return 0;
+    }
+
+    case HG_OP_CLUSTER_NODE_UP: {
+        (void)cmd.u.cluster_node_up;
+        return 0;
+    }
+
+    case HG_OP_CLUSTER_FORCE_HEARTBEAT: {
+        (void)cmd.u.cluster_force_heartbeat;
+        return 0;
+    }
+
+    case HG_OP_CLUSTER_DOWN: {
+        (void)cmd.u.cluster_down;
+        return 0;
+    }
+
+    case HG_OP_CLUSTER_UP: {
+        (void)cmd.u.cluster_up;
+        return 0;
+    }
+
+    case HG_OP_CLUSTER_INIT: {
+        (void)cmd.u.cluster_init;
+        return 0;
+    }
+
+    case HG_OP_CLUSTER_NODE_FENCE: {
+        (void)cmd.u.cluster_node_fence;
+        return 0;
+    }
+
+    case HG_OP_SET_NODE_TO_LEARNER: {
+        (void)cmd.u.node_to_learner;
+        return 0;
     }
 
     case HG_OP_LEASE_MAKE:
@@ -855,7 +1010,7 @@ int hifs_raft_submit_join_sec(const struct hive_guard_join_context *ctx)
         return -EAGAIN;
 
     struct RaftCmd entry = {0};
-    entry.op_type = HG_OP_PUT_JOIN_SEC;
+    entry.op_type = HG_OP_PUT_JOIN_NODE;
     struct RaftJoinSec *dst = &entry.u.join_sec;
 
     dst->cluster_id = ctx->cluster_id;

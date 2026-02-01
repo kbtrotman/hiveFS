@@ -80,9 +80,17 @@ enum hg_op_type {
     HG_OP_PUT_SESSION = 10,
     HG_OP_SESSION_CLEANUP = 11,
     HG_OP_SNAPSHOT_MARK = 50,
-    HG_OP_PUT_JOIN_SEC = 60,
-    HG_OP_CLUSTER_MAKE_SEC = 61,
-    HG_OP_STORAGE_NODE_UPDATE = 61,
+    HG_OP_SET_NODE_FULL_SYNC = 59,
+    HG_OP_PUT_JOIN_NODE = 60,
+    HG_OP_PUT_NODE_DOWN = 61,
+    HG_OP_CLUSTER_NODE_UP = 62,
+    HG_OP_CLUSTER_FORCE_HEARTBEAT = 63,
+    HG_OP_CLUSTER_DOWN = 64,
+    HG_OP_CLUSTER_UP = 65,
+    HG_OP_CLUSTER_INIT = 66,
+    HG_OP_CLUSTER_NODE_FENCE = 67,
+    HG_OP_STORAGE_NODE_UPDATE = 68,
+    HG_OP_SET_NODE_TO_LEARNER = 69,
     HG_OP_LEASE_MAKE = 70,
     HG_OP_LEASE_RENEW = 71,
     HG_OP_LEASE_RELEASE = 72,
@@ -152,6 +160,25 @@ struct RaftClusterAudit {
     char     message[HG_CLUSTER_AUDIT_MSG_MAX];
 };
 
+struct RaftClusterNodeMgmtCmd {
+    uint64_t cluster_id;
+    uint64_t node_id;
+    uint64_t timestamp_ns;
+    uint64_t arg0;
+    uint64_t arg1;
+    uint32_t flags;
+    uint32_t reserved;
+};
+
+struct RaftClusterMgmtCmd {
+    uint64_t cluster_id;
+    uint64_t timestamp_ns;
+    uint64_t arg0;
+    uint64_t arg1;
+    uint32_t flags;
+    uint32_t reserved;
+};
+
 struct RaftAtomicInodeUpdate {
     uint64_t volume_id;
     uint64_t inode_id;
@@ -217,6 +244,7 @@ struct RaftSessionCleanup {
     uint64_t timestamp_ns;
     uint32_t reason;
     uint32_t reserved;
+    char     user_name[HG_SESSION_USER_MAX];
 };
 
 struct RaftJoinSec {
@@ -315,6 +343,16 @@ struct RaftCmd {
         struct RaftClusterAudit cluster_audit;
         struct RaftJoinSec join_sec;
         struct RaftClusterMakeSec cluster_make_sec;
+        struct RaftClusterNodeMgmtCmd node_full_sync;
+        struct RaftClusterNodeMgmtCmd join_node;
+        struct RaftClusterNodeMgmtCmd node_down;
+        struct RaftClusterNodeMgmtCmd cluster_node_up;
+        struct RaftClusterMgmtCmd cluster_force_heartbeat;
+        struct RaftClusterMgmtCmd cluster_down;
+        struct RaftClusterMgmtCmd cluster_up;
+        struct RaftClusterMgmtCmd cluster_init;
+        struct RaftClusterNodeMgmtCmd cluster_node_fence;
+        struct RaftClusterNodeMgmtCmd node_to_learner;
         struct RaftLeaseCommand lease;
         struct RaftCacheCommand cache;
         struct RaftSnapshotMeta snapshot;
@@ -349,6 +387,7 @@ void hg_raft_shutdown(void);
 bool hg_guard_local_can_write(void);
 int hifs_raft_submit_put_block(const struct RaftPutBlock *cmd);
 int hifs_raft_submit_put_dirent(const struct RaftPutDirent *cmd);
+int hifs_raft_submit_session(const struct RaftPutSession *session);
 int hifs_raft_submit_join_sec(const struct hive_guard_join_context *ctx);
 int hifs_raft_submit_storage_update(const struct hive_guard_storage_update_cmd *cmd);
 int hifs_raft_submit_snapshot_mark(uint64_t snap_id);

@@ -26,6 +26,7 @@ UV_LIB := /usr/lib
 
 # ---- Sources ----
 SRCS_C  := hive_bootstrap.c hive_bootstrap_sock.c \
+           hive_bootstrap_metadata_stub.c \
            ../common/hive_common_sql.c ../common/hive_common_sock.c
 
 

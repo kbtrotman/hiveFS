@@ -19,6 +19,8 @@
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <sys/utsname.h>
+#include <pthread.h>
+#include <time.h>
 #include <openssl/sha.h>
 
 #include "hive_guard.h"
@@ -140,6 +142,245 @@ static long str_to_long(const char *s)
 	if (!s)
 		return 0;
 	return strtol(s, NULL, 10);
+}
+
+struct metadata_sql_job {
+	char *sql;
+	size_t len;
+	struct metadata_sql_job *next;
+};
+
+static pthread_mutex_t g_metadata_mu = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t g_metadata_cv = PTHREAD_COND_INITIALIZER;
+static struct metadata_sql_job *g_metadata_head;
+static struct metadata_sql_job *g_metadata_tail;
+static bool g_metadata_stop;
+static bool g_metadata_thread_started;
+static pthread_t g_metadata_thread;
+static size_t g_metadata_depth;
+
+#define HIFS_METADATA_QUEUE_MAX 4096
+
+static void hifs_metadata_job_free(struct metadata_sql_job *job)
+{
+	if (!job)
+		return;
+	free(job->sql);
+	free(job);
+}
+
+static MYSQL *hifs_metadata_open_connection(void)
+{
+	MYSQL *conn = mysql_init(NULL);
+
+	if (!conn)
+		return NULL;
+	if (!mysql_real_connect(conn,
+				DB_HOST,
+				DB_USER,
+				DB_PASS,
+				DB_NAME,
+				DB_PORT,
+				DB_SOCKET,
+				DB_FLAGS)) {
+		hifs_warning("metadata sql: connect failed: %s",
+			     mysql_error(conn));
+		mysql_close(conn);
+		return NULL;
+	}
+	return conn;
+}
+
+static bool hifs_metadata_execute_sql(MYSQL *conn,
+				      const char *sql,
+				      size_t len)
+{
+	if (!conn || !sql)
+		return false;
+	if (mysql_real_query(conn, sql, (unsigned long)len) != 0)
+		return false;
+
+	if (mysql_field_count(conn) == 0)
+		return true;
+
+	MYSQL_RES *res = mysql_store_result(conn);
+
+	if (!res) {
+		if (mysql_field_count(conn) != 0)
+			return false;
+		return true;
+	}
+
+	mysql_free_result(res);
+	return true;
+}
+
+static void hifs_metadata_worker_backoff(void)
+{
+	struct timespec ts = {
+		.tv_sec = 0,
+		.tv_nsec = 200 * 1000 * 1000,
+	};
+
+	nanosleep(&ts, NULL);
+}
+
+static struct metadata_sql_job *hifs_metadata_job_pop(void)
+{
+	struct metadata_sql_job *job = g_metadata_head;
+
+	if (!job)
+		return NULL;
+	g_metadata_head = job->next;
+	if (!g_metadata_head)
+		g_metadata_tail = NULL;
+	if (g_metadata_depth > 0)
+		--g_metadata_depth;
+	return job;
+}
+
+static void *hifs_metadata_worker_main(void *arg)
+{
+	(void)arg;
+	MYSQL *conn = NULL;
+
+	pthread_mutex_lock(&g_metadata_mu);
+	for (;;) {
+		while (!g_metadata_stop && !g_metadata_head)
+			pthread_cond_wait(&g_metadata_cv, &g_metadata_mu);
+
+		if (g_metadata_stop && !g_metadata_head) {
+			pthread_mutex_unlock(&g_metadata_mu);
+			break;
+		}
+
+		struct metadata_sql_job *job = hifs_metadata_job_pop();
+		pthread_mutex_unlock(&g_metadata_mu);
+
+		if (!job)
+			continue;
+
+		bool done = false;
+		while (!done) {
+			if (!conn) {
+				conn = hifs_metadata_open_connection();
+				if (!conn) {
+					hifs_metadata_worker_backoff();
+					continue;
+				}
+			}
+
+			if (hifs_metadata_execute_sql(conn,
+						      job->sql,
+						      job->len)) {
+				done = true;
+			} else {
+				hifs_warning("metadata sql: query failed: %s",
+					     mysql_error(conn));
+				mysql_close(conn);
+				conn = NULL;
+				hifs_metadata_worker_backoff();
+			}
+		}
+
+		hifs_metadata_job_free(job);
+		pthread_mutex_lock(&g_metadata_mu);
+	}
+
+	if (conn)
+		mysql_close(conn);
+	return NULL;
+}
+
+static bool hifs_metadata_worker_start_locked(void)
+{
+	if (g_metadata_thread_started)
+		return true;
+	g_metadata_stop = false;
+	int rc = pthread_create(&g_metadata_thread,
+				NULL,
+				hifs_metadata_worker_main,
+				NULL);
+	if (rc != 0) {
+		hifs_err("metadata sql: pthread_create failed: %s",
+			 strerror(rc));
+		return false;
+	}
+
+	g_metadata_thread_started = true;
+	return true;
+}
+
+bool hifs_metadata_async_execute(const char *sql_string)
+{
+	if (!sql_string || !sql_string[0])
+		return false;
+
+	struct metadata_sql_job *job = calloc(1, sizeof(*job));
+
+	if (!job)
+		return false;
+
+	size_t len = strlen(sql_string);
+	job->sql = malloc(len + 1);
+	if (!job->sql) {
+		free(job);
+		return false;
+	}
+
+	memcpy(job->sql, sql_string, len + 1);
+	job->len = len;
+
+	pthread_mutex_lock(&g_metadata_mu);
+	bool started = hifs_metadata_worker_start_locked();
+	if (!started) {
+		pthread_mutex_unlock(&g_metadata_mu);
+		hifs_metadata_job_free(job);
+		return false;
+	}
+
+	if (g_metadata_depth >= HIFS_METADATA_QUEUE_MAX) {
+		hifs_warning("metadata sql: queue full (depth=%zu)",
+			     g_metadata_depth);
+		pthread_mutex_unlock(&g_metadata_mu);
+		hifs_metadata_job_free(job);
+		return false;
+	}
+
+	if (!g_metadata_head)
+		g_metadata_head = job;
+	else
+		g_metadata_tail->next = job;
+	g_metadata_tail = job;
+	++g_metadata_depth;
+	pthread_cond_signal(&g_metadata_cv);
+	pthread_mutex_unlock(&g_metadata_mu);
+	return true;
+}
+
+void hifs_metadata_async_shutdown(void)
+{
+	pthread_mutex_lock(&g_metadata_mu);
+	if (!g_metadata_thread_started) {
+		pthread_mutex_unlock(&g_metadata_mu);
+		return;
+	}
+
+	g_metadata_stop = true;
+	pthread_cond_broadcast(&g_metadata_cv);
+	pthread_mutex_unlock(&g_metadata_mu);
+
+	pthread_join(g_metadata_thread, NULL);
+
+	pthread_mutex_lock(&g_metadata_mu);
+	g_metadata_thread_started = false;
+	g_metadata_stop = false;
+	while (g_metadata_head) {
+		struct metadata_sql_job *job = hifs_metadata_job_pop();
+		hifs_metadata_job_free(job);
+	}
+	g_metadata_tail = NULL;
+	pthread_mutex_unlock(&g_metadata_mu);
 }
 
 int get_host_info(void)
@@ -471,7 +712,7 @@ bool hifs_store_fs_stat(uint64_t node_id,
 	if (written <= 0 || written >= (int)sizeof(sql_query))
 		return false;
 
-	return hifs_insert_data(sql_query);
+	return hifs_metadata_async_execute(sql_query);
 }
 
 
@@ -536,7 +777,7 @@ bool hifs_store_disk_stat(uint64_t node_id,
 	if (written <= 0 || written >= (int)sizeof(sql_query))
 		return false;
 
-	return hifs_insert_data(sql_query);
+	return hifs_metadata_async_execute(sql_query);
 }
 
 int hifs_get_hive_host_sbs(void)

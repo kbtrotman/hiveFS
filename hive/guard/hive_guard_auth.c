@@ -20,7 +20,7 @@
 #include "hive_guard_auth.h"
 #include "hive_guard_sql.h"
 #include "hive_guard_sock.h"
-#include "../bootstrap/hive_bootstrap_sock.h"
+#include "../common/hive_common.h"
 #include "../../hifs_shared_defs.h"
 
 #include <fcntl.h>

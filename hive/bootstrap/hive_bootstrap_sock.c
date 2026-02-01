@@ -62,6 +62,10 @@ char g_config_state[16] = "IDLE";
 static char g_socket_path[sizeof(((struct sockaddr_un *)0)->sun_path)] =
 	HIVE_BOOTSTRAP_SOCK_PATH;
 
+static void persist_last_attempt_fields(const char *status,
+					unsigned int percent,
+					const char *message);
+
 static void log_tracking_field_error(const char *field)
 {
 	fprintf(stderr,
@@ -1421,6 +1425,8 @@ static void configure_node(const struct hive_bootstrap_request *req)
 		req->node_name);
 
 	struct hive_storage_node local_node_join;
+	char node_uuid[UUID_BUF_LEN];
+	char hw_node_uuid[UUID_BUF_LEN];
 	enum node_uuid_kind uuid_failure = NODE_UUID_CLUSTER_DEPENDENT;
 
 	if (!ensure_node_uuid_pair(node_uuid, sizeof(node_uuid),
