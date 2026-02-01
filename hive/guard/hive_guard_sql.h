@@ -32,12 +32,12 @@
 
 #include "../../hicomm/hi_command.h"
 
-#define DB_HOST     "127.0.0.1"
+#define DB_HOST     NULL
 #define DB_NAME     "hive_meta"
 #define DB_USER     "hiveadmin"
 #define DB_PASS     "hiveadmin"
-#define DB_PORT     3306
-#define DB_SOCKET   NULL
+#define DB_PORT     0
+#define DB_SOCKET   "/run/mysqld/mysqld.sock"
 #define DB_FLAGS    0
 
 #define NO_RECORDS 0x099
@@ -118,6 +118,8 @@ void init_hive_link(void);
 void close_hive_link(void);
 int get_hive_vers(void);
 MYSQL_RES *hifs_get_hive_host_data(char *machine_id);
+bool hifs_metadata_async_execute(const char *sql_string);
+void hifs_metadata_async_shutdown(void);
 
 /*
  * Filesystem stats (storage_node_fs_stats)

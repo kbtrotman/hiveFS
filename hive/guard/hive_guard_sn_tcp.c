@@ -38,6 +38,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#define OPENSSL_SUPPRESS_DEPRECATED
 #include <openssl/sha.h>
 
 #define HIFS_STRIPE_TCP_BACKLOG      8

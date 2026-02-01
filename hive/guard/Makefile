@@ -34,7 +34,8 @@ UV_LIB := /usr/lib
 SRCS_C  := hive_guard.c hive_guard_tcp.c hive_guard_sql.c hive_guard_auth.c \
            hive_guard_erasure_code.c hive_guard_raft.c hive_guard_sn_tcp.c \
            hive_guard_kv.c hive_guard_stats.c hive_guard_sock.c \
-           hive_guard_leasing.c hive_guard_quota.c hive_guard_auth.c \
+           hive_guard_leasing.c hive_guard_quota.c hive_guard_quota.c \
+           hive_guard_rebalance.c \
            ../common/hive_common_sql.c ../common/hive_common_sock.c
 #SRCS_CC := hive_guard_raft_rpc.cc \
 #           hive_guard_raft_statemachine.cc \

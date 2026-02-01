@@ -54,6 +54,8 @@ static void guard_sock_send_status_response(int fd);
 char g_status_message[64] = "IDLE";
 unsigned int g_status_percent = 0;
 char g_config_state[16] = "IDLE";
+enum bootstrap_request_type g_pending_request_type = BOOTSTRAP_REQ_UNKNOWN;
+struct hive_bootstrap_config hbc;
 
 void bootstrap_status_update(const char *message, unsigned int percent,
 			     const char *state)
@@ -277,11 +279,13 @@ int hive_guard_request_node_cert(const struct hive_storage_node *node,
 	};
 	int poll_rc = poll(&pfd, 1, 200);
 
-	if (poll_rc > 0 && (pfd.revents & POLLIN)) {
-		char buf[256];
-
-		(void)read(fd, buf, sizeof(buf));
-	}
+		if (poll_rc > 0 && (pfd.revents & POLLIN)) {
+			char buf[256];
+			ssize_t r = read(fd, buf, sizeof(buf));
+			if (r < 0)
+				hifs_warning("hive_guard_sock: read certmonger response failed: %s",
+					     strerror(errno));
+		}
 
 	close(fd);
 	return 0;

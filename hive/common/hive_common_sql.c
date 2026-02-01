@@ -387,6 +387,8 @@ void close_hive_link(void)
 		sqldb.last_query = NULL;
 	}
 
+	hifs_metadata_async_shutdown();
+
 	if (sqldb.conn)
 		mysql_close(sqldb.conn);
 
@@ -795,7 +797,7 @@ bool hifs_persist_storage_node(uint64_t node_id,
 	if (written < 0 || (size_t)written >= sizeof(sql_query))
 		return false;
 
-	bool ok = hifs_insert_sql(sql_query);
+	bool ok = hifs_metadata_async_execute(sql_query);
 	cache.node_id = node_id;
 	hifs_safe_strcpy(cache.address, sizeof(cache.address), local.address);
 	cache.port = local.guard_port;
@@ -937,19 +939,9 @@ static bool update_storage_node_row_common(uint64_t cluster_id,
 	if (written < 0 || (size_t)written >= sizeof(sql_query))
 		return false;
 
-	if (mysql_real_query(sqldb.conn, sql_query, (unsigned long)written) != 0) {
-		fprintf(stderr, "bootstrap: storage node metadata update failed: %s\n",
-			mysql_error(sqldb.conn));
-		return false;
-	}
-
-	MYSQL_RES *res = mysql_store_result(sqldb.conn);
-
-	if (res) {
-		mysql_free_result(res);
-	} else if (mysql_field_count(sqldb.conn) != 0) {
-		fprintf(stderr, "bootstrap: storage node metadata consume failure: %s\n",
-			mysql_error(sqldb.conn));
+	if (!hifs_metadata_async_execute(sql_query)) {
+		fprintf(stderr,
+			"bootstrap: failed to queue storage node metadata update\n");
 		return false;
 	}
 	return true;

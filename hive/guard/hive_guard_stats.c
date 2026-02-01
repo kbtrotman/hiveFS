@@ -46,6 +46,15 @@ typedef struct {
 	char fstype[64];
 } mountinfo_entry_t;
 
+static void hg_build_dev_path(char *dst, size_t dst_sz, const char *name)
+{
+	if (!dst || dst_sz == 0)
+		return;
+	const char *src = name ? name : "";
+	size_t max_copy = (dst_sz > 6) ? dst_sz - 6 : 0;
+	snprintf(dst, dst_sz, "/dev/%.*s", (int)max_copy, src);
+}
+
 static size_t hg_split_csv_paths(char *buf, const char *csv, char *out[], size_t out_cap)
 {
 	if (!buf || !csv || !out || out_cap == 0)
@@ -157,7 +166,7 @@ static const mountinfo_entry_t *hg_find_mount_for_disk(const mountinfo_entry_t *
 		return NULL;
 
 	char prefix[256];
-	snprintf(prefix, sizeof(prefix), "/dev/%s", disk_name);
+	hg_build_dev_path(prefix, sizeof(prefix), disk_name);
 	size_t plen = strlen(prefix);
 
 	for (size_t i = 0; i < n; ++i) {
@@ -323,7 +332,7 @@ static void hg_collect_disk_stats(uint64_t node_id)
 		uint64_t write_bytes = (uint64_t)sectors_written * sectsz;
 
 		char disk_path[256];
-		snprintf(disk_path, sizeof(disk_path), "/dev/%s", dev);
+		hg_build_dev_path(disk_path, sizeof(disk_path), dev);
 
 		const mountinfo_entry_t *m = hg_find_mount_for_disk(mi, mi_n, dev);
 		const char *fs_path = m ? m->mount_point : NULL;
@@ -675,6 +684,7 @@ static void *hg_stats_thread_main(void *arg)
     // Prime TCP baselines (monotonic totals updated by hot paths)
     uint64_t prev_tcp_rx = atomic_load(&g_stats.tcp_rx_bytes);
     uint64_t prev_tcp_tx = atomic_load(&g_stats.tcp_tx_bytes);
+    uint64_t last_fs_sample_node = 0;
 
     while (!atomic_load(&g_stats_thread_stop)) {
 
@@ -732,6 +742,17 @@ static void *hg_stats_thread_main(void *arg)
         uint64_t sn_out_bps = atomic_load(&g_stats.s_net_out);
         atomic_store(&g_stats.sn_node_in_mbps, bytes_per_sec_to_mbps(sn_in_bps));
         atomic_store(&g_stats.sn_node_out_mbps, bytes_per_sec_to_mbps(sn_out_bps));
+
+        // 7) Persist filesystem/disk health snapshots if we know our node id
+        uint64_t node_id = storage_node_id ? (uint64_t)storage_node_id : 0;
+        if (node_id != 0) {
+            hg_collect_filesystem_stats(node_id);
+            hg_collect_disk_stats(node_id);
+            last_fs_sample_node = node_id;
+        } else if (last_fs_sample_node != 0) {
+            hg_collect_filesystem_stats(last_fs_sample_node);
+            hg_collect_disk_stats(last_fs_sample_node);
+        }
 
         // 7) Persist one row
         (void)hifs_store_stats(g_stats);
