@@ -1,3 +1,11 @@
+-- Bootstrap performance/safety knobs (session-scoped)
+SET SESSION sql_log_bin = 0;
+SET SESSION autocommit = 0;
+SET SESSION unique_checks = 0;
+SET SESSION foreign_key_checks = 0;
+-- Faster initial load (acceptable for bootstrap); keep durability defaults in prod runtime
+SET SESSION innodb_flush_log_at_trx_commit = 2;
+
 -- ----- parameters -----
 USE hive_meta;
 SET @volume_id := 1;
@@ -176,3 +184,9 @@ INSERT INTO hive_api.ui_virtual_node
 VALUES (@v_shareables_id, 'S3_shares', 'virtual', 'none', NULL, NULL, 1)
 ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id);
 SET @v_s3_id := LAST_INSERT_ID();
+
+COMMIT;
+
+SET SESSION foreign_key_checks = 1;
+SET SESSION unique_checks = 1;
+SET SESSION autocommit = 1;

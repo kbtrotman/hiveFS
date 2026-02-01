@@ -62,6 +62,10 @@ const tabs = [
   { id: 'hel_docs', label: 'Documentation' },
   { id: 'hel_search', label: 'Search Help' },
   { id: 'hel_ai', label: 'AI Helper' },
+  { id: 'cluster_init', label: 'Cluster Init' },
+  { id: 'network_setup', label: 'Networking Setup' },
+  { id: 'filesystem_setup', label: 'Filesystem Setup' },
+  { id: 'permissions_setup', label: 'Permissions' },
 ];
 
 // Define which tabs are available for each sidebar item
@@ -76,6 +80,7 @@ const tabAvailability: Record<string, string[]> = {
   reports: ['reports', 'rep_creator', 'rep_scheduler', 'rep_settings'],
   notifications: ['alerts', 'not_endpoints', 'not_create', 'not_history'],
   help: ['hel_support', 'hel_bundle', 'hel_docs', 'hel_search', 'hel_ai'],
+  setup: ['cluster_init', 'network_setup', 'filesystem_setup', 'permissions_setup'],
   profile: [],
 };
 

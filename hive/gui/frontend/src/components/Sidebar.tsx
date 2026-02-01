@@ -1,14 +1,15 @@
 import {
+  Bell,
+  FileText,
+  HardDrive,
+  HelpCircle,
   Home,
   Layers,
   Server,
-  HardDrive,
+  Settings,
   Shield,
   Tag,
   Terminal,
-  FileText,
-  Bell,
-  HelpCircle,
   User,
 } from 'lucide-react';
 import { ImageWithFallback } from './figma/ImageWithFallback';
@@ -25,6 +26,7 @@ const menuItems = [
   { id: 'cluster', icon: Layers, label: 'Cluster' },
   { id: 'servers', icon: Server, label: 'Nodes' },
   { id: 'disk', icon: HardDrive, label: 'Disk' },
+  { id: 'setup', icon: Settings, label: 'Setup' },
   { id: 'reports', icon: FileText, label: 'Reports' },
   { id: 'notifications', icon: Bell, label: 'Notifications' },
   { id: 'security', icon: Shield, label: 'Security' },
