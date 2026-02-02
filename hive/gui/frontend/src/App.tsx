@@ -7,7 +7,9 @@ import { ClusterInitializationScreen } from './components/ClusterInitScreen';
 import { NetworkingSetupScreen, type NetworkingConfiguration } from './components/NetworkingSetupScreen';
 import { FilesystemSetupScreen, type FilesystemSetupConfiguration } from './components/FilesystemSetupScreen';
 import { PermissionsSetupScreen } from './components/PermissionsSetupScreen';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './components/ui/dialog';
+import { Button } from './components/ui/button';
+
+type SetupView = 'network' | 'filesystem' | 'permissions';
 
 const BOOTSTRAP_STATUS_URL =
   import.meta?.env?.VITE_BOOTSTRAP_STATUS_URL ??
@@ -26,13 +28,11 @@ export default function App() {
   const [showClusterInitScreen, setShowClusterInitScreen] = useState(false);
   const [bootstrapStatusChecked, setBootstrapStatusChecked] = useState(false);
   const [bootstrapStatusData, setBootstrapStatusData] = useState<any>(null);
-  const [networkSettingsOpen, setNetworkSettingsOpen] = useState(false);
   const [networkInitialSection, setNetworkInitialSection] = useState<'network' | 'dns' | 'time'>('network');
   const [networkIsSaving, setNetworkIsSaving] = useState(false);
-  const [filesystemSettingsOpen, setFilesystemSettingsOpen] = useState(false);
   const [filesystemInitialTab, setFilesystemInitialTab] = useState<'cluster' | 'filesystem'>('cluster');
-  const [permissionsSettingsOpen, setPermissionsSettingsOpen] = useState(false);
   const [permissionsInitialTab, setPermissionsInitialTab] = useState<'users' | 'groups' | 'roles'>('users');
+  const [activeSetupView, setActiveSetupView] = useState<SetupView | null>(null);
 
   const toggleTheme = () => {
     setTheme(theme === 'light' ? 'dark' : 'light');
@@ -58,21 +58,25 @@ export default function App() {
 
   const openNetworkSettings = (section: 'network' | 'dns' | 'time') => {
     setNetworkInitialSection(section);
-    setNetworkSettingsOpen(true);
+    setActiveSetupView('network');
   };
 
   const openFilesystemSettings = (tab: 'cluster' | 'filesystem') => {
     setFilesystemInitialTab(tab);
-    setFilesystemSettingsOpen(true);
+    setActiveSetupView('filesystem');
   };
 
   const openPermissionsSettings = (tab: 'users' | 'groups' | 'roles') => {
     setPermissionsInitialTab(tab);
-    setPermissionsSettingsOpen(true);
+    setActiveSetupView('permissions');
+  };
+
+  const closeSetupView = () => {
+    setActiveSetupView(null);
   };
 
   const handleNetworkDialogCancel = () => {
-    setNetworkSettingsOpen(false);
+    closeSetupView();
   };
 
   const handleNetworkDialogSave = (configuration: NetworkingConfiguration) => {
@@ -81,65 +85,19 @@ export default function App() {
       console.debug('Saving networking configuration', configuration);
     } finally {
       setNetworkIsSaving(false);
-      setNetworkSettingsOpen(false);
+      closeSetupView();
     }
   };
 
   const handleFilesystemDialogSave = (configuration: FilesystemSetupConfiguration) => {
     console.debug('Saving filesystem configuration', configuration);
-    setFilesystemSettingsOpen(false);
+    closeSetupView();
   };
 
-  const networkingDialog = (
-    <Dialog open={networkSettingsOpen} onOpenChange={setNetworkSettingsOpen}>
-      <DialogContent className="h-[90vh] max-h-[90vh] w-full max-w-5xl overflow-hidden p-0">
-        <div className="flex h-full flex-col">
-          <DialogHeader className="px-6 pt-6">
-            <DialogTitle>Networking Setup</DialogTitle>
-            <DialogDescription>Configure interfaces, DNS, and time services.</DialogDescription>
-          </DialogHeader>
-          <div className="flex-1 overflow-y-auto">
-            <NetworkingSetupScreen
-              initialSection={networkInitialSection}
-              onCancel={handleNetworkDialogCancel}
-              onSave={handleNetworkDialogSave}
-              isSaving={networkIsSaving}
-            />
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-
-  const filesystemDialog = (
-    <Dialog open={filesystemSettingsOpen} onOpenChange={setFilesystemSettingsOpen}>
-      <DialogContent className="h-[90vh] max-h-[90vh] w-full max-w-5xl overflow-hidden p-0">
-        <div className="flex h-full flex-col">
-          <DialogHeader className="px-6 pt-6">
-            <DialogTitle>Filesystem Configuration</DialogTitle>
-            <DialogDescription>Adjust cluster-wide and filesystem-specific options.</DialogDescription>
-          </DialogHeader>
-          <div className="flex-1 overflow-y-auto">
-            <FilesystemSetupScreen initialTab={filesystemInitialTab} onSave={handleFilesystemDialogSave} />
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-
-  const permissionsDialog = (
-    <Dialog open={permissionsSettingsOpen} onOpenChange={setPermissionsSettingsOpen}>
-      <DialogContent className="h-[90vh] max-h-[90vh] w-full max-w-6xl overflow-hidden">
-        <DialogHeader>
-          <DialogTitle>Permission Setup</DialogTitle>
-          <DialogDescription>Manage users, groups, and roles across HiveFS.</DialogDescription>
-        </DialogHeader>
-        <div className="h-full overflow-y-auto pr-1">
-          <PermissionsSetupScreen initialTab={permissionsInitialTab} />
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
+  useEffect(() => {
+    if (showClusterInitScreen && activeSetupView)
+      setActiveSetupView(null);
+  }, [showClusterInitScreen, activeSetupView]);
 
   const fetchBootstrapStatus = useCallback(async (token?: string | null) => {
     setBootstrapStatusChecked(false);
@@ -233,14 +191,16 @@ export default function App() {
   }
 
   // Show dashboard if authenticated
+  const navigationLocked = showClusterInitScreen;
   return (
     <div className={theme === 'dark' ? 'dark' : ''}>
       <div className="flex h-screen bg-background text-foreground">
         <Sidebar 
           activeItem={activeSidebarItem}
           onItemClick={setActiveSidebarItem}
+          disabled={navigationLocked}
         />
-        <div className="flex-1 flex flex-col overflow-hidden">
+        <div className="flex-1 flex min-h-0 flex-col overflow-hidden">
           <TopBar 
             theme={theme}
             onThemeToggle={toggleTheme}
@@ -256,21 +216,74 @@ export default function App() {
             onOpenNetworkSettings={openNetworkSettings}
             onOpenFilesystemSettings={openFilesystemSettings}
             onOpenPermissionsSettings={openPermissionsSettings}
-            settingsEnabled
+            settingsEnabled={!navigationLocked}
+            favoritesEnabled={!navigationLocked}
+            showTabs={!navigationLocked}
+            navigationLocked={navigationLocked}
           />
-          <main className="flex-1 overflow-y-auto bg-muted/20">
+          <main className="flex-1 overflow-hidden bg-muted/20">
             {showClusterInitScreen ? (
-              <ClusterInitializationScreen
-                statusData={bootstrapStatusData}
-                onActionComplete={() => fetchBootstrapStatus(authToken)}
-              />
+              <div className="h-full overflow-y-auto">
+                <ClusterInitializationScreen
+                  statusData={bootstrapStatusData}
+                  onActionComplete={() => fetchBootstrapStatus(authToken)}
+                />
+              </div>
+            ) : activeSetupView ? (
+              <div className="relative flex h-full w-full items-center justify-center px-2 py-2">
+                <div className="absolute inset-0 bg-background/80 backdrop-blur-sm" />
+                <div
+                  className={`relative z-10 flex min-h-0 flex-col overflow-hidden rounded-xl border border-border bg-card shadow-2xl ${
+                    activeSetupView === 'permissions'
+                      ? 'h-[calc(100%-20px)] w-[calc(100%-20px)] max-w-[1400px]'
+                      : 'h-[calc(100%-30px)] w-[calc(100%-30px)] max-w-[1200px]'
+                  }`}
+                >
+                  <div className="flex items-center justify-between border-b border-border px-6 py-4">
+                    <div>
+                      <h2 className="text-xl font-semibold">
+                        {activeSetupView === 'network'
+                          ? 'Networking Setup'
+                          : activeSetupView === 'filesystem'
+                            ? 'Filesystem Configuration'
+                            : 'Permission Setup'}
+                      </h2>
+                      <p className="text-sm text-muted-foreground">
+                        {activeSetupView === 'network'
+                          ? 'Configure interfaces, DNS, and time services.'
+                          : activeSetupView === 'filesystem'
+                            ? 'Adjust cluster-wide and filesystem-specific options.'
+                            : 'Manage users, groups, and roles across HiveFS.'}
+                      </p>
+                    </div>
+                    <Button variant="outline" onClick={closeSetupView}>
+                      Close
+                    </Button>
+                  </div>
+                  <div className="flex-1 min-h-0 overflow-y-auto">
+                    {activeSetupView === 'network' && (
+                      <NetworkingSetupScreen
+                        initialSection={networkInitialSection}
+                        onCancel={handleNetworkDialogCancel}
+                        onSave={handleNetworkDialogSave}
+                      isSaving={networkIsSaving}
+                    />
+                  )}
+                  {activeSetupView === 'filesystem' && (
+                    <FilesystemSetupScreen initialTab={filesystemInitialTab} onSave={handleFilesystemDialogSave} />
+                  )}
+                  {activeSetupView === 'permissions' && (
+                    <PermissionsSetupScreen initialTab={permissionsInitialTab} />
+                  )}
+                  </div>
+                </div>
+              </div>
             ) : (
-              <DashboardContent activeTab={activeTab} activeSidebarItem={activeSidebarItem} />
+              <div className="h-full overflow-y-auto">
+                <DashboardContent activeTab={activeTab} activeSidebarItem={activeSidebarItem} />
+              </div>
             )}
           </main>
-          {networkingDialog}
-          {filesystemDialog}
-          {permissionsDialog}
         </div>
       </div>
     </div>

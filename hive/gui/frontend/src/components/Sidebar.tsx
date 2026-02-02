@@ -6,7 +6,6 @@ import {
   Home,
   Layers,
   Server,
-  Settings,
   Shield,
   Tag,
   Terminal,
@@ -19,6 +18,7 @@ import type { CSSProperties } from 'react';
 interface SidebarProps {
   activeItem: string;
   onItemClick: (item: string) => void;
+  disabled?: boolean;
 }
 
 const menuItems = [
@@ -26,7 +26,6 @@ const menuItems = [
   { id: 'cluster', icon: Layers, label: 'Cluster' },
   { id: 'servers', icon: Server, label: 'Nodes' },
   { id: 'disk', icon: HardDrive, label: 'Disk' },
-  { id: 'setup', icon: Settings, label: 'Setup' },
   { id: 'reports', icon: FileText, label: 'Reports' },
   { id: 'notifications', icon: Bell, label: 'Notifications' },
   { id: 'security', icon: Shield, label: 'Security' },
@@ -36,7 +35,7 @@ const menuItems = [
   { id: 'profile', icon: User, label: 'Profile Setup' },
 ];
 
-export function Sidebar({ activeItem, onItemClick }: SidebarProps) {
+export function Sidebar({ activeItem, onItemClick, disabled = false }: SidebarProps) {
   const baseColor = "var(--card)";
   const gradientStyle: CSSProperties = {
     backgroundColor: baseColor,
@@ -91,9 +90,11 @@ export function Sidebar({ activeItem, onItemClick }: SidebarProps) {
             return (
               <button
                 key={item.id}
-                onClick={() => onItemClick(item.id)}
+                onClick={() => !disabled && onItemClick(item.id)}
+                disabled={disabled}
                 className={`
                   w-full flex items-center gap-3 px-6 py-3 transition-colors
+                  ${disabled ? 'opacity-60 cursor-not-allowed' : ''}
                   ${isActive 
                     ? 'bg-primary text-primary-foreground' 
                     : 'text-muted-foreground hover:bg-muted hover:text-foreground'

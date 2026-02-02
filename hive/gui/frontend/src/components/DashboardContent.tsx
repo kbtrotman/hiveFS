@@ -35,15 +35,6 @@ import { HelpSupportBundleTab } from './pages/tabs/help/HelpSupportBundleTab';
 import { HelpDocsTab } from './pages/tabs/help/HelpDocsTab';
 import { HelpSearchTab } from './pages/tabs/help/HelpSearchTab';
 import { HelpAiTab } from './pages/tabs/help/HelpAiTab';
-import { NetworkingSetupScreen } from './NetworkingSetupScreen';
-import { FilesystemSetupScreen } from './FilesystemSetupScreen';
-import { PermissionsSetupScreen } from './PermissionsSetupScreen';
-import { ClusterInitializationScreen } from './ClusterInitScreen';
-
-const NetworkingSetupTab = () => <NetworkingSetupScreen initialSection="network" />;
-const FilesystemSetupTab = () => <FilesystemSetupScreen initialTab="cluster" />;
-const PermissionsSetupTab = () => <PermissionsSetupScreen initialTab="users" />;
-const ClusterInitTab = () => <ClusterInitializationScreen />;
 
 
 interface DashboardContentProps {
@@ -106,12 +97,6 @@ const sidebarTabComponents: Record<string, Record<string, ComponentType>> = {
     hel_docs: HelpDocsTab,
     hel_search: HelpSearchTab,
     hel_ai: HelpAiTab,
-  },
-  setup: {
-    cluster_init: ClusterInitTab,
-    network_setup: NetworkingSetupTab,
-    filesystem_setup: FilesystemSetupTab,
-    permissions_setup: PermissionsSetupTab,
   },
 };
 
