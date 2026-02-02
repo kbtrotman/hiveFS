@@ -27,6 +27,7 @@ interface TopBarProps {
   showTabs?: boolean;
   favoritesEnabled?: boolean;
   settingsEnabled?: boolean;
+  navigationLocked?: boolean;
   onOpenNetworkSettings?: (section: NetworkSettingsSection) => void;
   onOpenFilesystemSettings?: (section: 'cluster' | 'filesystem') => void;
   onOpenPermissionsSettings?: (section: PermissionSettingsSection) => void;
@@ -62,10 +63,6 @@ const tabs = [
   { id: 'hel_docs', label: 'Documentation' },
   { id: 'hel_search', label: 'Search Help' },
   { id: 'hel_ai', label: 'AI Helper' },
-  { id: 'cluster_init', label: 'Cluster Init' },
-  { id: 'network_setup', label: 'Networking Setup' },
-  { id: 'filesystem_setup', label: 'Filesystem Setup' },
-  { id: 'permissions_setup', label: 'Permissions' },
 ];
 
 // Define which tabs are available for each sidebar item
@@ -80,7 +77,6 @@ const tabAvailability: Record<string, string[]> = {
   reports: ['reports', 'rep_creator', 'rep_scheduler', 'rep_settings'],
   notifications: ['alerts', 'not_endpoints', 'not_create', 'not_history'],
   help: ['hel_support', 'hel_bundle', 'hel_docs', 'hel_search', 'hel_ai'],
-  setup: ['cluster_init', 'network_setup', 'filesystem_setup', 'permissions_setup'],
   profile: [],
 };
 
@@ -111,19 +107,21 @@ export function TopBar({
   showTabs = true,
   favoritesEnabled = true,
   settingsEnabled = true,
+  navigationLocked = false,
   onOpenNetworkSettings,
   onOpenFilesystemSettings,
   onOpenPermissionsSettings,
 }: TopBarProps) {
+  const tabsEnabled = showTabs && !navigationLocked;
   const availableTabs = useMemo(
-    () => (showTabs ? tabAvailability[activeSidebarItem] || [] : []),
-    [showTabs, activeSidebarItem],
+    () => (tabsEnabled ? tabAvailability[activeSidebarItem] || [] : []),
+    [tabsEnabled, activeSidebarItem],
   );
   const visibleTabs = useMemo(
     () => tabs.filter((tab) => availableTabs.includes(tab.id)),
     [availableTabs],
   );
-  const tabsVisible = showTabs && visibleTabs.length > 0;
+  const tabsVisible = tabsEnabled && visibleTabs.length > 0;
   const [favorites, setFavorites] = useState<FavoriteEntry[]>([DEFAULT_FAVORITE]);
 
   useEffect(() => {
@@ -148,6 +146,8 @@ export function TopBar({
     () => favorites.some((fav) => fav.id === currentFavoriteId),
     [favorites, currentFavoriteId],
   );
+  const favoritesInteractive = favoritesEnabled && !navigationLocked;
+  const settingsInteractive = settingsEnabled && !navigationLocked;
 
   const handleAddFavorite = () => {
     if (isCurrentFavorite)
@@ -242,7 +242,7 @@ export function TopBar({
 
       {/* Right Icons */}
       <div className="flex items-center gap-2">
-        {favoritesEnabled && (
+        {favoritesInteractive && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="icon">
@@ -281,7 +281,7 @@ export function TopBar({
             </DropdownMenuContent>
           </DropdownMenu>
         )}
-        {settingsEnabled && (
+        {settingsInteractive && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="icon">
