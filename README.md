@@ -45,6 +45,8 @@ Each storage node is:
 
 - **Shared-nothing**
 - Backed by its own **commodity SSD**
+- The architecture doesn't limit the number of maximum nodes.
+- Adding nodes adds both bandwidth for reading/writing and capacity via internal commodity disk.
 - Installed via:
   - Physical ISO
   - AWS AMI
