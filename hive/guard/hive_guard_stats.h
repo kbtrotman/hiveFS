@@ -71,6 +71,7 @@ typedef struct hg_stats_counters {
     atomic_uint_fast64_t total_iops;
 
     atomic_uint_fast64_t meta_chan_ps;
+    atomic_uint_fast64_t meta_chan_ops;      // monotonic counter for dispatcher
 
     // Gauges computed by stats thread
     atomic_uint_fast64_t incoming_mbps;
@@ -82,6 +83,10 @@ typedef struct hg_stats_counters {
     atomic_uint_fast64_t writes_mbps;
     atomic_uint_fast64_t reads_mbps;
     atomic_uint_fast64_t t_throughput;
+
+    atomic_uint_fast64_t storage_read_bytes; // monotonic counter for read throughput
+    atomic_uint_fast64_t read_latency_ns;
+    atomic_uint_fast64_t read_latency_samples;
 
     // Hot-path monotonic counters: updated by TCP/client code
     atomic_uint_fast64_t tcp_rx_bytes;
@@ -119,12 +124,17 @@ typedef struct hg_stats_snapshot {
 
     uint64_t contig_calls;
     uint64_t contig_bytes;
+
+    uint64_t meta_chan_ops;
+    uint64_t read_bytes;
+    uint64_t read_latency_ns;
+    uint64_t read_latency_samples;
 } hg_stats_snapshot_t;
 
 // Existing helpers
 int hg_compute_latest_stats(void);
 int hg_read_disk_stats(const char *device, DiskStats *stats);
-int hifs_store_stats(struct hg_stats_counters stats);
+int hifs_store_stats(const hg_stats_snapshot_t *snapshot);
 
 // Thread control
 void hg_stats_flush_periodic_start(int node_id, const char *mysql_dsn_or_cfg);

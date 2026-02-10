@@ -83,7 +83,7 @@ Security is a first-class concern in HiveFS.
 - **Mutual TLS (mTLS)** is used for:
   - node-to-node authentication
   - client authentication
-- Identity is rooted in a **cluster CA authority**, with explicit trust validation
+- Identity is rooted in a **client-owned CA authority**, with explicit trust validation
 
 There is no implicit trust between components.  
 Every node and client must prove its identity cryptographically.
@@ -185,6 +185,61 @@ HiveFS is designed as a **quasi-appliance**:
   - cloud instances with attached block storage
 
 While Kubernetes-based deployments may be supported in the future, HiveFS is **not dependent on Kubernetes** and does not require it to function correctly.
+
+## Design philosophy: operational sanity
+
+HiveFS is written by a storage engineer, for storage engineers.
+
+The design is heavily influenced by years of operating large, complex storage systems that were fragile, over-configured, or required constant human intervention to remain healthy. HiveFS intentionally prioritizes **operational sanity** over exposing endless tuning knobs.
+
+Wherever possible, systems are designed to be:
+
+- deterministic
+- automated
+- self-correcting under pressure
+- predictable during failure
+
+This does *not* mean HiveFS attempts to turn untrained users into storage engineers. Instead, the goal is to **reduce cognitive load**, minimize routine firefighting, and allow experienced operators to focus on real problems instead of babysitting the system.
+
+---
+
+### Automation with intent
+
+HiveFS automates common operational tasks by default:
+
+- Installation is **fully hands-off** once initiated
+- Node enrollment, identity, and trust are handled automatically
+- Health monitoring and alerting are integrated into the core system
+
+Alerting is not treated as a passive reporting mechanism. Wherever possible, HiveFS attempts to **stabilize and repair the system first**, *while* alerts are being generated and distributed.
+
+---
+
+### Example: proactive space management
+
+As a concrete example, the metadata and snapshot volume manager intentionally maintains **reserved emergency capacity**.
+
+If a filesystem encounters a space-related error condition, HiveFS can:
+
+- automatically expand the affected filesystem to prevent immediate downtime
+- continue serving requests while operators are notified
+- allow reclaimed space to be returned later once the condition is resolved
+
+The goal is to prevent avoidable outages caused by short-lived or recoverable conditions, without hiding the underlying issue from operators.
+
+---
+
+### Designed to support experts, not replace them
+
+HiveFS does not attempt to abstract away storage engineering concepts entirely. Instead:
+
+- failure modes are explicit
+- behavior is observable
+- automation is conservative and explainable
+
+The system is designed to be **stress-reducing** for experienced operators — not to obscure reality or eliminate the need for understanding how storage works.
+
+In short, HiveFS aims to elevate the day-to-day operational experience for skilled storage engineers, rather than simplify the problem space beyond recognition.
 
 ---
 
