@@ -174,6 +174,8 @@ The node dashboard shows per-node health and status, including:
 
 This view is intended to make node-level issues visible quickly while still encouraging operators to think in terms of the cluster as a whole.
 
+---
+
 ## Deployment philosophy
 
 HiveFS is designed as a **quasi-appliance**:
@@ -185,6 +187,8 @@ HiveFS is designed as a **quasi-appliance**:
   - cloud instances with attached block storage
 
 While Kubernetes-based deployments may be supported in the future, HiveFS is **not dependent on Kubernetes** and does not require it to function correctly.
+
+---
 
 ## Design philosophy: operational sanity
 
