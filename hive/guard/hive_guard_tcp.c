@@ -22,6 +22,7 @@
 
 #include "hive_guard.h"
 #include "hive_guard_sql.h"
+#include "hive_guard_stats.h"
 #include "../../hifs_shared_defs.h"
 #include <endian.h>
 #include <string.h>
@@ -63,6 +64,22 @@ static bool hex_to_bytes_local(const char *hex, size_t hex_len,
 }
 
 static int write_framed_json(int fd, const char *json);
+
+static ssize_t guard_send(int fd, const void *buf, size_t len, int flags)
+{
+	ssize_t rc = send(fd, buf, len, flags);
+	if (rc > 0)
+		atomic_fetch_add(&g_stats.tcp_tx_bytes, (uint64_t)rc);
+	return rc;
+}
+
+static ssize_t guard_recv(int fd, void *buf, size_t len, int flags)
+{
+	ssize_t rc = recv(fd, buf, len, flags);
+	if (rc > 0)
+		atomic_fetch_add(&g_stats.tcp_rx_bytes, (uint64_t)rc);
+	return rc;
+}
 
 
 /* -------------------------------------------------------------------------- */
@@ -735,10 +752,10 @@ static int write_framed_json(int fd, const char *json)
 		{ .iov_base = &be, .iov_len = 4 },
 		{ .iov_base = (void *)json, .iov_len = n },
 	};
-	ssize_t w1 = send(fd, vec[0].iov_base, vec[0].iov_len, 0);
+	ssize_t w1 = guard_send(fd, vec[0].iov_base, vec[0].iov_len, 0);
 	if (w1 != 4)
 		return -1;
-	ssize_t w2 = send(fd, vec[1].iov_base, vec[1].iov_len, 0);
+	ssize_t w2 = guard_send(fd, vec[1].iov_base, vec[1].iov_len, 0);
 	return (w2 == (ssize_t)n) ? 0 : -1;
 }
 
@@ -751,7 +768,7 @@ static int read_frame(Client *c, char **out_json, size_t *out_len)
 				c->rbuf = realloc(c->rbuf, new_cap);
 				c->rcap = new_cap;
 			}
-			ssize_t r = recv(c->fd, c->rbuf + c->rlen, c->rcap - c->rlen, 0);
+			ssize_t r = guard_recv(c->fd, c->rbuf + c->rlen, c->rcap - c->rlen, 0);
 			if (r == 0)
 				return 1;
 			if (r < 0) {
@@ -773,7 +790,7 @@ static int read_frame(Client *c, char **out_json, size_t *out_len)
 				c->rbuf = realloc(c->rbuf, needed);
 				c->rcap = needed;
 			}
-			ssize_t r = recv(c->fd, c->rbuf + c->rlen, c->rcap - c->rlen, 0);
+			ssize_t r = guard_recv(c->fd, c->rbuf + c->rlen, c->rcap - c->rlen, 0);
 			if (r == 0)
 				return 1;
 			if (r < 0) {
@@ -1129,8 +1146,13 @@ static bool handle_volume_block_get(Client *c, const JVal *root)
 
 	uint8_t buf[HIFS_DEFAULT_BLOCK_SIZE];
 	uint32_t len = sizeof(buf);
+	uint64_t t0 = hg_now_ns();
 	if (!hifs_volume_block_load(volume_id, block_no, buf, &len))
 		return send_error_json(c->fd, "not_found", "block missing");
+	uint64_t t1 = hg_now_ns();
+	atomic_fetch_add(&g_stats.storage_read_bytes, len);
+	atomic_fetch_add(&g_stats.read_latency_ns, t1 - t0);
+	atomic_fetch_add(&g_stats.read_latency_samples, 1);
 	return send_payload_ok(c->fd, "volume_block_get", buf, len);
 }
 
@@ -1192,6 +1214,7 @@ static bool handle_volume_block_put_contig(Client *c, const JVal *root)
 	uint64_t block_start;
 	size_t data_len;
 	size_t consumed = 0;
+	uint64_t contig_total_bytes = 0;
 	const uint32_t *lens;
 
 	if (!get_u64(root, "volume_id", &volume_id))
@@ -1272,7 +1295,11 @@ static bool handle_volume_block_put_contig(Client *c, const JVal *root)
 			return send_error_json(c->fd, "db_error", "unable to store block");
 		}
 		consumed += len;
+		contig_total_bytes += len;
 	}
+
+	atomic_fetch_add(&g_stats.contig_write_calls, 1);
+	atomic_fetch_add(&g_stats.contig_write_bytes, contig_total_bytes);
 
 	free(blob);
 	return send_simple_ok(c->fd, "volume_block_put_contig");
@@ -1286,6 +1313,7 @@ static bool dispatch_request(Client *c, ServerState *S, const JVal *root)
 	const char *type = jstr(jobj_get(root, "type"));
 	if (!type)
 		return send_error_json(c->fd, "bad_request", "missing type");
+	atomic_fetch_add(&g_stats.meta_chan_ops, 1);
 
 	if (strcmp(type, "hello") == 0) {
 		if (c->session_id == 0)

@@ -380,6 +380,11 @@ static hg_stats_snapshot_t hg_stats_take_interval(void)
     s.contig_calls      = atomic_exchange(&g_stats.contig_write_calls, 0);
     s.contig_bytes      = atomic_exchange(&g_stats.contig_write_bytes, 0);
 
+    s.meta_chan_ops     = atomic_exchange(&g_stats.meta_chan_ops, 0);
+    s.read_bytes        = atomic_exchange(&g_stats.storage_read_bytes, 0);
+    s.read_latency_ns   = atomic_exchange(&g_stats.read_latency_ns, 0);
+    s.read_latency_samples = atomic_exchange(&g_stats.read_latency_samples, 0);
+
     return s;
 }
 
@@ -695,6 +700,7 @@ static void *hg_stats_thread_main(void *arg)
 
         // 2) Take per-interval deltas from hot-path counters (KV + contig + rocksdb time)
         hg_stats_snapshot_t s = hg_stats_take_interval();
+        atomic_store(&g_stats.meta_chan_ps, s.meta_chan_ops / INTERVAL_SEC);
 
         // 3) Compute client network deltas from monotonic TCP counters
         uint64_t cur_tcp_rx = atomic_load(&g_stats.tcp_rx_bytes);
@@ -715,26 +721,32 @@ static void *hg_stats_thread_main(void *arg)
         atomic_store(&g_stats.incoming_mbps, bytes_per_sec_to_mbps(c_rx_bps));
         atomic_store(&g_stats.cl_outgoing_mbps, bytes_per_sec_to_mbps(c_tx_bps));
 
-        // 4) Compute write throughput from KV logical bytes (per-interval)
+        // 4) Compute throughput from KV logical bytes (writes) and tracked reads
         uint64_t kv_write_bps = s.kv_putblock_bytes / INTERVAL_SEC;
+        uint64_t kv_read_bps  = s.read_bytes / INTERVAL_SEC;
         uint64_t writes_mbps  = bytes_per_sec_to_mbps(kv_write_bps);
+        uint64_t reads_mbps   = bytes_per_sec_to_mbps(kv_read_bps);
 
         atomic_store(&g_stats.writes_mbps, writes_mbps);
-
-        // Reads not tracked here (yet)
-        atomic_store(&g_stats.reads_mbps, 0);
+        atomic_store(&g_stats.reads_mbps, reads_mbps);
 
         // Total throughput (Mbps)
         atomic_store(&g_stats.t_throughput,
                      (uint64_t)atomic_load(&g_stats.writes_mbps) +
                      (uint64_t)atomic_load(&g_stats.reads_mbps));
-
         // 5) Avg write latency from RocksDB timing counters (store microseconds)
         if (s.rocksdb_writes > 0) {
             uint64_t avg_ns = s.rocksdb_write_ns / s.rocksdb_writes;
             atomic_store(&g_stats.avg_wr_latency, avg_ns / 1000ull); // us
         } else {
             atomic_store(&g_stats.avg_wr_latency, 0);
+        }
+
+        if (s.read_latency_samples > 0) {
+            uint64_t avg_ns = s.read_latency_ns / s.read_latency_samples;
+            atomic_store(&g_stats.avg_rd_latency, avg_ns / 1000ull);
+        } else {
+            atomic_store(&g_stats.avg_rd_latency, 0);
         }
 
         // 6) Optionally compute SN NIC Mbps from /proc/net/dev bytes/sec gauges
@@ -755,7 +767,7 @@ static void *hg_stats_thread_main(void *arg)
         }
 
         // 7) Persist one row
-        (void)hifs_store_stats(g_stats);
+        (void)hifs_store_stats(&s);
 
         // Optional roll-ups (enable if you want)
         // (void)hg_stats_trim_to_five_minute_marks();
@@ -799,9 +811,10 @@ void hg_stats_flush_periodic_stop(void)
  * DB insert (fixed to use c_net_in_bps/c_net_out_bps)
  * ----------------------------------------------------- */
 
-int hifs_store_stats(struct hg_stats_counters stats)
+int hifs_store_stats(const hg_stats_snapshot_t *snapshot)
 {
-    (void)stats;
+    if (!snapshot)
+        return 0;
 
     if (!sqldb.sql_init || !sqldb.conn)
         return 0;
@@ -844,6 +857,17 @@ int hifs_store_stats(struct hg_stats_counters stats)
     unsigned int reads_mbps       = (unsigned int)atomic_load(&g_stats.reads_mbps);
     unsigned int throughput       = (unsigned int)atomic_load(&g_stats.t_throughput);
 
+    uint64_t kv_putblock_calls    = snapshot->kv_putblock_calls;
+    uint64_t kv_putblock_bytes    = snapshot->kv_putblock_bytes;
+    uint64_t kv_dedup_hits        = snapshot->dedup_hits;
+    uint64_t kv_dedup_misses      = snapshot->dedup_misses;
+    uint64_t kv_rocksdb_writes    = snapshot->rocksdb_writes;
+    uint64_t kv_rocksdb_write_ns  = snapshot->rocksdb_write_ns;
+    uint64_t contig_calls         = snapshot->contig_calls;
+    uint64_t contig_bytes         = snapshot->contig_bytes;
+    uint64_t tcp_rx_bytes         = atomic_load(&g_stats.tcp_rx_bytes);
+    uint64_t tcp_tx_bytes         = atomic_load(&g_stats.tcp_tx_bytes);
+
     // FIX: use computed bytes/sec gauges, not the monotonic counters
     unsigned int c_net_in         = (unsigned int)atomic_load(&g_stats.c_net_in_bps);
     unsigned int c_net_out        = (unsigned int)atomic_load(&g_stats.c_net_out_bps);
@@ -878,6 +902,16 @@ int hifs_store_stats(struct hg_stats_counters stats)
              writes_mbps,
              reads_mbps,
              throughput,
+             (unsigned long long)kv_putblock_calls,
+             (unsigned long long)kv_putblock_bytes,
+             (unsigned long long)kv_dedup_hits,
+             (unsigned long long)kv_dedup_misses,
+             (unsigned long long)kv_rocksdb_writes,
+             (unsigned long long)kv_rocksdb_write_ns,
+             (unsigned long long)contig_calls,
+             (unsigned long long)contig_bytes,
+             (unsigned long long)tcp_rx_bytes,
+             (unsigned long long)tcp_tx_bytes,
              c_net_in,
              c_net_out,
              s_net_in,

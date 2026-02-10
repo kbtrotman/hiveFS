@@ -304,12 +304,15 @@ extern struct SQLDB sqldb;
 
 #define SQL_STORAGE_NODE_STATS_INSERT \
 	"INSERT INTO storage_node_stats " \
-	"(node_id, s_ts, cpu, mem_used, mem_avail, read_iops, write_iops, total_iops, " \
-	"meta_chan_ps, incoming_mbps, cl_outgoing_mbps, sn_node_in_mbps, sn_node_out_mbps, " \
-	"writes_mbps, reads_mbps, t_throughput, c_net_in, c_net_out, s_net_in, s_net_out, " \
-	"avg_wr_latency, avg_rd_latency, lavg, sees_warning, sees_error, message, " \
-	"cont1_isok, cont2_isok, cont1_message, cont2_message, clients) " \
-	"VALUES (%llu, FROM_UNIXTIME(%llu), %u, %u, %u, %u, %u, %u, %u, %u, %u, %u, %u, %u, %u, %u, %u, %u, %u, %u, %u, %u, '%s', %u, %u, '%s', %u, %u, '%s', '%s', %u)"
+"(node_id, s_ts, cpu, mem_used, mem_avail, read_iops, write_iops, total_iops, " \
+"meta_chan_ps, incoming_mbps, cl_outgoing_mbps, sn_node_in_mbps, sn_node_out_mbps, " \
+"writes_mbps, reads_mbps, t_throughput, kv_putblock_calls, kv_putblock_bytes, " \
+"kv_putblock_dedup_hits, kv_putblock_dedup_misses, kv_rocksdb_writes, kv_rocksdb_write_ns, " \
+"contig_write_calls, contig_write_bytes, tcp_rx_bytes, tcp_tx_bytes, c_net_in, c_net_out, " \
+"s_net_in, s_net_out, avg_wr_latency, avg_rd_latency, lavg, sees_warning, sees_error, " \
+"message, cont1_isok, cont2_isok, cont1_message, cont2_message, clients) " \
+"VALUES (%llu, FROM_UNIXTIME(%llu), %u, %u, %u, %u, %u, %u, %u, %u, %u, %u, %u, %u, %u, %u, " \
+"%llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %u, %u, %u, %u, %u, %u, '%s', %u, %u, '%s', '%s', %u)"
 
 #define SQL_STORAGE_NODE_FS_STATS_INSERT \
 	"INSERT INTO storage_node_fs_stats " \
