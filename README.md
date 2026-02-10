@@ -192,7 +192,7 @@ While Kubernetes-based deployments may be supported in the future, HiveFS is **n
 
 ## Design philosophy: operational sanity
 
-HiveFS is written by a storage engineer, for storage engineers.
+**HiveFS is written by a storage engineer, for storage engineers.**
 
 The design is heavily influenced by years of operating large, complex storage systems that were fragile, over-configured, or required constant human intervention to remain healthy. HiveFS intentionally prioritizes **operational sanity** over exposing endless tuning knobs.
 
