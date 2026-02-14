@@ -88,10 +88,12 @@ Security is a first-class concern in HiveFS.
 - **Mutual TLS (mTLS)** is used for:
   - node-to-node authentication
   - client authentication
-- Identity is rooted in a **client-owned CA authority**, with explicit trust validation
+- Identity is rooted in a **CA authority**, with explicit trust validation
+- Node & client adds are automated via crytographic tokens to ensure one-time, human-backed identity verification
 
 There is no implicit trust between components.  
 Every node and client must prove its identity cryptographically.
+No realistic possibility of man-in-the-middle attacts.
 
 ---
 
