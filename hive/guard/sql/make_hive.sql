@@ -106,8 +106,140 @@ CREATE TABLE IF NOT EXISTS storage_nodes (
     ON DELETE RESTRICT
 ) ENGINE=InnoDB;
 
+DROP PROCEDURE IF EXISTS ensure_stats_column_coverage;
+DELIMITER $$
+CREATE PROCEDURE ensure_stats_column_coverage()
+BEGIN
+  DECLARE meta_schema VARCHAR(64);
+  DECLARE missing_expected TEXT;
+  DECLARE missing_actual TEXT;
+
+  SET meta_schema = DATABASE();
+
+  DROP TEMPORARY TABLE IF EXISTS tmp_expected_stats_columns;
+  CREATE TEMPORARY TABLE tmp_expected_stats_columns (
+    table_name VARCHAR(64) NOT NULL,
+    column_name VARCHAR(64) NOT NULL,
+    PRIMARY KEY (table_name, column_name)
+  ) ENGINE=Memory;
+
+  INSERT INTO tmp_expected_stats_columns (table_name, column_name) VALUES
+    ('storage_node_stats','node_id'),
+    ('storage_node_stats','s_ts'),
+    ('storage_node_stats','cpu'),
+    ('storage_node_stats','mem_used'),
+    ('storage_node_stats','mem_avail'),
+    ('storage_node_stats','read_iops'),
+    ('storage_node_stats','write_iops'),
+    ('storage_node_stats','total_iops'),
+    ('storage_node_stats','meta_chan_ps'),
+    ('storage_node_stats','incoming_mbps'),
+    ('storage_node_stats','cl_outgoing_mbps'),
+    ('storage_node_stats','sn_node_in_mbps'),
+    ('storage_node_stats','sn_node_out_mbps'),
+    ('storage_node_stats','writes_mbps'),
+    ('storage_node_stats','reads_mbps'),
+    ('storage_node_stats','t_throughput'),
+    ('storage_node_stats','kv_putblock_calls'),
+    ('storage_node_stats','kv_putblock_ps'),
+    ('storage_node_stats','kv_putblock_bytes'),
+    ('storage_node_stats','kv_putblock_dedup_hits'),
+    ('storage_node_stats','kv_putblock_dedup_misses'),
+    ('storage_node_stats','kv_rocksdb_writes'),
+    ('storage_node_stats','kv_rocksdb_write_ns'),
+    ('storage_node_stats','contig_write_calls'),
+    ('storage_node_stats','contig_write_bytes'),
+    ('storage_node_stats','tcp_rx_bytes'),
+    ('storage_node_stats','tcp_tx_bytes'),
+    ('storage_node_stats','c_net_in'),
+    ('storage_node_stats','c_net_out'),
+    ('storage_node_stats','s_net_in'),
+    ('storage_node_stats','s_net_out'),
+    ('storage_node_stats','avg_wr_latency'),
+    ('storage_node_stats','avg_rd_latency'),
+    ('storage_node_stats','lavg'),
+    ('storage_node_stats','sees_warning'),
+    ('storage_node_stats','sees_error'),
+    ('storage_node_stats','message'),
+    ('storage_node_stats','cont1_isok'),
+    ('storage_node_stats','cont2_isok'),
+    ('storage_node_stats','cont1_message'),
+    ('storage_node_stats','cont2_message'),
+    ('storage_node_stats','clients'),
+    ('storage_node_fs_stats','node_id'),
+    ('storage_node_fs_stats','fs_ts'),
+    ('storage_node_fs_stats','fs_name'),
+    ('storage_node_fs_stats','fs_path'),
+    ('storage_node_fs_stats','fs_type'),
+    ('storage_node_fs_stats','fs_total_bytes'),
+    ('storage_node_fs_stats','fs_used_bytes'),
+    ('storage_node_fs_stats','fs_avail_bytes'),
+    ('storage_node_fs_stats','fs_used_pct'),
+    ('storage_node_fs_stats','in_total_bytes'),
+    ('storage_node_fs_stats','in_used_bytes'),
+    ('storage_node_fs_stats','in_avail_bytes'),
+    ('storage_node_fs_stats','in_used_pct'),
+    ('storage_node_fs_stats','health'),
+    ('storage_node_disk_stats','node_id'),
+    ('storage_node_disk_stats','disk_ts'),
+    ('storage_node_disk_stats','disk_name'),
+    ('storage_node_disk_stats','disk_path'),
+    ('storage_node_disk_stats','disk_size_bytes'),
+    ('storage_node_disk_stats','disk_rotational'),
+    ('storage_node_disk_stats','reads_completed'),
+    ('storage_node_disk_stats','writes_completed'),
+    ('storage_node_disk_stats','read_bytes'),
+    ('storage_node_disk_stats','write_bytes'),
+    ('storage_node_disk_stats','read_ms'),
+    ('storage_node_disk_stats','write_ms'),
+    ('storage_node_disk_stats','io_in_progress'),
+    ('storage_node_disk_stats','io_ms'),
+    ('storage_node_disk_stats','weighted_io_ms'),
+    ('storage_node_disk_stats','fs_path'),
+    ('storage_node_disk_stats','health');
+
+  DROP TEMPORARY TABLE IF EXISTS tmp_actual_stats_columns;
+  CREATE TEMPORARY TABLE tmp_actual_stats_columns (
+    table_name VARCHAR(64) NOT NULL,
+    column_name VARCHAR(64) NOT NULL,
+    PRIMARY KEY (table_name, column_name)
+  ) ENGINE=Memory;
+
+  INSERT INTO tmp_actual_stats_columns (table_name, column_name)
+  SELECT table_name, column_name
+    FROM information_schema.columns
+   WHERE table_schema = meta_schema
+     AND table_name IN ('storage_node_stats', 'storage_node_fs_stats', 'storage_node_disk_stats');
+
+  SELECT GROUP_CONCAT(CONCAT(e.table_name, '.', e.column_name) ORDER BY e.table_name, e.column_name)
+    INTO missing_expected
+    FROM tmp_expected_stats_columns e
+    LEFT JOIN tmp_actual_stats_columns a
+      ON a.table_name = e.table_name AND a.column_name = e.column_name
+   WHERE a.column_name IS NULL;
+
+  SELECT GROUP_CONCAT(CONCAT(a.table_name, '.', a.column_name) ORDER BY a.table_name, a.column_name)
+    INTO missing_actual
+    FROM tmp_actual_stats_columns a
+    LEFT JOIN tmp_expected_stats_columns e
+      ON a.table_name = e.table_name AND a.column_name = e.column_name
+   WHERE e.column_name IS NULL;
+
+  DROP TEMPORARY TABLE IF EXISTS tmp_expected_stats_columns;
+  DROP TEMPORARY TABLE IF EXISTS tmp_actual_stats_columns;
+
+  IF missing_expected IS NOT NULL OR missing_actual IS NOT NULL THEN
+    SIGNAL SQLSTATE '45000'
+      SET MESSAGE_TEXT = CONCAT('Stats column mismatch. Missing in SQL: ',
+                                IFNULL(missing_expected, 'none'),
+                                '; Extra table columns: ',
+                                IFNULL(missing_actual, 'none'));
+  END IF;
+END$$
+DELIMITER ;
+
 CREATE TABLE IF NOT EXISTS storage_node_stats (
-  node_uid       INT UNSIGNED NOT NULL,
+  node_id        INT UNSIGNED NOT NULL,
   s_ts           TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
   cpu            INT UNSIGNED,
@@ -131,6 +263,7 @@ CREATE TABLE IF NOT EXISTS storage_node_stats (
   t_throughput   INT UNSIGNED,
 
   kv_putblock_calls      BIGINT UNSIGNED,
+  kv_putblock_ps         INT UNSIGNED,
   kv_putblock_bytes      BIGINT UNSIGNED,
   kv_putblock_dedup_hits BIGINT UNSIGNED,
   kv_putblock_dedup_misses BIGINT UNSIGNED,
@@ -141,10 +274,10 @@ CREATE TABLE IF NOT EXISTS storage_node_stats (
   tcp_rx_bytes           BIGINT UNSIGNED,
   tcp_tx_bytes           BIGINT UNSIGNED,
 
-  c_net_in_bps       INT UNSIGNED,
-  c_net_out_bps      INT UNSIGNED,
-  s_net_in_bps       INT UNSIGNED,
-  s_net_out_bps      INT UNSIGNED,
+  c_net_in       INT UNSIGNED,
+  c_net_out      INT UNSIGNED,
+  s_net_in       INT UNSIGNED,
+  s_net_out      INT UNSIGNED,
 
   avg_wr_latency INT UNSIGNED,
   avg_rd_latency INT UNSIGNED,
@@ -162,13 +295,13 @@ CREATE TABLE IF NOT EXISTS storage_node_stats (
 
   clients        INT UNSIGNED,
 
-  PRIMARY KEY (node_uid, s_ts),
+  PRIMARY KEY (node_id, s_ts),
   KEY idx_ts (s_ts),
-  KEY idx_node_ts (node_uid, s_ts)
+  KEY idx_node_ts (node_id, s_ts)
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS storage_node_fs_stats (
-  node_uid       INT UNSIGNED NOT NULL,
+  node_id        INT UNSIGNED NOT NULL,
   fs_ts          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   fs_name        VARCHAR(255) NOT NULL,
   fs_path        VARCHAR(255) NOT NULL,
@@ -182,14 +315,14 @@ CREATE TABLE IF NOT EXISTS storage_node_fs_stats (
   in_avail_bytes BIGINT UNSIGNED NOT NULL,
   in_used_pct    DECIMAL(5,2) NOT NULL,
   health       ENUM('ok', 'warn', 'crit') NOT NULL DEFAULT 'ok',
-  PRIMARY KEY (node_uid, fs_path, fs_ts),
+  PRIMARY KEY (node_id, fs_path, fs_ts),
   KEY idx_fs_ts (fs_ts),
-  KEY idx_node_ts (node_uid, fs_ts),
-  KEY idx_node_path_ts (node_uid, fs_path, fs_ts)
+  KEY idx_node_ts (node_id, fs_ts),
+  KEY idx_node_path_ts (node_id, fs_path, fs_ts)
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS storage_node_disk_stats (
-  node_uid       INT UNSIGNED NOT NULL,
+  node_id        INT UNSIGNED NOT NULL,
   disk_ts        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   disk_name      VARCHAR(64) NOT NULL,        -- sda, nvme0n1
   disk_path      VARCHAR(128) NOT NULL,       -- /dev/sda
@@ -199,15 +332,21 @@ CREATE TABLE IF NOT EXISTS storage_node_disk_stats (
   writes_completed BIGINT UNSIGNED NOT NULL,
   read_bytes      BIGINT UNSIGNED NOT NULL,
   write_bytes     BIGINT UNSIGNED NOT NULL,
+  read_ms         BIGINT UNSIGNED NOT NULL,
+  write_ms        BIGINT UNSIGNED NOT NULL,
   io_in_progress  BIGINT UNSIGNED NOT NULL,
   io_ms           BIGINT UNSIGNED NOT NULL,
+  weighted_io_ms  BIGINT UNSIGNED NOT NULL,
   fs_path         VARCHAR(255) NULL,          -- best-effort mapping
   health          ENUM('ok','warn','crit') NOT NULL DEFAULT 'ok',
-  PRIMARY KEY (node_uid, disk_name, disk_ts),
+  PRIMARY KEY (node_id, disk_name, disk_ts),
   KEY idx_disk_ts (disk_ts),
-  KEY idx_node_ts (node_uid, disk_ts),
-  KEY idx_node_disk_ts (node_uid, disk_name, disk_ts)
+  KEY idx_node_ts (node_id, disk_ts),
+  KEY idx_node_disk_ts (node_id, disk_name, disk_ts)
 ) ENGINE=InnoDB;
+
+CALL ensure_stats_column_coverage();
+DROP PROCEDURE IF EXISTS ensure_stats_column_coverage;
 
 CREATE TABLE IF NOT EXISTS volume_stats (
   volume_id      BIGINT UNSIGNED NOT NULL PRIMARY KEY,
