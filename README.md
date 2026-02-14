@@ -20,7 +20,7 @@ HiveFS is designed around a few core principles:
 - Long-term scalability (exabyte → yottabyte class)
 - Reduction of management overhead through automation and good design
 - A clustered system can be both shared & non-shared: shared dirs/single-client mixed in the same FS
-- The filesystem ##is also## the backup
+- The filesystem **is also** the backup
 - Tree-based and non-tree alignment in the same system through file tagging
 
 ---
