@@ -845,6 +845,158 @@ SELECT
   COALESCE(SUM(total_bytes), 0)       AS total_bytes
 FROM hive_meta.volume_stats;
 
+CREATE TABLE IF NOT EXISTS settings (
+  settings_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  cluster_allow_gui_management BOOLEAN NOT NULL DEFAULT 0,
+  cluster_encrypt_inter_cluster BOOLEAN NOT NULL DEFAULT 0,
+  cluster_allow_cli_access BOOLEAN NOT NULL DEFAULT 1,
+  cluster_notification_forwarder VARCHAR(255) DEFAULT NULL,
+  cluster_pki_username VARCHAR(255) DEFAULT NULL,
+  cluster_rollup_initial_minutes INT UNSIGNED NOT NULL DEFAULT 10,
+  cluster_rollup_daily_minutes INT UNSIGNED NOT NULL DEFAULT 120,
+  cluster_rollup_weekly_days INT UNSIGNED NOT NULL DEFAULT 3,
+  fs_client_timeout_ms INT UNSIGNED NOT NULL DEFAULT 30000,
+  fs_encrypt_client_traffic BOOLEAN NOT NULL DEFAULT 1,
+  fs_enable_tags BOOLEAN NOT NULL DEFAULT 1,
+  fs_metadata_target VARCHAR(128) DEFAULT NULL,
+  fs_log_target VARCHAR(128) DEFAULT NULL,
+  fs_metadata_space_gib INT UNSIGNED NOT NULL DEFAULT 0,
+  fs_kv_space_gib INT UNSIGNED NOT NULL DEFAULT 0,
+  fs_log_space_gib INT UNSIGNED NOT NULL DEFAULT 0,
+  perm_users JSON DEFAULT NULL,
+  perm_groups JSON DEFAULT NULL,
+  perm_roles JSON DEFAULT NULL,
+  net_client_interface VARCHAR(64) DEFAULT NULL,
+  net_client_auto_dhcp BOOLEAN NOT NULL DEFAULT 1,
+  net_client_ip VARCHAR(64) DEFAULT NULL,
+  net_client_netmask VARCHAR(64) DEFAULT NULL,
+  net_cluster_interface VARCHAR(64) DEFAULT NULL,
+  net_cluster_auto_dhcp BOOLEAN NOT NULL DEFAULT 1,
+  net_cluster_ip VARCHAR(64) DEFAULT NULL,
+  net_cluster_netmask VARCHAR(64) DEFAULT NULL,
+  net_domain_name VARCHAR(255) DEFAULT NULL,
+  net_dns_server VARCHAR(64) DEFAULT NULL,
+  net_dns_secondary VARCHAR(64) DEFAULT NULL,
+  net_time_config TEXT DEFAULT NULL,
+  rebal_node_add_fill_ratio DOUBLE NOT NULL DEFAULT 0.30,
+  rebal_node_add_throttle_bytes BIGINT UNSIGNED NOT NULL DEFAULT 134217728,
+  rebal_capacity_high_water_ratio DOUBLE NOT NULL DEFAULT 0.85,
+  rebal_capacity_low_water_ratio DOUBLE NOT NULL DEFAULT 0.65,
+  rebal_capacity_skew_gap_ratio DOUBLE NOT NULL DEFAULT 0.20,
+  rebal_capacity_throttle_bytes BIGINT UNSIGNED NOT NULL DEFAULT 100663296,
+  rebal_hotspot_read_threshold INT UNSIGNED NOT NULL DEFAULT 4096,
+  rebal_hotspot_throttle_bytes BIGINT UNSIGNED NOT NULL DEFAULT 67108864,
+  created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  updated_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+  PRIMARY KEY (settings_id)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS schedules (
+  schedule_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  schedule_name VARCHAR(128) NOT NULL,
+  description VARCHAR(255) DEFAULT NULL,
+  timezone VARCHAR(64) NOT NULL DEFAULT 'UTC',
+  start_at DATETIME DEFAULT NULL,
+  end_at DATETIME DEFAULT NULL,
+  frequency ENUM('once','interval','cron') NOT NULL DEFAULT 'cron',
+  interval_seconds INT UNSIGNED DEFAULT NULL,
+  cron_expression VARCHAR(255) DEFAULT NULL,
+  is_active BOOLEAN NOT NULL DEFAULT 1,
+  created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  updated_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+  PRIMARY KEY (schedule_id),
+  UNIQUE KEY uk_schedule_name (schedule_name),
+  KEY idx_schedule_active (is_active, start_at)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS audit_entries (
+  audit_entry_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  user_id BIGINT UNSIGNED NOT NULL,
+  username VARCHAR(150) NOT NULL,
+  user_display_name VARCHAR(255) DEFAULT NULL,
+  page_name VARCHAR(128) NOT NULL,
+  setting_name VARCHAR(128) NOT NULL,
+  previous_value TEXT DEFAULT NULL,
+  new_value TEXT DEFAULT NULL,
+  change_summary TEXT DEFAULT NULL,
+  change_context JSON DEFAULT NULL,
+  request_ip VARCHAR(64) DEFAULT NULL,
+  request_id CHAR(36) DEFAULT NULL,
+  created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  PRIMARY KEY (audit_entry_id),
+  KEY idx_audit_user (user_id, created_at),
+  KEY idx_audit_page_setting (page_name, setting_name),
+  KEY idx_audit_request (request_id)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS notifications (
+  notification_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  schedule_id BIGINT UNSIGNED NOT NULL,
+  audit_entry_id BIGINT UNSIGNED DEFAULT NULL,
+  notification_type ENUM('email','ticket','webhook') NOT NULL DEFAULT 'email',
+  subject VARCHAR(255) NOT NULL,
+  body TEXT DEFAULT NULL,
+  payload JSON DEFAULT NULL,
+  status ENUM('pending','queued','sent','failed','cancelled') NOT NULL DEFAULT 'pending',
+  w_status ENUM('new', 'acknowledged', 'working', 'pending wait', 'review', 'resolved', 'closed') NOT NULL DEFAULT 'new',
+  priority ENUM('low','normal','high') NOT NULL DEFAULT 'normal',
+  next_attempt_at TIMESTAMP(6) NULL DEFAULT NULL,
+  last_attempt_at TIMESTAMP(6) NULL DEFAULT NULL,
+  attempt_count INT UNSIGNED NOT NULL DEFAULT 0,
+  created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  updated_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+  PRIMARY KEY (notification_id),
+  KEY idx_notification_schedule_status (schedule_id, status),
+  KEY idx_notification_type (notification_type),
+  KEY idx_notification_audit (audit_entry_id),
+  CONSTRAINT fk_notifications_schedule
+    FOREIGN KEY (schedule_id) REFERENCES schedules(schedule_id)
+      ON DELETE CASCADE,
+  CONSTRAINT fk_notifications_audit
+    FOREIGN KEY (audit_entry_id) REFERENCES audit_entries(audit_entry_id)
+      ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS alerts (
+  alert_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  schedule_id BIGINT UNSIGNED NOT NULL,
+  source VARCHAR(128) NOT NULL,
+  title VARCHAR(255) NOT NULL,
+  message TEXT NOT NULL,
+  severity ENUM('info','warning','critical') NOT NULL DEFAULT 'info',
+  status ENUM('triggered','acknowledged','resolved','suppressed') NOT NULL DEFAULT 'triggered',
+  w_status ENUM('new', 'acknowledged', 'working', 'pending wait', 'review', 'resolved', 'closed') NOT NULL DEFAULT 'new',
+  triggered_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  acknowledged_at TIMESTAMP(6) NULL DEFAULT NULL,
+  resolved_at TIMESTAMP(6) NULL DEFAULT NULL,
+  created_by BIGINT UNSIGNED DEFAULT NULL,
+  metadata JSON DEFAULT NULL,
+  PRIMARY KEY (alert_id),
+  KEY idx_alert_schedule_status (schedule_id, status),
+  KEY idx_alert_severity (severity),
+  CONSTRAINT fk_alerts_schedule
+    FOREIGN KEY (schedule_id) REFERENCES schedules(schedule_id)
+      ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS email_targets (
+  target_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  schedule_id BIGINT UNSIGNED NOT NULL,
+  user_id BIGINT UNSIGNED NOT NULL,
+  target_name VARCHAR(255) DEFAULT NULL,
+  destination_email VARCHAR(320) DEFAULT NULL,
+  delivery_channel ENUM('email','ticket','webhook') NOT NULL DEFAULT 'email',
+  is_primary BOOLEAN NOT NULL DEFAULT 0,
+  created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  updated_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+  PRIMARY KEY (target_id),
+  UNIQUE KEY uk_user_schedule_channel (schedule_id, user_id, delivery_channel),
+  KEY idx_email_target_user (user_id),
+  CONSTRAINT fk_email_targets_schedule
+    FOREIGN KEY (schedule_id) REFERENCES schedules(schedule_id)
+      ON DELETE CASCADE
+) ENGINE=InnoDB;
+
 DELIMITER ;
 
 COMMIT;

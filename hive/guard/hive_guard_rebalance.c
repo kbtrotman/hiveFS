@@ -66,6 +66,7 @@ static struct hg_rebalance_policy hg_active_policy = {
 	},
 };
 
+
 void hg_rebalance_set_policy(const struct hg_rebalance_policy *policy)
 {
 	if (!policy)
