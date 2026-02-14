@@ -2,7 +2,8 @@
 
 **HiveFS** is a distributed, secure, SSD-optimized cluster filesystem designed for large-scale, multi-tenant environments where **clients and storage are strictly separated**, **metadata consistency is critical**, and **storage must scale independently of compute**.
 
-HiveFS is built from the ground up as a *shared-nothing* storage system with a **single global filesystem tree**, strong cryptographic identity, and a flexible sharing model that goes beyond traditional cluster filesystems.
+HiveFS is built from the ground up as a *shared-nothing* storage system with a **single global filesystem tree**, strong cryptographic identity, and a flexible sharing model that goes beyond traditional cluster filesystems. HiveFS is architected around modern SSD realities rather than legacy HDD assumptions. Instead of treating flash like a sector-rewritable disk, HiveFS uses a key-value storage engine aligned with how SSDs manage block groups internally, reducing write amplification and positioning the system to take advantage of emerging native KV-based storage technologies.
+
 
 > ⚠️ **Status:** HiveFS is under active development. The core architecture is largely implemented, but it is not yet production-ready. The GUI and extended features are in process currently.
 
