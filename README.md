@@ -17,6 +17,7 @@ HiveFS is designed around a few core principles:
 - Predictable performance on SSD that's aligned to SSD storage models
 - Strong security by default
 - Cloud-friendly *and* appliance-friendly deployment
+- All Storage Nodes are deliberately and strictly equal & interchangeable
 - Long-term scalability (exabyte → yottabyte class)
 - Reduction of management overhead through automation and good design
 - A clustered system can be both shared & non-shared: shared dirs/single-client mixed in the same FS
