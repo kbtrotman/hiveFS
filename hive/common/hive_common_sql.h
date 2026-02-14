@@ -193,6 +193,20 @@ extern struct SQLDB sqldb;
 	"de_type=VALUES(de_type), de_name_len=VALUES(de_name_len), " \
 	"de_name=VALUES(de_name)"
 
+#define SQL_BLOCK_STRIPE_LOCATIONS_SELECT_BY_NODE \
+	"SELECT volume_id, block_no, stripe_index, shard_id, " \
+	"estripe_id, block_offset " \
+	"FROM block_stripe_locations " \
+	"WHERE storage_node_id=%u " \
+	"ORDER BY block_offset DESC LIMIT %llu"
+
+#define SQL_BLOCK_STRIPE_LOCATION_UPDATE \
+	"UPDATE block_stripe_locations SET " \
+	"storage_node_id=%u, shard_id=%u, " \
+	"estripe_id=%llu, block_offset=%llu " \
+	"WHERE volume_id=%llu AND block_no=%llu " \
+	"AND stripe_index=%u"
+
 #define SQL_VOLUME_INODE_SELECT \
 	"SELECT i_msg_flags, i_version, i_flags, i_mode, i_ino, i_uid, i_gid, " \
 	"i_hrd_lnk, i_atime, i_mtime, i_ctime, i_size, HEX(i_name), " \
