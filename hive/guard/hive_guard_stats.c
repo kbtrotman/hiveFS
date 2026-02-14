@@ -350,8 +350,11 @@ static void hg_collect_disk_stats(uint64_t node_id)
 					   (uint64_t)reads_completed,
 					   (uint64_t)writes_completed,
 					   read_bytes, write_bytes,
+					   (uint64_t)ms_reading,
+					   (uint64_t)ms_writing,
 					   (uint64_t)io_in_progress,
 					   (uint64_t)io_ms,
+					   (uint64_t)weighted_io_ms,
 					   fs_path,
 					   health);
 	}
@@ -807,6 +810,189 @@ void hg_stats_flush_periodic_stop(void)
     atomic_store(&g_stats_thread_running, false);
 }
 
+/* Stats coverage: mirror the definitions in hive/guard/sql/make_hive.sql. */
+static const char *const kStorageNodeStatsColumns[] = {
+	"node_id",
+	"s_ts",
+	"cpu",
+	"mem_used",
+	"mem_avail",
+	"read_iops",
+	"write_iops",
+	"total_iops",
+	"meta_chan_ps",
+	"incoming_mbps",
+	"cl_outgoing_mbps",
+	"sn_node_in_mbps",
+	"sn_node_out_mbps",
+	"writes_mbps",
+	"reads_mbps",
+	"t_throughput",
+	"kv_putblock_calls",
+	"kv_putblock_ps",
+	"kv_putblock_bytes",
+	"kv_putblock_dedup_hits",
+	"kv_putblock_dedup_misses",
+	"kv_rocksdb_writes",
+	"kv_rocksdb_write_ns",
+	"contig_write_calls",
+	"contig_write_bytes",
+	"tcp_rx_bytes",
+	"tcp_tx_bytes",
+	"c_net_in",
+	"c_net_out",
+	"s_net_in",
+	"s_net_out",
+	"avg_wr_latency",
+	"avg_rd_latency",
+	"lavg",
+	"sees_warning",
+	"sees_error",
+	"message",
+	"cont1_isok",
+	"cont2_isok",
+	"cont1_message",
+	"cont2_message",
+	"clients"
+};
+
+static const char *const kStorageNodeFsStatsColumns[] = {
+	"node_id",
+	"fs_ts",
+	"fs_name",
+	"fs_path",
+	"fs_type",
+	"fs_total_bytes",
+	"fs_used_bytes",
+	"fs_avail_bytes",
+	"fs_used_pct",
+	"in_total_bytes",
+	"in_used_bytes",
+	"in_avail_bytes",
+	"in_used_pct",
+	"health"
+};
+
+static const char *const kStorageNodeDiskStatsColumns[] = {
+	"node_id",
+	"disk_ts",
+	"disk_name",
+	"disk_path",
+	"disk_size_bytes",
+	"disk_rotational",
+	"reads_completed",
+	"writes_completed",
+	"read_bytes",
+	"write_bytes",
+	"read_ms",
+	"write_ms",
+	"io_in_progress",
+	"io_ms",
+	"weighted_io_ms",
+	"fs_path",
+	"health"
+};
+
+static bool hg_stats_check_table_schema(const char *table_name,
+					const char *const *columns,
+					size_t column_count)
+{
+	if (!sqldb.sql_init || !sqldb.conn || !table_name || !columns ||
+	    column_count == 0)
+		return false;
+
+	char sql[256];
+	int written = snprintf(sql, sizeof(sql),
+			       "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS "
+			       "WHERE TABLE_SCHEMA='%s' AND TABLE_NAME='%s'",
+			       DB_NAME, table_name);
+	if (written <= 0 || written >= (int)sizeof(sql)) {
+		hifs_warning("stats schema query truncated for %s", table_name);
+		return false;
+	}
+
+	if (mysql_real_query(sqldb.conn, sql, (unsigned long)written) != 0) {
+		hifs_warning("stats schema query failed for %s: %s",
+			     table_name, mysql_error(sqldb.conn));
+		return false;
+	}
+
+	MYSQL_RES *res = mysql_store_result(sqldb.conn);
+	if (!res) {
+		hifs_warning("stats schema fetch failed for %s: %s",
+			     table_name, mysql_error(sqldb.conn));
+		return false;
+	}
+
+	bool ok = true;
+	bool *seen = calloc(column_count, sizeof(bool));
+	if (!seen) {
+		mysql_free_result(res);
+		hifs_warning("stats schema allocation failed for %s", table_name);
+		return false;
+	}
+
+	MYSQL_ROW row;
+	while ((row = mysql_fetch_row(res)) != NULL) {
+		const char *col = row[0];
+		if (!col)
+			continue;
+		for (size_t i = 0; i < column_count; ++i) {
+			if (!seen[i] && strcmp(col, columns[i]) == 0) {
+				seen[i] = true;
+				break;
+			}
+		}
+	}
+
+	mysql_free_result(res);
+
+	for (size_t i = 0; i < column_count; ++i) {
+		if (!seen[i]) {
+			ok = false;
+			hifs_warning("stats schema missing %s.%s; update hive/guard/sql/make_hive.sql",
+				     table_name, columns[i]);
+		}
+	}
+
+	free(seen);
+	return ok;
+}
+
+static atomic_bool g_stats_schema_checked = ATOMIC_VAR_INIT(false);
+static atomic_bool g_stats_schema_ok = ATOMIC_VAR_INIT(false);
+
+static bool hg_stats_verify_schema_once(void)
+{
+	if (atomic_load(&g_stats_schema_checked))
+		return atomic_load(&g_stats_schema_ok);
+
+	bool ok = true;
+	ok &= hg_stats_check_table_schema("storage_node_stats",
+					  kStorageNodeStatsColumns,
+					  sizeof(kStorageNodeStatsColumns) /
+					  sizeof(kStorageNodeStatsColumns[0]));
+	ok &= hg_stats_check_table_schema("storage_node_fs_stats",
+					  kStorageNodeFsStatsColumns,
+					  sizeof(kStorageNodeFsStatsColumns) /
+					  sizeof(kStorageNodeFsStatsColumns[0]));
+	ok &= hg_stats_check_table_schema("storage_node_disk_stats",
+					  kStorageNodeDiskStatsColumns,
+					  sizeof(kStorageNodeDiskStatsColumns) /
+					  sizeof(kStorageNodeDiskStatsColumns[0]));
+
+	atomic_store(&g_stats_schema_ok, ok);
+	atomic_store(&g_stats_schema_checked, true);
+
+	if (!ok) {
+		atomic_store(&g_stats.sees_error, 1);
+		atomic_store(&g_stats.last_error_msg,
+			     "stats schema mismatch; update hive/guard/sql/make_hive.sql");
+	}
+
+	return ok;
+}
+
 /* -----------------------------------------------------
  * DB insert (fixed to use c_net_in_bps/c_net_out_bps)
  * ----------------------------------------------------- */
@@ -817,6 +1003,9 @@ int hifs_store_stats(const hg_stats_snapshot_t *snapshot)
         return 0;
 
     if (!sqldb.sql_init || !sqldb.conn)
+        return 0;
+
+    if (!hg_stats_verify_schema_once())
         return 0;
 
     char sql_query[MAX_QUERY_SIZE];
@@ -858,6 +1047,7 @@ int hifs_store_stats(const hg_stats_snapshot_t *snapshot)
     unsigned int throughput       = (unsigned int)atomic_load(&g_stats.t_throughput);
 
     uint64_t kv_putblock_calls    = snapshot->kv_putblock_calls;
+    unsigned int kv_putblock_ps   = (unsigned int)(kv_putblock_calls / INTERVAL_SEC);
     uint64_t kv_putblock_bytes    = snapshot->kv_putblock_bytes;
     uint64_t kv_dedup_hits        = snapshot->dedup_hits;
     uint64_t kv_dedup_misses      = snapshot->dedup_misses;
@@ -903,6 +1093,7 @@ int hifs_store_stats(const hg_stats_snapshot_t *snapshot)
              reads_mbps,
              throughput,
              (unsigned long long)kv_putblock_calls,
+             kv_putblock_ps,
              (unsigned long long)kv_putblock_bytes,
              (unsigned long long)kv_dedup_hits,
              (unsigned long long)kv_dedup_misses,

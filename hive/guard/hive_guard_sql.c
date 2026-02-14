@@ -726,8 +726,11 @@ bool hifs_store_disk_stat(uint64_t node_id,
 			  uint64_t writes_completed,
 			  uint64_t read_bytes,
 			  uint64_t write_bytes,
+			  uint64_t read_ms,
+			  uint64_t write_ms,
 			  uint64_t io_in_progress,
 			  uint64_t io_ms,
+			  uint64_t weighted_io_ms,
 			  const char *fs_path,
 			  const char *health)
 {
@@ -764,8 +767,11 @@ bool hifs_store_disk_stat(uint64_t node_id,
 			       (unsigned long long)writes_completed,
 			       (unsigned long long)read_bytes,
 			       (unsigned long long)write_bytes,
+			       (unsigned long long)read_ms,
+			       (unsigned long long)write_ms,
 			       (unsigned long long)io_in_progress,
 			       (unsigned long long)io_ms,
+			       (unsigned long long)weighted_io_ms,
 			       fsp_use,
 			       health_use);
 
