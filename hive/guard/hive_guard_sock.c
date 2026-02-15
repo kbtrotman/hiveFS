@@ -30,12 +30,7 @@
 #include "../common/hive_common_sql.h"
 #include "../common/hive_common_sock.h"
 
-#ifndef HIVE_CERTMONGER_SOCK_PATH
-#define HIVE_CERTMONGER_SOCK_PATH "/run/certmonger.sock"
-#endif
 
-#define GUARD_CLUSTER_NAME_LEN 128
-#define GUARD_CLUSTER_DESC_LEN 512
 
 struct hive_guard_sock_cluster_join {
 	uint64_t cluster_id;
@@ -44,12 +39,13 @@ struct hive_guard_sock_cluster_join {
 	char cluster_name[GUARD_CLUSTER_NAME_LEN];
 	char cluster_desc[GUARD_CLUSTER_DESC_LEN];
 	char cluster_state[GUARD_SOCK_STATE_LEN];
-	char join_token[GUARD_SOCK_TOKEN_LEN];
+	char join_token[GUARD_SOCK_TOKEN_LEN + 1];
 };
 
 static void guard_sock_copy_field(char *dst, size_t dst_len,
-				  const char *value, const char *fallback);
+			  const char *value, const char *fallback);
 static void guard_sock_send_status_response(int fd);
+static void guard_sock_send_token_response(int fd, const char *token);
 
 char g_status_message[64] = "IDLE";
 unsigned int g_status_percent = 0;
@@ -1060,6 +1056,58 @@ static void guard_sock_send_status_response(int fd)
 	hive_common_sock_respond(fd, "\n");
 }
 
+static void guard_sock_send_token_response(int fd, const char *token)
+{
+	char token_buf[GUARD_SOCK_TOKEN_LEN * 6 + 3];
+	char resp[sizeof(token_buf) + 64];
+	const char *escaped = json_escape_string(token, token_buf,
+						    sizeof(token_buf));
+	int written = snprintf(resp, sizeof(resp),
+			       "{\"command\":\"newtoken\"," \
+			       "\"bootstrap_token\":\"%s\"}\n",
+			       escaped);
+	if (written < 0 || (size_t)written >= sizeof(resp)) {
+		hive_common_sock_respond(fd,
+				       "ERR token response too large\n");
+		return;
+	}
+	hive_common_sock_respond(fd, resp);
+}
+
+static bool guard_sock_try_handle_token_request(int fd, const char *json)
+{
+	char command[32];
+	uint64_t len_val = GUARD_SOCK_TOKEN_LEN;
+	bool has_len;
+	char token[GUARD_SOCK_TOKEN_LEN + 1];
+	size_t token_len = GUARD_SOCK_TOKEN_LEN;
+
+	if (!guard_sock_parse_string_value(json, "command",
+					   command, sizeof(command)))
+		return false;
+	if (strcmp(command, "newtoken") != 0 &&
+	    strcmp(command, "node_token") != 0 &&
+	    strcmp(command, "generate_node_token") != 0)
+		return false;
+	has_len = guard_sock_parse_u64_value(json, "token_len", &len_val);
+	if (has_len) {
+		token_len = (size_t)len_val;
+		if (token_len != GUARD_SOCK_TOKEN_LEN) {
+			hive_common_sock_respond(
+				fd,
+				"ERR token_len must be 43 characters\n");
+			return true;
+		}
+	}
+	if (hive_guard_generate_node_token(token) != 0) {
+		hive_common_sock_respond(fd,
+				"ERR token generation failed\n");
+		return true;
+	}
+	guard_sock_send_token_response(fd, token);
+	return true;
+}
+
 static bool guard_sock_dispatch_request(int fd, const char *json)
 {
 	struct hive_guard_sock_join_sec join_req;
@@ -1081,6 +1129,8 @@ static bool guard_sock_dispatch_request(int fd, const char *json)
 		hive_common_sock_respond(fd, "ERR cluster join failed\n");
 		return false;
 	}
+	if (guard_sock_try_handle_token_request(fd, json))
+		return true;
 	if (guard_sock_try_handle_status_request(fd, json))
 		return true;
 	hive_common_sock_respond(fd, "ERR unknown command\n");

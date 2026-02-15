@@ -258,7 +258,7 @@ struct RaftJoinSec {
     char     kv_state[GUARD_SOCK_STATE_LEN];
     char     cont1_state[GUARD_SOCK_STATE_LEN];
     char     cont2_state[GUARD_SOCK_STATE_LEN];
-    char     bootstrap_token[GUARD_SOCK_TOKEN_LEN];
+    char     bootstrap_token[GUARD_SOCK_TOKEN_LEN + 1];
     char     first_boot_ts[GUARD_SOCK_TS_LEN];
     char     config_status[GUARD_SOCK_STATUS_LEN];
     char     config_progress[GUARD_SOCK_STATUS_LEN];

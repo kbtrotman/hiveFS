@@ -621,6 +621,26 @@ CREATE TABLE IF NOT EXISTS meta_snapshots (
   KEY idx_meta_snapshots_container (container, container_ref),
   KEY idx_meta_snapshots_scope (cluster_wide, scope_node_id)
 ) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS quota_settings (
+  quota_setting_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  layer ENUM('user','group','client_node','client_group','share') NOT NULL,
+  identifier VARCHAR(128) NOT NULL,
+  bytes_soft BIGINT UNSIGNED DEFAULT NULL,
+  bytes_hard BIGINT UNSIGNED DEFAULT NULL,
+  bytes_stop BIGINT UNSIGNED DEFAULT NULL,
+  files_soft BIGINT UNSIGNED DEFAULT NULL,
+  files_hard BIGINT UNSIGNED DEFAULT NULL,
+  files_stop BIGINT UNSIGNED DEFAULT NULL,
+  is_enabled BOOLEAN NOT NULL DEFAULT 1,
+  description VARCHAR(255) DEFAULT NULL,
+  created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  updated_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+  PRIMARY KEY (quota_setting_id),
+  UNIQUE KEY uk_quota_layer_identifier (layer, identifier),
+  KEY idx_quota_enabled (is_enabled)
+) ENGINE=InnoDB;
+
 -- =========================
 -- PROCEDURES (hive_meta)
 -- =========================
@@ -649,6 +669,7 @@ CREATE OR REPLACE VIEW v_roots    AS SELECT * FROM hive_meta.volume_root_dentrie
 CREATE OR REPLACE VIEW v_nodes    AS SELECT * FROM hive_meta.storage_nodes;
 CREATE OR REPLACE VIEW v_vstats    AS SELECT * FROM hive_meta.volume_stats;
 CREATE OR REPLACE VIEW v_stats    AS SELECT * FROM hive_meta.storage_node_stats;
+CREATE OR REPLACE VIEW v_quota_settings AS SELECT * FROM hive_meta.quota_settings;
 CREATE OR REPLACE VIEW hive_api.v_alerts AS SELECT * FROM hive_meta.alerts;
 CREATE OR REPLACE VIEW hive_api.v_clusters AS SELECT * FROM hive_api.cluster;
 CREATE OR REPLACE VIEW hive_api.v_shard_map AS SELECT * FROM hive_meta.shard_map;
@@ -845,6 +866,8 @@ SELECT
   COALESCE(SUM(total_bytes), 0)       AS total_bytes
 FROM hive_meta.volume_stats;
 
+use hive_api;
+
 CREATE TABLE IF NOT EXISTS settings (
   settings_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   cluster_allow_gui_management BOOLEAN NOT NULL DEFAULT 0,
@@ -996,6 +1019,12 @@ CREATE TABLE IF NOT EXISTS email_targets (
     FOREIGN KEY (schedule_id) REFERENCES schedules(schedule_id)
       ON DELETE CASCADE
 ) ENGINE=InnoDB;
+
+-- Now let's setup some views in hive_meta for the things that really need to be more API-based but
+-- still need write capability from the data plane.
+CREATE OR REPLACE VIEW v_notifications AS SELECT * FROM hive_api.notifications;
+CREATE OR REPLACE VIEW v_alerts AS SELECT * FROM hive_api.alerts;
+CREATE OR REPLACE VIEW v_settings AS SELECT * FROM hive_api.settings;
 
 DELIMITER ;
 
