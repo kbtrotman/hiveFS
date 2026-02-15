@@ -15,11 +15,17 @@
 #define GUARD_SOCK_STATE_LEN 32
 #define GUARD_SOCK_STATUS_LEN 64
 #define GUARD_SOCK_MSG_LEN 256
-#define GUARD_SOCK_TOKEN_LEN 256
+#define GUARD_SOCK_TOKEN_LEN 43
 #define GUARD_SOCK_TS_LEN 128
 #define GUARD_SOCK_PUBKEY_LEN 4096
 #define GUARD_SOCK_UID_LEN 128
 
+#ifndef HIVE_CERTMONGER_SOCK_PATH
+#define HIVE_CERTMONGER_SOCK_PATH "/run/certmonger.sock"
+#endif
+
+#define GUARD_CLUSTER_NAME_LEN 128
+#define GUARD_CLUSTER_DESC_LEN 512
 struct hive_guard_sock_join_sec {
 	uint64_t cluster_id;
 	uint64_t node_id;
@@ -29,7 +35,7 @@ struct hive_guard_sock_join_sec {
 	char kv_state[GUARD_SOCK_STATE_LEN];
 	char cont1_state[GUARD_SOCK_STATE_LEN];
 	char cont2_state[GUARD_SOCK_STATE_LEN];
-	char bootstrap_token[GUARD_SOCK_TOKEN_LEN];
+	char bootstrap_token[GUARD_SOCK_TOKEN_LEN + 1];
 	char first_boot_ts[GUARD_SOCK_TS_LEN];
 	char config_status[GUARD_SOCK_STATUS_LEN];
 	char config_progress[GUARD_SOCK_STATUS_LEN];

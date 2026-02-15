@@ -22,12 +22,15 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <stdbool.h>
 #include <sys/random.h>
 #include <errno.h>
 
+#define NODE_CERT_VALID_DAYS 365
+
 struct hive_storage_node;
 
-char *generate_random_token(size_t length);
+int hive_guard_generate_node_token(char out[44]);
 int add_node_mtls_token(const struct hive_storage_node *node);
 int add_node_join_token(uint32_t node_id, const char *token);
 int update_node_for_add(struct hive_storage_node *local);

@@ -13,6 +13,8 @@
  * The keypair creator (access) and certificate (authenticator)
  * management routines for hiveFS. This also will need to include
  * user and group managmenet as they relate to tokens and certs.
+ * It also includes the token generator for the API backend to
+ * register new clients.
  * 
  * Basically, this is client access, node access, and RBAC.
  * 
@@ -33,8 +35,120 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <stdint.h>
+#include <sys/random.h>
 
-#define NODE_CERT_VALID_DAYS 365
+// Base64url alphabet (RFC 4648 §5): A–Z a–z 0–9 - _
+static const char B64URL_ALPHABET[64] =
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+
+// Best-effort explicit zeroing (won't be optimized away on most modern toolchains)
+static void secure_bzero(void *p, size_t n) {
+#if defined(__STDC_LIB_EXT1__)
+  memset_s(p, n, 0, n);
+#else
+  volatile unsigned char *vp = (volatile unsigned char *)p;
+  while (n--) *vp++ = 0;
+#endif
+}
+
+static int os_csprng_bytes(uint8_t *buf, size_t len) {
+#if defined(__linux__)
+  // getrandom() is ideal on Linux
+  size_t off = 0;
+  while (off < len) {
+    ssize_t r = getrandom(buf + off, len - off, 0);
+    if (r < 0) {
+      if (errno == EINTR) continue;
+      // If getrandom isn't available in this environment, fall back below.
+      break;
+    }
+    off += (size_t)r;
+  }
+  if (off == len) return 0;
+  // else fall through to /dev/urandom fallback
+#endif
+
+  int fd = open("/dev/urandom", O_RDONLY | O_CLOEXEC);
+  if (fd < 0) return -1;
+
+  size_t off = 0;
+  while (off < len) {
+    ssize_t r = read(fd, buf + off, len - off);
+    if (r < 0) {
+      if (errno == EINTR) continue;
+      close(fd);
+      return -1;
+    }
+    if (r == 0) { // unexpected EOF
+      close(fd);
+      return -1;
+    }
+    off += (size_t)r;
+  }
+  close(fd);
+  return 0;
+}
+
+// Encodes exactly in_len bytes to base64url without '=' padding.
+// out must have capacity >= ((in_len + 2) / 3) * 4 + 1
+static size_t base64url_encode_nopad(const uint8_t *in, size_t in_len, char *out) {
+  size_t i = 0, o = 0;
+
+  while (i + 3 <= in_len) {
+    uint32_t v = ((uint32_t)in[i] << 16) | ((uint32_t)in[i+1] << 8) | (uint32_t)in[i+2];
+    out[o++] = B64URL_ALPHABET[(v >> 18) & 0x3F];
+    out[o++] = B64URL_ALPHABET[(v >> 12) & 0x3F];
+    out[o++] = B64URL_ALPHABET[(v >>  6) & 0x3F];
+    out[o++] = B64URL_ALPHABET[(v >>  0) & 0x3F];
+    i += 3;
+  }
+
+  // Handle tail (1 or 2 bytes) with no padding emitted
+  size_t rem = in_len - i;
+  if (rem == 1) {
+    uint32_t v = ((uint32_t)in[i] << 16);
+    out[o++] = B64URL_ALPHABET[(v >> 18) & 0x3F];
+    out[o++] = B64URL_ALPHABET[(v >> 12) & 0x3F];
+    // Normally would emit "==", but we omit padding -> stop here
+  } else if (rem == 2) {
+    uint32_t v = ((uint32_t)in[i] << 16) | ((uint32_t)in[i+1] << 8);
+    out[o++] = B64URL_ALPHABET[(v >> 18) & 0x3F];
+    out[o++] = B64URL_ALPHABET[(v >> 12) & 0x3F];
+    out[o++] = B64URL_ALPHABET[(v >>  6) & 0x3F];
+    // Normally would emit "=", but we omit padding -> stop here
+  }
+
+  out[o] = '\0';
+  return o;
+}
+
+// Public API: generate a 256-bit token as base64url (no padding).
+// out must be at least 44 bytes:
+// - 32 bytes -> base64 length ceil(32/3)*4 = 44, minus 1 padding char => 43
+// - plus NUL => 44
+int hive_guard_generate_node_token(char out[44]) {
+  uint8_t raw[32];
+
+  if (os_csprng_bytes(raw, sizeof(raw)) != 0) {
+    secure_bzero(raw, sizeof(raw));
+    return -1;
+  }
+
+  size_t n = base64url_encode_nopad(raw, sizeof(raw), out);
+
+  // Expect 43 chars for 32 bytes when omitting '=' padding
+  if (n != 43) {
+    secure_bzero(raw, sizeof(raw));
+    secure_bzero(out, 44);
+    return -1;
+  }
+
+  secure_bzero(raw, sizeof(raw));
+  return 0;
+}
 
 static void ensure_pki_directories(void)
 {
@@ -53,23 +167,6 @@ static void ensure_pki_directories(void)
 			dirs[i],
 			strerror(errno));
 	}
-}
-
-char *generate_random_token(size_t length)
-{
-    char *buf = malloc(length + 1);
-    ssize_t rc = getrandom(buf, length, 0);
-    if (rc < 0) {
-        free(buf);
-        return NULL;
-    }
-    if ((size_t)rc != length) {
-        free(buf);
-        return NULL;
-    }
-    buf[length] = '\0';
-    
-    return buf;
 }
 
 static bool build_cert_path(char *dst, size_t dst_len,
