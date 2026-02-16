@@ -15,6 +15,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "../common/hive_common_sql.h"
+
 
 
 typedef struct hg_quota_node {
@@ -43,8 +45,7 @@ static void hg_quota_subject_assign(hg_quota_subject_t *subject,
     subject->layer = layer;
     if (!identifier)
         identifier = "";
-    strncpy(subject->identifier, identifier, HG_QUOTA_ID_MAX - 1);
-    subject->identifier[HG_QUOTA_ID_MAX - 1] = '\0';
+    hifs_safe_strcpy(subject->identifier, sizeof(subject->identifier), identifier);
 }
 
 static bool hg_quota_subject_equal(const hg_quota_subject_t *a, const hg_quota_subject_t *b)
@@ -232,8 +233,7 @@ static hg_quota_status_t hg_quota_eval_limits(const hg_quota_limits_t *limits,
     hg_quota_status_t best = HG_QUOTA_STATUS_OK;
     hg_quota_violation_t local = {0};
     local.layer = subject->layer;
-    strncpy(local.subject, subject->identifier, HG_QUOTA_ID_MAX - 1);
-    local.subject[HG_QUOTA_ID_MAX - 1] = '\0';
+    hifs_safe_strcpy(local.subject, sizeof(local.subject), subject->identifier);
 
     uint64_t limit_hit = 0;
     hg_quota_status_t st = hg_quota_classify(used_bytes, &limits->bytes, &limit_hit);

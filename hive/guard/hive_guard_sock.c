@@ -40,6 +40,7 @@ struct hive_guard_sock_cluster_join {
 	char cluster_desc[GUARD_CLUSTER_DESC_LEN];
 	char cluster_state[GUARD_SOCK_STATE_LEN];
 	char join_token[GUARD_SOCK_TOKEN_LEN + 1];
+	char user_id[GUARD_SOCK_UID_LEN];
 };
 
 #define GUARD_SOCK_TOKEN_ID_LEN 64
@@ -731,6 +732,12 @@ static bool guard_sock_parse_join_request(const char *json,
 		return false;
 	guard_sock_parse_u64_value(json, "min_nodes_req",
 				   &out->min_nodes_req);
+	guard_sock_parse_string_value(json, "cluster_name",
+				      out->cluster_name,
+				      sizeof(out->cluster_name));
+	guard_sock_parse_string_value(json, "cluster_desc",
+				      out->cluster_desc,
+				      sizeof(out->cluster_desc));
 	guard_sock_parse_string_value(json, "cluster_state",
 				      out->cluster_state,
 				      sizeof(out->cluster_state));
@@ -773,6 +780,17 @@ static bool guard_sock_parse_join_request(const char *json,
 	guard_sock_parse_string_value(json, "cduid",
 				      out->cduid,
 				      sizeof(out->cduid));
+	guard_sock_parse_string_value(json, "user_id",
+				      out->user_id,
+				      sizeof(out->user_id));
+	if (!out->user_id[0]) {
+		uint64_t user_id_val = 0;
+		if (guard_sock_parse_u64_value(json, "user_id",
+					       &user_id_val)) {
+			snprintf(out->user_id, sizeof(out->user_id),
+				 "%llu", (unsigned long long)user_id_val);
+		}
+	}
 	return true;
 }
 
@@ -807,6 +825,17 @@ static bool guard_sock_parse_cluster_join(const char *json,
 	guard_sock_parse_string_value(json, "join_token",
 				      out->join_token,
 				      sizeof(out->join_token));
+	guard_sock_parse_string_value(json, "user_id",
+				      out->user_id,
+				      sizeof(out->user_id));
+	if (!out->user_id[0]) {
+		uint64_t user_id_val = 0;
+		if (guard_sock_parse_u64_value(json, "user_id",
+					       &user_id_val)) {
+			snprintf(out->user_id, sizeof(out->user_id),
+				 "%llu", (unsigned long long)user_id_val);
+		}
+	}
 	return true;
 }
 
@@ -1035,8 +1064,13 @@ int guard_sock_handle_cluster_init(const struct hive_guard_sock_join_sec *req)
     // Add any other raft related initialization here
     bootstrap_status_update("RAFT_INIT", 95, "RAFT initialization complete, persisting record in DB.");
 
+	const char *cluster_name = req->cluster_name[0]
+		? req->cluster_name : NULL;
+	const char *cluster_desc = req->cluster_desc[0]
+		? req->cluster_desc : NULL;
+
 	if (!hifs_persist_cluster_record(req->cluster_id,
-					 NULL, NULL,
+					 cluster_name, cluster_desc,
 					 min_nodes))
 		return -EIO;
 
@@ -1057,6 +1091,8 @@ static int guard_sock_handle_join_sec(const struct hive_guard_sock_join_sec *req
 		.node_id = req->node_id,
 		.machine_uid = NULL,
 		.cduid = req->cduid[0] ? req->cduid : NULL,
+		.cluster_name = req->cluster_name[0] ? req->cluster_name : NULL,
+		.cluster_desc = req->cluster_desc[0] ? req->cluster_desc : NULL,
 		.cluster_state = req->cluster_state[0]
 			? req->cluster_state : NULL,
 		.database_state = req->database_state[0]
@@ -1078,6 +1114,7 @@ static int guard_sock_handle_join_sec(const struct hive_guard_sock_join_sec *req
 			? req->hive_version : NULL,
 		.hive_patch_level = req->hive_patch_level[0]
 			? req->hive_patch_level : NULL,
+		.user_id = req->user_id[0] ? req->user_id : NULL,
 	};
 	if (req->action[0] && strcmp(req->action, "node_join") == 0)
 		return guard_sock_handle_node_join(req);

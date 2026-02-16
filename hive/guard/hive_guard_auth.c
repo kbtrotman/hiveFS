@@ -56,9 +56,9 @@ static void secure_bzero(void *p, size_t n) {
 }
 
 static int os_csprng_bytes(uint8_t *buf, size_t len) {
+  size_t off = 0;
 #if defined(__linux__)
   // getrandom() is ideal on Linux
-  size_t off = 0;
   while (off < len) {
     ssize_t r = getrandom(buf + off, len - off, 0);
     if (r < 0) {
@@ -75,7 +75,7 @@ static int os_csprng_bytes(uint8_t *buf, size_t len) {
   int fd = open("/dev/urandom", O_RDONLY | O_CLOEXEC);
   if (fd < 0) return -1;
 
-  size_t off = 0;
+  off = 0;
   while (off < len) {
     ssize_t r = read(fd, buf + off, len - off);
     if (r < 0) {
@@ -508,6 +508,8 @@ int update_node_for_add(struct hive_storage_node *local)
 		.machine_uid = hbc.storage_node_uid,
 		.cduid = hbc.storage_node_cduid,
 		.node_record = local,
+		.cluster_name = NULL,
+		.cluster_desc = NULL,
 		.cluster_state = hbc.cluster_state,
 		.database_state = hbc.database_state,
 		.kv_state = hbc.kv_state,
@@ -521,6 +523,7 @@ int update_node_for_add(struct hive_storage_node *local)
 		.config_message = g_status_message,
 		.hive_version = HIFS_VERSION,
 		.hive_patch_level = patch_level_str,
+		.user_id = NULL,
 		.node_version = hbc.storage_node_hive_version,
 		.node_patch_level = hbc.storage_node_hive_patch_level,
 	};

@@ -1010,11 +1010,13 @@ int hifs_store_stats(const hg_stats_snapshot_t *snapshot)
 
     char sql_query[MAX_QUERY_SIZE];
     char lavg_buf[32];
+    char lavg_sql[36];
 
     uint64_t lavg_x100 = atomic_load(&g_stats.load_avg_x100);
     snprintf(lavg_buf, sizeof(lavg_buf), "%llu.%02llu",
              (unsigned long long)(lavg_x100 / 100ull),
              (unsigned long long)(lavg_x100 % 100ull));
+    snprintf(lavg_sql, sizeof(lavg_sql), "'%s'", lavg_buf);
 
     const char *msg_raw = atomic_load(&g_stats.last_error_msg);
     char *msg_sql = NULL;
@@ -1109,14 +1111,14 @@ int hifs_store_stats(const hg_stats_snapshot_t *snapshot)
              s_net_out,
              avg_wr_latency,
              avg_rd_latency,
-             lavg_buf,
+             lavg_sql,
              sees_warning,
              sees_error,
-             msg_sql ? msg_sql : "",
+             msg_sql ? msg_sql : "''",
              cont1_isok,
              cont2_isok,
-             cont1_sql ? cont1_sql : "",
-             cont2_sql ? cont2_sql : "",
+             cont1_sql ? cont1_sql : "''",
+             cont2_sql ? cont2_sql : "''",
              clients);
 
     bool ok = hifs_insert_data(sql_query);

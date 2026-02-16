@@ -12,24 +12,15 @@ const titleGradientStyle: CSSProperties = {
   WebkitTextFillColor: 'transparent',
   color: 'transparent',
 };
-const labelGradientStyle: CSSProperties = {
-  backgroundImage:
-    'linear-gradient(90deg, #f97316 0%, var(--foreground, #e5e7eb) 35%, #38bdf8 80%, #0ea5e9 100%)',
-  WebkitBackgroundClip: 'text',
-  backgroundClip: 'text',
-  WebkitTextFillColor: 'transparent',
-  color: 'transparent',
-};
-
 const API_BASE =
   import.meta?.env?.VITE_BOOTSTRAP_API_BASE ?? 'http://localhost:8000/api/v1/bootstrap';
 const CLUSTER_INIT_URL = `${API_BASE}/init`;
 const NODE_JOIN_URL = `${API_BASE}/addnode`;
-const FOREIGNER_URL = `${API_BASE}/addforeigner`;
 
 type ClusterInitializationScreenProps = {
   statusData?: any;
   onActionComplete?: () => void;
+  userId?: string | number | null;
 };
 
 const formatDisplayValue = (value: unknown) =>
@@ -38,17 +29,18 @@ const formatDisplayValue = (value: unknown) =>
 export function ClusterInitializationScreen({
   statusData,
   onActionComplete,
+  userId,
 }: ClusterInitializationScreenProps) {
   const [clusterName, setClusterName] = useState('');
   const [clusterDescription, setClusterDescription] = useState('');
   const [existingClusterNode, setExistingClusterNode] = useState('');
   const [joinToken, setJoinToken] = useState('');
   const [newNodeName, setNewNodeName] = useState('');
-  const [foreignNode, setForeignNode] = useState('');
-  const [foreignToken, setForeignToken] = useState('');
   const [submittingAction, setSubmittingAction] = useState<string | null>(null);
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const normalizedUserId = userId === undefined || userId === null ? null : String(userId);
 
   const basePayload = {
     node_id: statusData?.node_id ?? null,
@@ -77,6 +69,7 @@ export function ClusterInitializationScreen({
       const payload = {
         ...basePayload,
         command,
+        user_id: normalizedUserId,
         ...extra,
       };
       const response = await fetch(url, {
@@ -115,18 +108,14 @@ export function ClusterInitializationScreen({
     });
   };
 
-  const handleAddForeigner = () => {
-    sendRequest(FOREIGNER_URL, 'add_foreigner', {
-      foreign_node: foreignNode,
-      foreign_token: foreignToken,
-    });
-  };
-
-  const clusterIdDisplay = formatDisplayValue(statusData?.cluster_id);
-  const nodeIdDisplay = formatDisplayValue(statusData?.node_id);
+  const clusterIdDisplay = formatDisplayValue(
+    statusData?.cluster_id ?? 'To be Created...'
+  ) || 'To be Created...';
+  const nodeIdDisplay = formatDisplayValue(
+    statusData?.node_id ?? 'To be Created...'
+  ) || 'To be Created...';
   const initDisabled = submittingAction === 'cluster_init';
   const joinDisabled = submittingAction === 'node_join';
-  const foreignDisabled = submittingAction === 'add_foreigner';
 
   return (
     <div className="w-full h-full bg-background text-foreground flex flex-col items-center px-6 py-6 gap-4">
@@ -152,49 +141,31 @@ export function ClusterInitializationScreen({
         )}
       </div>
 
-      <div className="w-full max-w-6xl grid grid-cols-1 gap-6 lg:grid-cols-2 lg:gap-10">
-        <Card className="flex flex-col shadow-lg border-border min-h-[20rem]">
+      <div className="w-full max-w-6xl grid grid-cols-1 gap-6 lg:grid-cols-2 lg:gap-10 items-start">
+        <Card className="flex flex-col shadow-lg border-border min-h-[24rem]">
           <CardHeader>
             <CardTitle className="text-xl" style={titleGradientStyle}>
               Initialize a New Cluster
             </CardTitle>
           </CardHeader>
-          <CardContent className="flex flex-col gap-5 flex-1">
+          <CardContent className="flex flex-col gap-6 flex-1">
             <div className="flex gap-4 flex-wrap">
               <div className="flex-1">
-                <Label
-                  htmlFor="cluster-id"
-                  className="text-xs uppercase text-muted-foreground"
-                  style={labelGradientStyle}
-                >
-                  Cluster ID
-                </Label>
-                <Input
-                  id="cluster-id"
-                  value={clusterIdDisplay}
-                  disabled
-                  className="mt-1 text-sm"
-                />
+                <p className="text-xs uppercase text-white/80">Cluster ID</p>
+                <div className="mt-1 text-sm rounded-md border border-border bg-card/60 px-3 py-2 text-white/90">
+                  {clusterIdDisplay}
+                </div>
               </div>
               <div className="flex-1">
-                <Label
-                  htmlFor="node-id"
-                  className="text-xs uppercase text-muted-foreground"
-                  style={labelGradientStyle}
-                >
-                  Node ID
-                </Label>
-                <Input
-                  id="node-id"
-                  value={nodeIdDisplay}
-                  disabled
-                  className="mt-1 text-sm"
-                />
+                <p className="text-xs uppercase text-white/80">Node ID</p>
+                <div className="mt-1 text-sm rounded-md border border-border bg-card/60 px-3 py-2 text-white/90">
+                  {nodeIdDisplay}
+                </div>
               </div>
             </div>
 
             <div>
-              <Label htmlFor="cluster-name" className="text-sm font-medium" style={labelGradientStyle}>
+              <Label htmlFor="cluster-name" className="text-sm font-medium text-white">
                 Cluster Name
               </Label>
               <Input
@@ -207,7 +178,7 @@ export function ClusterInitializationScreen({
             </div>
 
             <div>
-              <Label htmlFor="cluster-description" className="text-sm font-medium" style={labelGradientStyle}>
+              <Label htmlFor="cluster-description" className="text-sm font-medium text-white">
                 Cluster Description
               </Label>
               <Input
@@ -224,26 +195,30 @@ export function ClusterInitializationScreen({
               className="w-full mt-auto"
               onClick={handleClusterInit}
               disabled={initDisabled}
+              type="button"
             >
               {initDisabled ? 'Submitting...' : 'Initialize Cluster'}
             </Button>
           </CardContent>
         </Card>
 
-        <Card className="flex flex-col shadow-lg border-border min-h-[20rem]">
+        <Card className="flex flex-col shadow-lg border-border min-h-[24rem]">
           <CardHeader>
             <CardTitle className="text-xl" style={titleGradientStyle}>
               Add this Node to an Existing Cluster
             </CardTitle>
+            <p className="text-[0.7rem] text-muted-foreground italic">
+              (Or add this node later from the admin console via “Add Node” in the Nodes view.)
+            </p>
           </CardHeader>
-          <CardContent className="flex flex-col gap-5 flex-1">
+          <CardContent className="flex flex-col gap-6 flex-1">
             <div>
-              <Label htmlFor="existing-cluster-node" className="text-sm font-medium" style={labelGradientStyle}>
-                Existing Cluster Node
+              <Label htmlFor="existing-cluster-node" className="text-sm font-medium text-white">
+                Existing Cluster UUID
               </Label>
               <Input
                 id="existing-cluster-node"
-                placeholder="Enter existing cluster node"
+                placeholder="Enter the cluster's UUID the node is to be added to"
                 className="mt-1.5 text-sm"
                 value={existingClusterNode}
                 onChange={(event) => setExistingClusterNode(event.target.value)}
@@ -251,7 +226,7 @@ export function ClusterInitializationScreen({
             </div>
 
             <div>
-              <Label htmlFor="token-key" className="text-sm font-medium" style={labelGradientStyle}>
+              <Label htmlFor="token-key" className="text-sm font-medium text-white">
                 Token Key
               </Label>
               <Input
@@ -264,7 +239,7 @@ export function ClusterInitializationScreen({
             </div>
 
             <div>
-              <Label htmlFor="new-node-name" className="text-sm font-medium" style={labelGradientStyle}>
+              <Label htmlFor="new-node-name" className="text-sm font-medium text-white">
                 New Node Name
               </Label>
               <Input
@@ -276,68 +251,14 @@ export function ClusterInitializationScreen({
               />
             </div>
 
-            <p className="text-[0.7rem] text-muted-foreground">
-              Or add this node later from the admin console via “Add Node” in the Nodes view.
-            </p>
-
+            <div className="flex-1" />
             <Button
               className="w-full mt-auto"
               onClick={handleNodeJoin}
               disabled={joinDisabled}
+              type="button"
             >
               {joinDisabled ? 'Submitting...' : 'Join Cluster'}
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="w-full max-w-6xl">
-        <Card className="shadow-lg border-border">
-          <CardHeader>
-            <CardTitle className="text-lg" style={titleGradientStyle}>
-              Optional: Add This Cluster to a Foreign Console
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-5">
-            <p className="text-sm text-muted-foreground">
-              Expose this cluster to others so admin consoles can manage a multi-cluster environment.
-            </p>
-
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              <div>
-                <Label htmlFor="foreign-node" className="text-sm font-medium" style={labelGradientStyle}>
-                  Foreign Node or IP
-                </Label>
-                <Input
-                  id="foreign-node"
-                  placeholder="Enter foreign node name or IP"
-                  className="mt-1.5 text-sm"
-                  value={foreignNode}
-                  onChange={(event) => setForeignNode(event.target.value)}
-                />
-              </div>
-              <div>
-                <Label htmlFor="foreign-token" className="text-sm font-medium" style={labelGradientStyle}>
-                  Token from Foreign Cluster
-                </Label>
-                <Input
-                  id="foreign-token"
-                  placeholder="Enter token"
-                  className="mt-1.5 text-sm"
-                  value={foreignToken}
-                  onChange={(event) => setForeignToken(event.target.value)}
-                />
-              </div>
-            </div>
-            <p className="text-[0.7rem] text-muted-foreground">
-              Or add this cluster later from the admin console via “Add Foreign Cluster” in the Clusters view.
-            </p>
-            <Button
-              className="w-full md:w-auto self-start"
-              onClick={handleAddForeigner}
-              disabled={foreignDisabled}
-            >
-              {foreignDisabled ? 'Submitting...' : 'Add Foreign Cluster'}
             </Button>
           </CardContent>
         </Card>

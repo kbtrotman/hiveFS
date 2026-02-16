@@ -836,6 +836,8 @@ commitCb(struct uv_raft *raft,
         req.node_id = src->node_id;
         req.min_nodes_req = src->min_nodes_req;
         req.raft_replay = src->raft_replay;
+        hg_raft_copy_str(req.cluster_name, sizeof(req.cluster_name), src->cluster_name);
+        hg_raft_copy_str(req.cluster_desc, sizeof(req.cluster_desc), src->cluster_desc);
         hg_raft_copy_str(req.cluster_state, sizeof(req.cluster_state), src->cluster_state);
         hg_raft_copy_str(req.database_state, sizeof(req.database_state), src->database_state);
         hg_raft_copy_str(req.kv_state, sizeof(req.kv_state), src->kv_state);
@@ -852,6 +854,7 @@ commitCb(struct uv_raft *raft,
         hg_raft_copy_str(req.cduid, sizeof(req.cduid), src->cduid);
         hg_raft_copy_str(req.machine_uid, sizeof(req.machine_uid), src->machine_uid);
         hg_raft_copy_str(req.action, sizeof(req.action), src->action);
+        hg_raft_copy_str(req.user_id, sizeof(req.user_id), src->user_id);
         return hive_guard_apply_join_sec(&req);
     }
 
@@ -1165,6 +1168,8 @@ int hifs_raft_submit_join_sec(const struct hive_guard_join_context *ctx)
     hg_raft_copy_str(dst->kv_state, sizeof(dst->kv_state), ctx->kv_state);
     hg_raft_copy_str(dst->cont1_state, sizeof(dst->cont1_state), ctx->cont1_state);
     hg_raft_copy_str(dst->cont2_state, sizeof(dst->cont2_state), ctx->cont2_state);
+    hg_raft_copy_str(dst->cluster_name, sizeof(dst->cluster_name), ctx->cluster_name);
+    hg_raft_copy_str(dst->cluster_desc, sizeof(dst->cluster_desc), ctx->cluster_desc);
     hg_raft_copy_str(dst->bootstrap_token, sizeof(dst->bootstrap_token), NULL);
     hg_raft_copy_str(dst->first_boot_ts, sizeof(dst->first_boot_ts), ctx->first_boot_ts);
     hg_raft_copy_str(dst->config_status, sizeof(dst->config_status), ctx->config_status);
@@ -1181,6 +1186,7 @@ int hifs_raft_submit_join_sec(const struct hive_guard_join_context *ctx)
         machine_uid = ctx->node_record->uid;
     hg_raft_copy_str(dst->machine_uid, sizeof(dst->machine_uid), machine_uid);
     hg_raft_copy_str(dst->action, sizeof(dst->action), ctx->action);
+    hg_raft_copy_str(dst->user_id, sizeof(dst->user_id), ctx->user_id);
 
     dst->raft_replay = ctx->raft_replay;
     dst->reserved_i32 = 0;

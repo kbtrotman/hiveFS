@@ -30,6 +30,8 @@ struct hive_guard_sock_join_sec {
 	uint64_t cluster_id;
 	uint64_t node_id;
 	uint64_t min_nodes_req;
+	char cluster_name[GUARD_CLUSTER_NAME_LEN];
+	char cluster_desc[GUARD_CLUSTER_DESC_LEN];
 	char cluster_state[GUARD_SOCK_STATE_LEN];
 	char database_state[GUARD_SOCK_STATE_LEN];
 	char kv_state[GUARD_SOCK_STATE_LEN];
@@ -45,6 +47,7 @@ struct hive_guard_sock_join_sec {
 	char pub_key[GUARD_SOCK_PUBKEY_LEN];
 	char cduid[GUARD_SOCK_UID_LEN];
 	char machine_uid[GUARD_SOCK_UID_LEN];
+	char user_id[GUARD_SOCK_UID_LEN];
 	char action[GUARD_SOCK_STATUS_LEN];
 	int raft_replay;
 };
@@ -62,6 +65,8 @@ struct hive_guard_join_context {
 	uint64_t node_id;
 	const char *machine_uid;
 	const struct hive_storage_node *node_record;
+	const char *cluster_name;
+	const char *cluster_desc;
 	const char *cluster_state;
 	const char *database_state;
 	const char *kv_state;
@@ -77,6 +82,7 @@ struct hive_guard_join_context {
 	const char *hive_patch_level;
 	const char *cduid;
 	const char *action;
+	const char *user_id;
 	uint32_t node_version;
 	uint32_t node_patch_level;
 	int raft_replay;

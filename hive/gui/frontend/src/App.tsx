@@ -227,6 +227,7 @@ export default function App() {
                 <ClusterInitializationScreen
                   statusData={bootstrapStatusData}
                   onActionComplete={() => fetchBootstrapStatus(authToken)}
+                  userId={user?.id ?? user?.user_id ?? null}
                 />
               </div>
             ) : activeSetupView ? (
