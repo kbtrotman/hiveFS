@@ -33,7 +33,7 @@ struct RaftTokenCommand;
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "../../hicomm/hi_command.h"
+#include "../../hifs_shared_defs.h"
 
 #define DB_HOST     NULL
 #define DB_NAME     "hive_meta"

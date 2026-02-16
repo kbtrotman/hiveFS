@@ -78,16 +78,6 @@ int register_hive_host(void);
 int hifs_get_hive_host_sbs(void);
 
 
-/* Convenience macros mirroring the kernel names */
-#define hifs_emerg(fmt, ...)   hicomm_log(LOG_EMERG,   "hivefs: " fmt, ##__VA_ARGS__)
-#define hifs_alert(fmt, ...)   hicomm_log(LOG_ALERT,   "hivefs: " fmt, ##__VA_ARGS__)
-#define hifs_crit(fmt, ...)    hicomm_log(LOG_CRIT,    "hivefs: " fmt, ##__VA_ARGS__)
-#define hifs_err(fmt, ...)     hicomm_log(LOG_ERR,     "hivefs: " fmt, ##__VA_ARGS__)
-#define hifs_warning(fmt, ...) hicomm_log(LOG_WARNING, "hivefs: " fmt, ##__VA_ARGS__)
-#define hifs_notice(fmt, ...)  hicomm_log(LOG_NOTICE,  "hivefs: " fmt, ##__VA_ARGS__)
-#define hifs_info(fmt, ...)    hicomm_log(LOG_INFO,    "hivefs: " fmt, ##__VA_ARGS__)
-#define hifs_debug(fmt, ...)   hicomm_log(LOG_DEBUG,   "hivefs: " fmt, ##__VA_ARGS__)
-
 /* hi_command_mm.c */
 int hicomm_comm_open(bool nonblock);
 void hicomm_comm_close(int fd);

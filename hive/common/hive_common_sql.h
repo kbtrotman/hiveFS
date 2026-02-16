@@ -20,7 +20,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "../../hicomm/hi_command.h"
+#include "../../hifs_shared_defs.h"
 
 struct hive_storage_node {
 	uint32_t id;
@@ -64,6 +64,8 @@ struct SQLDB {
 struct hive_bootstrap_config;
 struct hive_bootstrap_config;
 extern struct SQLDB sqldb;
+
+void init_hive_link(void);
 
 #ifndef HIFS_STORAGE_NODE_HEARTBEAT_MAX_AGE
 #define HIFS_STORAGE_NODE_HEARTBEAT_MAX_AGE 30

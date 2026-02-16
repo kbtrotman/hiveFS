@@ -858,7 +858,7 @@ static bool build_local_node_join_payload(char *buf, size_t buf_sz)
 	char cduid_value[UUID_BUF_LEN];
 	char cduid_json_buf[UUID_BUF_LEN + 4];
 
-	if (!ensure_uuid_file(HIVE_NODE_ID, cduid_value, sizeof(cduid_value)))
+	if (!ensure_uuid_file(HIVE_NODE_CLUST_UUID, cduid_value, sizeof(cduid_value)))
 		return false;
 	hifs_safe_strcpy(hbc.storage_node_cduid,
 			 sizeof(hbc.storage_node_cduid),
@@ -1190,12 +1190,12 @@ static bool ensure_node_uuid_pair(char *cduid, size_t cduid_sz,
 			*failure_kind = NODE_UUID_CLUSTER_DEPENDENT;
 		return false;
 	}
-	if (!ensure_uuid_file(HIVE_NODE_ID, cduid, cduid_sz)) {
+	if (!ensure_uuid_file(HIVE_NODE_CLUST_UUID, cduid, cduid_sz)) {
 		if (failure_kind)
 			*failure_kind = NODE_UUID_CLUSTER_DEPENDENT;
 		return false;
 	}
-	if (!ensure_uuid_file(HW_NODE_UID, global_uuid, global_uuid_sz)) {
+	if (!ensure_uuid_file(HW_NODE_HW_UUID, global_uuid, global_uuid_sz)) {
 		if (failure_kind)
 			*failure_kind = NODE_UUID_GLOBAL;
 		return false;
