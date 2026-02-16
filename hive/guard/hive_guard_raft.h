@@ -32,7 +32,6 @@
 #include <raft.h>      // core algorithm state
 #include <raft/uv.h>   // libuv-based I/O driver
 
-#include "../../hicomm/hi_command.h"
 #include "../../hifs_shared_defs.h"
 #include "hive_guard.h"
 #include "hive_guard_sock.h"

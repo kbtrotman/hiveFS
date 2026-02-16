@@ -228,6 +228,23 @@ static bool load_peers_from_db(struct hg_raft_peer **out_peers,
 	return true;
 }
 
+static void setup_guard_logging(void)
+{
+	if (!ensure_directory(HIVE_LOG_DIR))
+		return;
+	FILE *fp = fopen(HIVE_HG_LOG_FILE, "a");
+
+	if (!fp)
+		return;
+	setvbuf(fp, NULL, _IOLBF, 0);
+	int fd = fileno(fp);
+
+	if (fd >= 0) {
+		dup2(fd, fileno(stdout));
+		dup2(fd, fileno(stderr));
+	}
+}
+
 int main(void)
 {
 	struct hg_raft_peer fallback_peers[] = {
@@ -241,6 +258,7 @@ int main(void)
 	const char *self_address = fallback_peers[0].address;
 	int ret;
 
+	setup_guard_logging();
 	maybe_run_bootstrap();
 
 	if (!ensure_directory(HIVE_DATA_DIR) ||

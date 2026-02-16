@@ -17,8 +17,32 @@
 #else
 #include <time.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <syslog.h>
+#include <stdarg.h>
 #define GET_TIME() (clock() * 1000 / CLOCKS_PER_SEC)
 #endif
+
+/* Basic metadata shared between hive components */
+struct superblock {
+	uint64_t volume_id;
+	uint32_t s_magic;
+	uint32_t s_blocksize;
+	uint32_t s_blocksize_bits;
+	uint64_t s_blocks_count;
+	uint64_t s_free_blocks;
+	uint64_t s_inodes_count;
+	uint64_t s_free_inodes;
+};
+
+struct machine {
+	char *serial;
+	char *name;
+	long host_id;
+	char *os_name;
+	char *os_version;
+	char *create_time;
+};
 
 
 #ifdef __KERNEL__
@@ -33,7 +57,36 @@
 #define hifs_notice(fmt, ...)  HIFS_LOG(KERN_NOTICE,  HIFS_LOG_FMT(fmt), HIFS_LOG_ARGS, ##__VA_ARGS__)
 #define hifs_info(fmt, ...)    HIFS_LOG(KERN_INFO,    HIFS_LOG_FMT(fmt), HIFS_LOG_ARGS, ##__VA_ARGS__)
 #define hifs_debug(fmt, ...)   HIFS_LOG(KERN_DEBUG,   HIFS_LOG_FMT(fmt), HIFS_LOG_ARGS, ##__VA_ARGS__)
+#else
+static inline void hifs_user_log(int level, const char *fmt, ...)
+{
+	va_list ap;
+	va_start(ap, fmt);
+	FILE *stream = (level <= LOG_ERR) ? stderr : stdout;
+	vfprintf(stream, fmt, ap);
+	fputc('\n', stream);
+	va_end(ap);
+
+	va_start(ap, fmt);
+	vsyslog(level, fmt, ap);
+	va_end(ap);
+}
+#define HIFS_LOG(level, fmt, ...) hifs_user_log(level, "hivefs: " fmt, ##__VA_ARGS__)
+#define hifs_emerg(fmt, ...)   HIFS_LOG(LOG_EMERG,   fmt, ##__VA_ARGS__)
+#define hifs_alert(fmt, ...)   HIFS_LOG(LOG_ALERT,   fmt, ##__VA_ARGS__)
+#define hifs_crit(fmt, ...)    HIFS_LOG(LOG_CRIT,    fmt, ##__VA_ARGS__)
+#define hifs_err(fmt, ...)     HIFS_LOG(LOG_ERR,     fmt, ##__VA_ARGS__)
+#define hifs_warning(fmt, ...) HIFS_LOG(LOG_WARNING, fmt, ##__VA_ARGS__)
+#define hifs_notice(fmt, ...)  HIFS_LOG(LOG_NOTICE,  fmt, ##__VA_ARGS__)
+#define hifs_info(fmt, ...)    HIFS_LOG(LOG_INFO,    fmt, ##__VA_ARGS__)
+#define hifs_debug(fmt, ...)   HIFS_LOG(LOG_DEBUG,   fmt, ##__VA_ARGS__)
 #endif // __KERNEL__
+
+/***********************************
+ * Shared Hi_command & guard defs
+ ***********************************/
+#define HIFS_GUARD_HOST "127.0.0.1"
+#define HIFS_GUARD_PORT_STR "7070"
 
 /******************************
  * Base FS Information
@@ -58,6 +111,13 @@
 #define HIFS_EC_W         6
 #define HIFS_EC_CHECKSUM  CHKSUM_CRC32
 #define HIFS_EC_STRIPES  (HIFS_EC_K + HIFS_EC_M)
+
+#ifndef HIFS_GUARD_HOST
+#define HIFS_GUARD_HOST "127.0.0.1"
+#endif
+#ifndef HIFS_GUARD_PORT_STR
+#define HIFS_GUARD_PORT_STR "7070"
+#endif
 
 /******************************
  * Queue Management Structures

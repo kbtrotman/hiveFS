@@ -37,6 +37,8 @@
 #define HIVE_LOG_DIR          HIVE_DATA_DIR "/logs"
 #define HIVE_UI_BACKEND_ROOT  HIVE_DATA_DIR "/backend"
 #define HIVE_UI_FRONTEND_ROOT HIVE_DATA_DIR "/frontend"
+#define HIVE_HG_LOG_FILE      HIVE_LOG_DIR  "/hive_guard_log"
+#define HIVE_HBS_LOG_FILE      HIVE_LOG_DIR  "/hive_bootstrap_log"
 // SETUP Dirs/Files
 #define HIVE_UI_SYSTEMD_DIR   "/etc/systemd/system"
 #define HIVE_BOOTSTRAP_SYS_DIR "/etc/hivefs"

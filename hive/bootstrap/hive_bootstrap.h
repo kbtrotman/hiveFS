@@ -32,7 +32,6 @@
 #include <sys/stat.h>
  
 #include <mysql.h>   // libmariadbclient or libmysqlclient
-#include "../../hicomm/hi_command.h"
 #include "../common/hive_common.h"
 
 

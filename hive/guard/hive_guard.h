@@ -33,11 +33,13 @@
  
 #include <mysql.h>   // libmariadbclient or libmysqlclient
 
-#include "../../hicomm/hi_command.h"
+#include "../../hifs_shared_defs.h"
 #include "../common/hive_common.h"
 #include "../common/hive_common_sql.h"
 
 #define MAXC 1024
+#define HIFS_GUARD_HOST "127.0.0.1"
+#define HIFS_GUARD_PORT_STR "7070"
 
 extern unsigned int storage_node_id;
 extern char storage_node_name[50];

@@ -67,6 +67,23 @@ static bool ensure_directory(const char *path)
 	return false;
 }
 
+static void setup_bootstrap_logging(void)
+{
+	if (!ensure_directory(HIVE_LOG_DIR))
+		return;
+	FILE *fp = fopen(HIVE_HBS_LOG_FILE, "a");
+
+	if (!fp)
+		return;
+	setvbuf(fp, NULL, _IOLBF, 0);
+	int fd = fileno(fp);
+
+	if (fd >= 0) {
+		dup2(fd, fileno(stdout));
+		dup2(fd, fileno(stderr));
+	}
+}
+
 static const char *skip_ws(const char *p)
 {
 	while (p && *p && isspace((unsigned char)*p))
@@ -1088,6 +1105,7 @@ static bool run_container_stage(void)
 
 int main(void)
 {
+	setup_bootstrap_logging();
 
 	load_node_config();
 	if (!normalize_stage_from_states())
