@@ -36,6 +36,9 @@
 #include "../../hifs_shared_defs.h"
 #include "hive_guard.h"
 #include "hive_guard_sock.h"
+#include "hive_guard_auth.h"
+
+struct hive_guard_token_metadata;
 
 
 /* hive_guard_raft.h */
@@ -79,25 +82,31 @@ enum hg_op_type {
     HG_OP_ATOMIC_RENAME = 9,
     HG_OP_PUT_SESSION = 10,
     HG_OP_SESSION_CLEANUP = 11,
-    HG_OP_SNAPSHOT_MARK = 50,
-    HG_OP_SET_NODE_FULL_SYNC = 59,
-    HG_OP_PUT_JOIN_NODE = 60,
-    HG_OP_PUT_NODE_DOWN = 61,
-    HG_OP_CLUSTER_NODE_UP = 62,
-    HG_OP_CLUSTER_FORCE_HEARTBEAT = 63,
-    HG_OP_CLUSTER_DOWN = 64,
-    HG_OP_CLUSTER_UP = 65,
-    HG_OP_CLUSTER_INIT = 66,
-    HG_OP_CLUSTER_NODE_FENCE = 67,
-    HG_OP_STORAGE_NODE_UPDATE = 68,
-    HG_OP_SET_NODE_TO_LEARNER = 69,
-    HG_OP_LEASE_MAKE = 70,
-    HG_OP_LEASE_RENEW = 71,
-    HG_OP_LEASE_RELEASE = 72,
-    HG_OP_CACHE_CHECK = 80,
-    HG_OP_CACHE_CLEAR = 81,
-    HG_OP_CACHE_EVICTION = 82,
-    HG_OP_CACHE_PURGE = 83,
+    HG_OP_SET_NODE_FULL_SYNC = 12,
+    HG_OP_SET_NODE_TO_LEARNER = 13,
+    HG_OP_PUT_JOIN_NODE = 14,
+    HG_OP_PUT_NODE_DOWN = 15,
+    HG_OP_CLUSTER_NODE_UP = 16,
+    HG_OP_CLUSTER_FORCE_HEARTBEAT = 17,
+    HG_OP_CLUSTER_DOWN = 18,
+    HG_OP_CLUSTER_UP = 19,
+    HG_OP_CLUSTER_INIT = 20,
+    HG_OP_CLUSTER_NODE_FENCE = 21,
+    HG_OP_STORAGE_NODE_UPDATE = 22,
+
+    HG_OP_SNAPSHOT_MARK = 30,
+    HG_OP_LEASE_MAKE = 31,
+    HG_OP_LEASE_RENEW = 32,
+    HG_OP_LEASE_RELEASE = 33,
+    HG_OP_CACHE_CHECK = 34,
+    HG_OP_CACHE_CLEAR = 35,
+    HG_OP_CACHE_EVICTION = 36,
+    HG_OP_CACHE_PURGE = 37,
+// Ops up to 50 are for cluster-specific data-plane
+// Ops in 50's are for GUI metadata updates
+    HG_OP_NEW_TOKEN = 50,
+    HG_OP_EXPIRE_TOKEN = 51,
+
     /* later: other read/write routines, etc. */
 };
 
@@ -313,6 +322,25 @@ struct RaftCacheCommand {
     char     tag[HG_CACHE_TAG_MAX];
 };
 
+#define HG_TOKEN_VALUE_MAX 64
+
+struct RaftTokenCommand {
+    uint64_t token_id;
+    uint64_t expires_ns;
+    uint32_t token_type;
+    uint32_t flags;
+    char     machine_uid[GUARD_SOCK_UID_LEN];
+    char     token[HG_TOKEN_VALUE_MAX];
+    struct hive_guard_token_metadata meta;
+};
+
+struct RaftTokenExpireCommand {
+    uint64_t token_id;
+    uint32_t flags;
+    uint32_t reserved;
+    char     token[HG_TOKEN_VALUE_MAX];
+};
+
 #define SNAPSHOT_MAGIC 0x534E4150u  // 'SNAP'
 
 struct RaftSnapshotMeta {
@@ -355,6 +383,8 @@ struct RaftCmd {
         struct RaftClusterNodeMgmtCmd node_to_learner;
         struct RaftLeaseCommand lease;
         struct RaftCacheCommand cache;
+        struct RaftTokenCommand new_token;
+        struct RaftTokenExpireCommand expire_token;
         struct RaftSnapshotMeta snapshot;
         struct hive_guard_storage_update_cmd storage_update;
     } u;
@@ -395,5 +425,6 @@ int hg_prepare_snapshot_for_new_node(const struct hg_raft_config *cfg,
                                      uint64_t snap_id,
                                      const char *new_node_addr,
                                      struct hg_snapshot_source *out_src);
+int hg_raft_call_update_token(const struct hive_guard_token_metadata *meta);
 
 #endif /* HIVE_GUARD_RAFT_H */

@@ -24,7 +24,7 @@ from monitor.views import MonitorRootView
 from tenant.views import TenantRootView
 from nodes.views import StorageNodeViewSet, StorageNodeStatViewSet
 from disk.views import DiskNodeViewSet, DiskNodeStatViewSet, StorageNodeFsStatsListView, StorageNodeDiskStatsListView
-from api.views import BootstrapError, BootstrapInitView, BootstrapStatusView, AddNodeView, AddForeignerView
+from api.views import BootstrapError, BootstrapInitView, BootstrapStatusView, AddNodeView, AddForeignerView, NewTokenView
 from accounts.views import (
     GroupMembershipViewSet,
     GroupViewSet,
@@ -68,6 +68,7 @@ urlpatterns = [
     path("api/v1/bootstrap/init", BootstrapInitView.as_view()),
     path("api/v1/bootstrap/addnode", AddNodeView.as_view()),
     path("api/v1/bootstrap/addforeigner", AddForeignerView.as_view()),
+     path("api/v1/new_token", NewTokenView.as_view()),
     path("api/v1/health/fs", StorageNodeFsStatsListView.as_view(), name="fs-stats"),
     path("api/v1/health/disks", StorageNodeDiskStatsListView.as_view(), name="disk-stats"), 
     path('admin/', admin.site.urls),

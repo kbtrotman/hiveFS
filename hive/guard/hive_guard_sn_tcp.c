@@ -18,6 +18,7 @@
 #include "hive_guard_sql.h"
 #include "hive_guard_sock.h"
 #include "hive_guard_raft.h"
+#include "hive_guard_auth.h"
 #include "../common/hive_common.h"
 
 #include <arpa/inet.h>
@@ -50,6 +51,39 @@ struct stripe_msg_header {
 	uint32_t payload_len;
 } __attribute__((packed));
 
+#define HG_TOKEN_METADATA_MAGIC 0x48544D44u
+#define HG_TOKEN_METADATA_VERSION 1
+#define HG_TOKEN_METADATA_CMD_STORE 1
+#define HG_TOKEN_METADATA_TIMEOUT_MS 3000
+
+struct hg_token_metadata_header {
+	uint32_t magic;
+	uint16_t version;
+	uint16_t command;
+	uint32_t payload_len;
+} __attribute__((packed));
+
+struct hg_token_metadata_payload {
+	uint64_t cluster_id_be;
+	uint8_t has_cluster_id;
+	uint8_t reserved[7];
+	char bootstrap_token[HIVE_GUARD_BOOTSTRAP_TOKEN_LEN];
+	char first_boot_ts[HIVE_GUARD_TOKEN_TS_LEN];
+	char tid[HIVE_GUARD_UUID_STR_LEN];
+	char token_type[HIVE_GUARD_TOKEN_TYPE_LEN];
+	char host_uuid[HIVE_GUARD_UID_LEN];
+	char host_mid[HIVE_GUARD_UID_LEN];
+	char issued_at[HIVE_GUARD_TOKEN_TS_LEN];
+	char expires_at[HIVE_GUARD_TOKEN_TS_LEN];
+	char approved_at[HIVE_GUARD_TOKEN_TS_LEN];
+	char approved_by[HIVE_USER_ID_LEN];
+} __attribute__((packed));
+
+struct hg_token_metadata_response {
+	uint32_t magic;
+	int32_t status;
+} __attribute__((packed));
+
 static pthread_t sn_thread;
 static int sn_listen_fd = -1;
 static volatile bool sn_running = false;
@@ -73,6 +107,71 @@ static uint64_t htonll(uint64_t v)
 static uint64_t ntohll(uint64_t v)
 {
 	return htonll(v);
+}
+
+static void hg_token_metadata_payload_from_meta(
+	struct hg_token_metadata_payload *dst,
+	const struct hive_guard_token_metadata *src)
+{
+	if (!dst) {
+		return;
+	}
+	memset(dst, 0, sizeof(*dst));
+	if (!src) {
+		return;
+	}
+	dst->cluster_id_be = htonll(src->cluster_id);
+	dst->has_cluster_id = src->has_cluster_id ? 1 : 0;
+	memcpy(dst->bootstrap_token,
+	       src->bootstrap_token,
+	       sizeof(dst->bootstrap_token));
+	memcpy(dst->first_boot_ts,
+	       src->first_boot_ts,
+	       sizeof(dst->first_boot_ts));
+	memcpy(dst->tid, src->tid, sizeof(dst->tid));
+	memcpy(dst->token_type, src->token_type, sizeof(dst->token_type));
+	memcpy(dst->host_uuid, src->host_uuid, sizeof(dst->host_uuid));
+	memcpy(dst->host_mid, src->host_mid, sizeof(dst->host_mid));
+	memcpy(dst->issued_at, src->issued_at, sizeof(dst->issued_at));
+	memcpy(dst->expires_at, src->expires_at, sizeof(dst->expires_at));
+	memcpy(dst->approved_at, src->approved_at, sizeof(dst->approved_at));
+	memcpy(dst->approved_by, src->approved_by, sizeof(dst->approved_by));
+}
+
+static void hg_token_metadata_payload_to_meta(
+	struct hive_guard_token_metadata *dst,
+	const struct hg_token_metadata_payload *src)
+{
+	if (!dst || !src) {
+		return;
+	}
+	memset(dst, 0, sizeof(*dst));
+	dst->cluster_id = ntohll(src->cluster_id_be);
+	dst->has_cluster_id = src->has_cluster_id ? true : false;
+	memcpy(dst->bootstrap_token,
+	       src->bootstrap_token,
+	       sizeof(dst->bootstrap_token));
+	dst->bootstrap_token[sizeof(dst->bootstrap_token) - 1] = '\0';
+	memcpy(dst->first_boot_ts,
+	       src->first_boot_ts,
+	       sizeof(dst->first_boot_ts));
+	dst->first_boot_ts[sizeof(dst->first_boot_ts) - 1] = '\0';
+	memcpy(dst->tid, src->tid, sizeof(dst->tid));
+	dst->tid[sizeof(dst->tid) - 1] = '\0';
+	memcpy(dst->token_type, src->token_type, sizeof(dst->token_type));
+	dst->token_type[sizeof(dst->token_type) - 1] = '\0';
+	memcpy(dst->host_uuid, src->host_uuid, sizeof(dst->host_uuid));
+	dst->host_uuid[sizeof(dst->host_uuid) - 1] = '\0';
+	memcpy(dst->host_mid, src->host_mid, sizeof(dst->host_mid));
+	dst->host_mid[sizeof(dst->host_mid) - 1] = '\0';
+	memcpy(dst->issued_at, src->issued_at, sizeof(dst->issued_at));
+	dst->issued_at[sizeof(dst->issued_at) - 1] = '\0';
+	memcpy(dst->expires_at, src->expires_at, sizeof(dst->expires_at));
+	dst->expires_at[sizeof(dst->expires_at) - 1] = '\0';
+	memcpy(dst->approved_at, src->approved_at, sizeof(dst->approved_at));
+	dst->approved_at[sizeof(dst->approved_at) - 1] = '\0';
+	memcpy(dst->approved_by, src->approved_by, sizeof(dst->approved_by));
+	dst->approved_by[sizeof(dst->approved_by) - 1] = '\0';
 }
 
 static ssize_t write_full(int fd, const void *buf, size_t len)
@@ -600,6 +699,65 @@ static void handle_fetch_request(int fd, const struct stripe_msg_header *req)
 	close(fd);
 }
 
+static int hg_handle_token_metadata_locally(
+	uint16_t command,
+	const struct hive_guard_token_metadata *meta)
+{
+	if (!meta)
+		return -EINVAL;
+	if (command != HG_TOKEN_METADATA_CMD_STORE)
+		return -ENOTSUP;
+	return hg_raft_call_update_token(meta);
+}
+
+static void handle_token_metadata_request(int fd)
+{
+	if (fd < 0)
+		return;
+
+	struct hg_token_metadata_header hdr;
+	struct hg_token_metadata_response resp = {
+		.magic = htonl(HG_TOKEN_METADATA_MAGIC),
+		.status = htonl(-EPROTO),
+	};
+
+	if (read_full(fd, &hdr, sizeof(hdr)) != (ssize_t)sizeof(hdr)) {
+		close(fd);
+		return;
+	}
+
+	uint32_t magic = ntohl(hdr.magic);
+	uint16_t version = ntohs(hdr.version);
+	uint32_t payload_len = ntohl(hdr.payload_len);
+	uint16_t command = ntohs(hdr.command);
+
+	if (magic != HG_TOKEN_METADATA_MAGIC ||
+	    version != HG_TOKEN_METADATA_VERSION ||
+	    payload_len != sizeof(struct hg_token_metadata_payload)) {
+		write_full(fd, &resp, sizeof(resp));
+		close(fd);
+		return;
+	}
+
+	struct hg_token_metadata_payload payload;
+	if (read_full(fd, &payload, sizeof(payload)) !=
+	    (ssize_t)sizeof(payload)) {
+		close(fd);
+		return;
+	}
+
+	struct hive_guard_token_metadata meta;
+	hg_token_metadata_payload_to_meta(&meta, &payload);
+
+	int rc = -EAGAIN;
+	if (hg_guard_local_can_write())
+		rc = hg_handle_token_metadata_locally(command, &meta);
+
+	resp.status = htonl((uint32_t)rc);
+	write_full(fd, &resp, sizeof(resp));
+	close(fd);
+}
+
 static void handle_join_cluster_request(int fd)
 {
 	if (fd < 0) {
@@ -666,6 +824,10 @@ static void *sn_listener_thread(void *arg)
 			}
 			if (magic == HG_JOIN_CLUSTER_MAGIC) {
 				handle_join_cluster_request(fd);
+				continue;
+			}
+			if (magic == HG_TOKEN_METADATA_MAGIC) {
+				handle_token_metadata_request(fd);
 				continue;
 			}
 		}
@@ -1341,6 +1503,78 @@ static int hg_send_join_request_to_peer(const struct hive_storage_node *peer,
 	return -EAGAIN;
 }
 
+static int hg_send_token_metadata_to_peer(
+	const struct hive_storage_node *peer,
+	const struct hive_guard_token_metadata *meta,
+	uint16_t command)
+{
+	if (!peer || !meta)
+		return -EINVAL;
+
+	char host[256];
+	bool have_host = false;
+	uint16_t port = peer->stripe_port
+		? peer->stripe_port
+		: HIFS_STRIPE_TCP_DEFAULT_PORT;
+
+	if (peer->address[0]) {
+		uint16_t parsed_port = port;
+		if (parse_host_port_string(peer->address,
+					   host,
+					   sizeof(host),
+					   &parsed_port) == 0) {
+			if (parsed_port)
+				port = parsed_port;
+			have_host = true;
+		}
+	}
+	if (!have_host) {
+		const char *fallback = peer->address[0]
+			? peer->address
+			: "127.0.0.1";
+		snprintf(host, sizeof(host), "%s", fallback);
+	}
+
+	int fd = connect_to_host_port(host, port);
+	if (fd < 0)
+		return -EHOSTUNREACH;
+
+	struct hg_token_metadata_payload payload;
+	hg_token_metadata_payload_from_meta(&payload, meta);
+
+	struct hg_token_metadata_header hdr = {
+		.magic = htonl(HG_TOKEN_METADATA_MAGIC),
+		.version = htons(HG_TOKEN_METADATA_VERSION),
+		.command = htons(command),
+		.payload_len = htonl((uint32_t)sizeof(payload)),
+	};
+
+	if (write_full(fd, &hdr, sizeof(hdr)) != (ssize_t)sizeof(hdr) ||
+	    write_full(fd, &payload, sizeof(payload)) != (ssize_t)sizeof(payload)) {
+		close(fd);
+		return -EIO;
+	}
+
+	int wait_rc = hg_wait_for_fd(fd, POLLIN, HG_TOKEN_METADATA_TIMEOUT_MS);
+	if (wait_rc != 0) {
+		close(fd);
+		return wait_rc;
+	}
+
+	struct hg_token_metadata_response resp;
+	if (read_full(fd, &resp, sizeof(resp)) != (ssize_t)sizeof(resp)) {
+		close(fd);
+		return -EIO;
+	}
+	close(fd);
+
+	if (ntohl(resp.magic) != HG_TOKEN_METADATA_MAGIC)
+		return -EPROTO;
+
+	int32_t status = (int32_t)ntohl((uint32_t)resp.status);
+	return status;
+}
+
 int hg_ask_to_join_cluster(unsigned int storage_node_id, uint32_t join_flags)
 {
 	if (storage_node_id == 0)
@@ -1473,4 +1707,41 @@ int hg_acept_request_to_join_cluster(unsigned int storage_node_id,
 		}
 	}
 	return 0;
+}
+
+int hg_send_token_metadata_to_leader(
+	const struct hive_guard_token_metadata *meta)
+{
+	if (!meta)
+		return -EINVAL;
+
+	if (hg_guard_local_can_write())
+		return hg_handle_token_metadata_locally(
+			HG_TOKEN_METADATA_CMD_STORE,
+			meta);
+
+	size_t count = 0;
+	const struct hive_storage_node *nodes = hifs_get_storage_nodes(&count);
+	if ((!nodes || count == 0) && hifs_load_storage_nodes())
+		nodes = hifs_get_storage_nodes(&count);
+	if (!nodes || count == 0)
+		return -ENOENT;
+
+	int rc = -EHOSTUNREACH;
+	for (size_t i = 0; i < count; ++i) {
+		const struct hive_storage_node *peer = &nodes[i];
+		if (!peer->id || peer->id == storage_node_id)
+			continue;
+
+		int send_rc = hg_send_token_metadata_to_peer(
+			peer,
+			meta,
+			HG_TOKEN_METADATA_CMD_STORE);
+		if (send_rc == 0)
+			return 0;
+		if (send_rc == -EAGAIN)
+			continue;
+		rc = send_rc;
+	}
+	return rc;
 }

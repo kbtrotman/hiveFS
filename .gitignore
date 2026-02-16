@@ -17,7 +17,9 @@ lib64/
 share/
 include/
 node_modules/
+__pycache__/
 __pycache__
+migrations/
 _pycache_
 .codex
 _deps
