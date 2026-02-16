@@ -4,6 +4,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status as http_status
 from .bootstrap import call_bootstrap, BootstrapError
+from .newtoken import request_newtoken
 class BootstrapStatusView(APIView):
     authentication_classes = []  # allow pre-login if desired
     permission_classes = []      # tighten later
@@ -52,3 +53,15 @@ class AddForeignerView(APIView):
             return Response(r)
         except BootstrapError as e:
             return Response({"ok": False, "error": str(e)}, status=http_status.HTTP_502_BAD_GATEWAY)
+
+class NewTokenView(APIView):
+    authentication_classes = []
+    permission_classes = []
+ 
+    def post(self, request):
+        try:
+            r = request_newtoken(request.data)
+            return Response(r)
+        except BootstrapError as e:
+            return Response({"ok": False, "error": str(e)}, status=http_status.HTTP_502_BAD_GATEWAY)   
+    

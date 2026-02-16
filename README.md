@@ -224,7 +224,7 @@ Load distribution, metadata control, and state reconciliation are designed to pr
 
 **5. Storage as a Native Discipline**
 
-HiveFS treats emerging technologies (SSD) as they're designed to be seen, and not as the prior generation of technology was seen. Optimizing for the realities of the new architecture and discarding the limitations inherent to a retrofitting layer. It's designed from the lowest-level storage layer up.
+HiveFS treats emerging technologies (SSD) as they're designed to be seen, and not as the prior generation of technology was seen, optimizing for the realities of new architectures and discarding the retrofitting layers. It's designed from the lowest-level storage layer up.
 
 **6. Security as a Core Primitive**
 

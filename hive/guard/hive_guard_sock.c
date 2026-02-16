@@ -42,10 +42,28 @@ struct hive_guard_sock_cluster_join {
 	char join_token[GUARD_SOCK_TOKEN_LEN + 1];
 };
 
+#define GUARD_SOCK_TOKEN_ID_LEN 64
+#define GUARD_SOCK_TOKEN_TYPE_LEN 32
+
+struct guard_sock_token_request {
+	uint64_t cluster_id;
+	bool has_cluster_id;
+	char bootstrap_token[GUARD_SOCK_TOKEN_LEN + 1];
+	char first_boot_ts[GUARD_SOCK_TS_LEN];
+	char tid[GUARD_SOCK_TOKEN_ID_LEN];
+	char token_type[GUARD_SOCK_TOKEN_TYPE_LEN];
+	char host_mid[GUARD_SOCK_UID_LEN];
+	char issued_at[GUARD_SOCK_TS_LEN];
+	char expires_at[GUARD_SOCK_TS_LEN];
+	char approved_at[GUARD_SOCK_TS_LEN];
+	char approved_by[GUARD_SOCK_UID_LEN];
+};
+
 static void guard_sock_copy_field(char *dst, size_t dst_len,
 			  const char *value, const char *fallback);
 static void guard_sock_send_status_response(int fd);
-static void guard_sock_send_token_response(int fd, const char *token);
+static void guard_sock_send_token_response(int fd, const char *token,
+				      const struct hive_guard_token_metadata *meta);
 
 char g_status_message[64] = "IDLE";
 unsigned int g_status_percent = 0;
@@ -617,6 +635,57 @@ static bool guard_sock_parse_string_value(const char *json, const char *key,
 	return true;
 }
 
+static bool guard_sock_parse_string_or_null(const char *json, const char *key,
+					    char *out, size_t out_len,
+					    bool *has_value)
+{
+	size_t needle_len = 0;
+	const char *p = guard_sock_find_key(json, key, &needle_len);
+
+	if (!p || !out || !out_len)
+		return false;
+	p += needle_len;
+	p = guard_sock_skip_ws(p);
+	if (*p != ':')
+		return false;
+	p = guard_sock_skip_ws(p + 1);
+	if (strncmp(p, "null", 4) == 0) {
+		out[0] = '\0';
+		if (has_value)
+			*has_value = false;
+		return true;
+	}
+	if (*p != '"')
+		return false;
+	++p;
+	const char *start = p;
+	while (*p && *p != '"')
+		++p;
+	size_t len = (size_t)(p - start);
+	if (len >= out_len)
+		len = out_len - 1;
+	memcpy(out, start, len);
+	out[len] = '\0';
+	if (has_value)
+		*has_value = true;
+	return true;
+}
+
+static bool guard_sock_value_is_null(const char *json, const char *key)
+{
+	size_t needle_len = 0;
+	const char *p = guard_sock_find_key(json, key, &needle_len);
+
+	if (!p)
+		return false;
+	p += needle_len;
+	p = guard_sock_skip_ws(p);
+	if (*p != ':')
+		return false;
+	p = guard_sock_skip_ws(p + 1);
+	return strncmp(p, "null", 4) == 0;
+}
+
 static bool guard_sock_parse_u64_value(const char *json, const char *key,
 				       uint64_t *out)
 {
@@ -1056,16 +1125,79 @@ static void guard_sock_send_status_response(int fd)
 	hive_common_sock_respond(fd, "\n");
 }
 
-static void guard_sock_send_token_response(int fd, const char *token)
+static void guard_sock_send_token_response(int fd, const char *token,
+				      const struct hive_guard_token_metadata *meta)
 {
 	char token_buf[GUARD_SOCK_TOKEN_LEN * 6 + 3];
-	char resp[sizeof(token_buf) + 64];
-	const char *escaped = json_escape_string(token, token_buf,
-						    sizeof(token_buf));
+	char first_boot_buf[HIVE_GUARD_TOKEN_TS_LEN * 6 + 3];
+	char tid_buf[HIVE_GUARD_UUID_STR_LEN * 6 + 3];
+	char token_type_buf[HIVE_GUARD_TOKEN_TYPE_LEN * 6 + 3];
+	char host_uuid_buf[HIVE_GUARD_UID_LEN * 6 + 3];
+	char host_mid_buf[HIVE_GUARD_UID_LEN * 6 + 3];
+	char issued_at_buf[HIVE_GUARD_TOKEN_TS_LEN * 6 + 3];
+	char expires_at_buf[HIVE_GUARD_TOKEN_TS_LEN * 6 + 3];
+	char approved_at_buf[HIVE_GUARD_TOKEN_TS_LEN * 6 + 3];
+	char approved_by_buf[HIVE_USER_ID_LEN * 6 + 3];
+	char resp[1024];
+	const bool have_meta = meta != NULL;
+	const char *bootstrap = json_escape_string(token, token_buf,
+				       sizeof(token_buf));
+	const char *first_boot = json_escape_string(
+			have_meta ? meta->first_boot_ts : "",
+			first_boot_buf, sizeof(first_boot_buf));
+	const char *tid = json_escape_string(have_meta ? meta->tid : "",
+					  tid_buf, sizeof(tid_buf));
+	const char *token_type = json_escape_string(
+			have_meta ? meta->token_type : "",
+			token_type_buf, sizeof(token_type_buf));
+	const char *host_uuid = json_escape_string(
+			have_meta ? meta->host_uuid : "",
+			host_uuid_buf, sizeof(host_uuid_buf));
+	const char *host_mid = json_escape_string(
+			have_meta ? meta->host_mid : "",
+			host_mid_buf, sizeof(host_mid_buf));
+	const char *issued_at = json_escape_string(
+			have_meta ? meta->issued_at : "",
+			issued_at_buf, sizeof(issued_at_buf));
+	const char *expires_at = json_escape_string(
+			have_meta ? meta->expires_at : "",
+			expires_at_buf, sizeof(expires_at_buf));
+	const char *approved_at = json_escape_string(
+			have_meta ? meta->approved_at : "",
+			approved_at_buf, sizeof(approved_at_buf));
+	const char *approved_by = json_escape_string(
+			have_meta ? meta->approved_by : "",
+			approved_by_buf, sizeof(approved_by_buf));
+	uint64_t cluster_id = have_meta && meta->has_cluster_id ?
+		meta->cluster_id : 0;
+	const char *cluster_id_flag =
+		have_meta && meta->has_cluster_id ? "true" : "false";
 	int written = snprintf(resp, sizeof(resp),
 			       "{\"command\":\"newtoken\"," \
-			       "\"bootstrap_token\":\"%s\"}\n",
-			       escaped);
+			       "\"bootstrap_token\":\"%s\"," \
+			       "\"cluster_id\":%llu," \
+			       "\"has_cluster_id\":%s," \
+			       "\"first_boot_ts\":\"%s\"," \
+			       "\"tid\":\"%s\"," \
+			       "\"token_type\":\"%s\"," \
+			       "\"host_uuid\":\"%s\"," \
+			       "\"host_mid\":\"%s\"," \
+			       "\"issued_at\":\"%s\"," \
+			       "\"expires_at\":\"%s\"," \
+			       "\"approved_at\":\"%s\"," \
+			       "\"approved_by\":\"%s\"}\n",
+			       bootstrap,
+			       (unsigned long long)cluster_id,
+			       cluster_id_flag,
+			       first_boot,
+			       tid,
+			       token_type,
+			       host_uuid,
+			       host_mid,
+			       issued_at,
+			       expires_at,
+			       approved_at,
+			       approved_by);
 	if (written < 0 || (size_t)written >= sizeof(resp)) {
 		hive_common_sock_respond(fd,
 				       "ERR token response too large\n");
@@ -1076,12 +1208,15 @@ static void guard_sock_send_token_response(int fd, const char *token)
 
 static bool guard_sock_try_handle_token_request(int fd, const char *json)
 {
+	struct guard_sock_token_request token_req;
+	struct hive_guard_token_metadata meta;
 	char command[32];
 	uint64_t len_val = GUARD_SOCK_TOKEN_LEN;
 	bool has_len;
 	char token[GUARD_SOCK_TOKEN_LEN + 1];
 	size_t token_len = GUARD_SOCK_TOKEN_LEN;
 
+	memset(&token_req, 0, sizeof(token_req));
 	if (!guard_sock_parse_string_value(json, "command",
 					   command, sizeof(command)))
 		return false;
@@ -1089,6 +1224,111 @@ static bool guard_sock_try_handle_token_request(int fd, const char *json)
 	    strcmp(command, "node_token") != 0 &&
 	    strcmp(command, "generate_node_token") != 0)
 		return false;
+	token_req.has_cluster_id =
+		guard_sock_parse_u64_value(json, "cluster_id",
+					   &token_req.cluster_id);
+	if (!token_req.has_cluster_id &&
+	    !guard_sock_value_is_null(json, "cluster_id")) {
+		hive_common_sock_respond(
+			fd,
+			"ERR cluster_id missing or invalid\n");
+		return true;
+	}
+	if (!guard_sock_parse_string_or_null(json, "bootstrap_token",
+					     token_req.bootstrap_token,
+					     sizeof(token_req.bootstrap_token),
+					     NULL)) {
+		hive_common_sock_respond(fd,
+					 "ERR bootstrap_token missing\n");
+		return true;
+	}
+	if (!guard_sock_parse_string_or_null(json, "first_boot_ts",
+					     token_req.first_boot_ts,
+					     sizeof(token_req.first_boot_ts),
+					     NULL)) {
+		hive_common_sock_respond(fd,
+					 "ERR first_boot_ts missing\n");
+		return true;
+	}
+	if (!guard_sock_parse_string_or_null(json, "tid",
+					     token_req.tid,
+					     sizeof(token_req.tid),
+					     NULL)) {
+		hive_common_sock_respond(fd,
+					 "ERR tid missing\n");
+		return true;
+	}
+	bool has_token_type = false;
+	if (!guard_sock_parse_string_or_null(json, "t_type",
+					     token_req.token_type,
+					     sizeof(token_req.token_type),
+					     &has_token_type) ||
+	    !has_token_type || !token_req.token_type[0]) {
+		hive_common_sock_respond(fd,
+					 "ERR t_type must be provided\n");
+		return true;
+	}
+	bool has_host_mid = false;
+	if (!guard_sock_parse_string_or_null(json, "host_mid",
+					     token_req.host_mid,
+					     sizeof(token_req.host_mid),
+					     &has_host_mid) ||
+	    !has_host_mid || !token_req.host_mid[0]) {
+		hive_common_sock_respond(fd,
+					 "ERR host_mid must be provided\n");
+		return true;
+	}
+	if (!guard_sock_parse_string_or_null(json, "issued_at",
+					     token_req.issued_at,
+					     sizeof(token_req.issued_at),
+					     NULL)) {
+		hive_common_sock_respond(fd,
+					 "ERR issued_at missing\n");
+		return true;
+	}
+	if (!guard_sock_parse_string_or_null(json, "expires_at",
+					     token_req.expires_at,
+					     sizeof(token_req.expires_at),
+					     NULL)) {
+		hive_common_sock_respond(fd,
+					 "ERR expires_at missing\n");
+		return true;
+	}
+	if (!guard_sock_parse_string_or_null(json, "approved_at",
+					     token_req.approved_at,
+					     sizeof(token_req.approved_at),
+					     NULL)) {
+		hive_common_sock_respond(fd,
+					 "ERR approved_at missing\n");
+		return true;
+	}
+	if (!guard_sock_parse_string_or_null(json, "approved_by",
+					     token_req.approved_by,
+					     sizeof(token_req.approved_by),
+					     NULL)) {
+		hive_common_sock_respond(fd,
+					 "ERR approved_by missing\n");
+		return true;
+	}
+	memset(&meta, 0, sizeof(meta));
+	meta.cluster_id = token_req.cluster_id;
+	meta.has_cluster_id = token_req.has_cluster_id;
+	guard_sock_copy_field(meta.bootstrap_token, sizeof(meta.bootstrap_token),
+			      token_req.bootstrap_token, "");
+	guard_sock_copy_field(meta.first_boot_ts, sizeof(meta.first_boot_ts),
+			      token_req.first_boot_ts, "");
+	guard_sock_copy_field(meta.token_type, sizeof(meta.token_type),
+			      token_req.token_type, "");
+	guard_sock_copy_field(meta.host_mid, sizeof(meta.host_mid),
+			      token_req.host_mid, "");
+	guard_sock_copy_field(meta.issued_at, sizeof(meta.issued_at),
+			      token_req.issued_at, "");
+	guard_sock_copy_field(meta.expires_at, sizeof(meta.expires_at),
+			      token_req.expires_at, "");
+	guard_sock_copy_field(meta.approved_at, sizeof(meta.approved_at),
+			      token_req.approved_at, "");
+	guard_sock_copy_field(meta.approved_by, sizeof(meta.approved_by),
+			      token_req.approved_by, "");
 	has_len = guard_sock_parse_u64_value(json, "token_len", &len_val);
 	if (has_len) {
 		token_len = (size_t)len_val;
@@ -1099,12 +1339,12 @@ static bool guard_sock_try_handle_token_request(int fd, const char *json)
 			return true;
 		}
 	}
-	if (hive_guard_generate_node_token(token) != 0) {
+	if (hive_guard_generate_node_token(token, &meta) != 0) {
 		hive_common_sock_respond(fd,
 				"ERR token generation failed\n");
 		return true;
 	}
-	guard_sock_send_token_response(fd, token);
+	guard_sock_send_token_response(fd, token, &meta);
 	return true;
 }
 

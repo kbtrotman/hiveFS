@@ -31,6 +31,7 @@
 #include "hive_guard_sql.h"
 #include "hive_guard_kv.h"
 #include "hive_guard.h"
+#include "hive_guard_auth.h"
 #include "hive_guard_leasing.h"
 #include "hive_guard_sn_tcp.h"
 
@@ -88,6 +89,15 @@ static pthread_mutex_t g_session_mu = PTHREAD_MUTEX_INITIALIZER;
 static struct hg_guard_session_entry *g_sessions;
 static size_t g_session_count;
 static size_t g_session_capacity;
+
+struct hg_guard_token_entry {
+    struct RaftTokenCommand token;
+};
+
+static pthread_mutex_t g_token_mu = PTHREAD_MUTEX_INITIALIZER;
+static struct hg_guard_token_entry *g_tokens;
+static size_t g_token_count;
+static size_t g_token_capacity;
 
 static int raft_log_append_entry(const struct RaftCmd *cmd, uint64_t *out_idx);
 static int raft_log_commit_up_to(uint64_t idx);
@@ -184,6 +194,108 @@ static int hg_guard_session_cleanup(const struct RaftSessionCleanup *cleanup)
     }
     pthread_mutex_unlock(&g_session_mu);
     return 0;
+}
+
+static int hg_guard_token_store(const struct RaftTokenCommand *token)
+{
+    if (!token || token->token[0] == '\0')
+        return -EINVAL;
+
+    pthread_mutex_lock(&g_token_mu);
+    for (size_t i = 0; i < g_token_count; ++i) {
+        bool match = false;
+        if (token->token_id != 0 &&
+            g_tokens[i].token.token_id == token->token_id) {
+            match = true;
+        } else if (token->token[0] != '\0' &&
+                   strncmp(g_tokens[i].token.token,
+                           token->token,
+                           sizeof(token->token)) == 0) {
+            match = true;
+        }
+        if (match) {
+            g_tokens[i].token = *token;
+            pthread_mutex_unlock(&g_token_mu);
+            return 0;
+        }
+    }
+
+    if (g_token_count == g_token_capacity) {
+        size_t new_cap = g_token_capacity ? g_token_capacity * 2 : 16;
+        struct hg_guard_token_entry *new_entries =
+            realloc(g_tokens, new_cap * sizeof(*new_entries));
+        if (!new_entries) {
+            pthread_mutex_unlock(&g_token_mu);
+            return -ENOMEM;
+        }
+        g_tokens = new_entries;
+        g_token_capacity = new_cap;
+    }
+
+    g_tokens[g_token_count].token = *token;
+    g_token_count++;
+    pthread_mutex_unlock(&g_token_mu);
+    return 0;
+}
+
+static int hg_guard_token_expire(const struct RaftTokenExpireCommand *cmd)
+{
+    if (!cmd)
+        return -EINVAL;
+
+    pthread_mutex_lock(&g_token_mu);
+    size_t i = 0;
+    bool removed = false;
+    while (i < g_token_count) {
+        const struct RaftTokenCommand *entry = &g_tokens[i].token;
+        bool match = false;
+        if (cmd->token_id != 0 && entry->token_id == cmd->token_id)
+            match = true;
+        else if (cmd->token[0] != '\0' &&
+                 strncmp(entry->token, cmd->token, sizeof(cmd->token)) == 0)
+            match = true;
+
+        if (match) {
+            size_t last = g_token_count - 1;
+            if (i != last)
+                g_tokens[i] = g_tokens[last];
+            g_token_count--;
+            removed = true;
+            continue;
+        }
+        ++i;
+    }
+    pthread_mutex_unlock(&g_token_mu);
+    return removed ? 0 : -ENOENT;
+}
+
+static int hg_guard_refresh_tokens_from_sql(void)
+{
+    struct RaftTokenCommand *tokens = NULL;
+    size_t count = 0;
+    int rc = hg_sql_load_tokens(&tokens, &count);
+    if (rc != 0)
+        return rc;
+
+    pthread_mutex_lock(&g_token_mu);
+    free(g_tokens);
+    g_tokens = NULL;
+    g_token_count = 0;
+    g_token_capacity = 0;
+    pthread_mutex_unlock(&g_token_mu);
+
+    for (size_t i = 0; i < count; ++i) {
+        int store_rc = hg_guard_token_store(&tokens[i]);
+        if (store_rc != 0) {
+            hifs_warning("hg_guard_refresh_tokens_from_sql: store failed idx=%zu rc=%d",
+                         i, store_rc);
+            rc = store_rc;
+            break;
+        }
+    }
+
+    free(tokens);
+    return rc;
 }
 
 extern MYSQL *hg_sql_get_db(void);
@@ -395,8 +507,18 @@ static const char *hg_raft_op_name(uint8_t op_type)
     case HG_OP_DELETE_INODE: return "HG_OP_DELETE_INODE/HG_OP_ATOMIC_RENAME";
     case HG_OP_PUT_SESSION: return "HG_OP_PUT_SESSION";
     case HG_OP_SESSION_CLEANUP: return "HG_OP_SESSION_CLEANUP";
-    case HG_OP_SNAPSHOT_MARK: return "HG_OP_SNAPSHOT_MARK";
+    case HG_OP_SET_NODE_FULL_SYNC: return "HG_OP_SET_NODE_FULL_SYNC";
+    case HG_OP_SET_NODE_TO_LEARNER: return "HG_OP_SET_NODE_TO_LEARNER";
+    case HG_OP_PUT_JOIN_NODE: return "HG_OP_PUT_JOIN_NODE";
+    case HG_OP_PUT_NODE_DOWN: return "HG_OP_PUT_NODE_DOWN";
+    case HG_OP_CLUSTER_NODE_UP: return "HG_OP_CLUSTER_NODE_UP";
+    case HG_OP_CLUSTER_FORCE_HEARTBEAT: return "HG_OP_CLUSTER_FORCE_HEARTBEAT";
+    case HG_OP_CLUSTER_DOWN: return "HG_OP_CLUSTER_DOWN";
+    case HG_OP_CLUSTER_UP: return "HG_OP_CLUSTER_UP";
+    case HG_OP_CLUSTER_INIT: return "HG_OP_CLUSTER_INIT";
+    case HG_OP_CLUSTER_NODE_FENCE: return "HG_OP_CLUSTER_NODE_FENCE";
     case HG_OP_STORAGE_NODE_UPDATE: return "HG_OP_STORAGE_NODE_UPDATE";
+    case HG_OP_SNAPSHOT_MARK: return "HG_OP_SNAPSHOT_MARK";
     case HG_OP_LEASE_MAKE: return "HG_OP_LEASE_MAKE";
     case HG_OP_LEASE_RENEW: return "HG_OP_LEASE_RENEW";
     case HG_OP_LEASE_RELEASE: return "HG_OP_LEASE_RELEASE";
@@ -404,6 +526,8 @@ static const char *hg_raft_op_name(uint8_t op_type)
     case HG_OP_CACHE_CLEAR: return "HG_OP_CACHE_CLEAR";
     case HG_OP_CACHE_EVICTION: return "HG_OP_CACHE_EVICTION";
     case HG_OP_CACHE_PURGE: return "HG_OP_CACHE_PURGE";
+    case HG_OP_NEW_TOKEN: return "HG_OP_NEW_TOKEN";
+    case HG_OP_EXPIRE_TOKEN: return "HG_OP_EXPIRE_TOKEN";
     default:
         break;
     }
@@ -780,6 +904,23 @@ commitCb(struct uv_raft *raft,
     case HG_OP_LEASE_RELEASE:
         return hg_leasing_apply_lease_release(&cmd.u.lease);
 
+    case HG_OP_NEW_TOKEN: {
+        int rc = hg_sql_update_token_entry(&cmd.u.new_token.meta);
+        if (rc != 0)
+            return rc;
+
+        rc = hg_guard_refresh_tokens_from_sql();
+        if (rc != 0) {
+            hifs_warning("hg_guard_refresh_tokens_from_sql failed rc=%d, using local token cache",
+                         rc);
+            int store_rc = hg_guard_token_store(&cmd.u.new_token);
+            return store_rc != 0 ? store_rc : rc;
+        }
+        return 0;
+    }
+
+    case HG_OP_EXPIRE_TOKEN:
+        return hg_guard_token_expire(&cmd.u.expire_token);
 
     case HG_OP_CACHE_CHECK:
 
@@ -1176,4 +1317,90 @@ int hg_prepare_snapshot_for_new_node(const struct hg_raft_config *cfg,
     return tcp_send_file_to_new_node(out_src->source_addr,
                                      out_src->local_path,
                                      new_node_addr);
+}
+
+static uint64_t
+hg_token_metadata_make_id(const struct hive_guard_token_metadata *meta)
+{
+    if (!meta)
+        return 0;
+
+    const struct {
+        const char *value;
+        size_t max_len;
+    } fields[] = {
+        { meta->tid, sizeof(meta->tid) },
+        { meta->bootstrap_token, sizeof(meta->bootstrap_token) },
+        { meta->host_mid, sizeof(meta->host_mid) },
+        { meta->host_uuid, sizeof(meta->host_uuid) },
+    };
+
+    for (size_t i = 0; i < sizeof(fields) / sizeof(fields[0]); ++i) {
+        const char *val = fields[i].value;
+        if (!val || val[0] == '\0')
+            continue;
+        uint64_t hash = 1469598103934665603ULL;
+        size_t len = strnlen(val, fields[i].max_len);
+        for (size_t j = 0; j < len; ++j) {
+            hash ^= (uint64_t)(unsigned char)val[j];
+            hash *= 1099511628211ULL;
+        }
+        if (hash != 0)
+            return hash;
+    }
+    return 0;
+}
+
+static uint32_t hg_token_metadata_type_code(const char *type)
+{
+    if (!type || type[0] == '\0')
+        return 0;
+
+    uint32_t hash = 2166136261u;
+    size_t len = strnlen(type, HIVE_GUARD_TOKEN_TYPE_LEN);
+    for (size_t i = 0; i < len; ++i) {
+        hash ^= (uint32_t)(unsigned char)type[i];
+        hash *= 16777619u;
+    }
+    return hash;
+}
+
+static const char *
+hg_token_metadata_pick_uid(const struct hive_guard_token_metadata *meta)
+{
+    if (!meta)
+        return NULL;
+    if (meta->host_mid[0] != '\0')
+        return meta->host_mid;
+    if (meta->host_uuid[0] != '\0')
+        return meta->host_uuid;
+    return NULL;
+}
+
+int hg_raft_call_update_token(const struct hive_guard_token_metadata *meta)
+{
+    if (!meta || meta->bootstrap_token[0] == '\0')
+        return -EINVAL;
+    if (!hg_guard_local_can_write())
+        return -EAGAIN;
+
+    struct RaftCmd entry = {0};
+    entry.op_type = HG_OP_NEW_TOKEN;
+    struct RaftTokenCommand *dst = &entry.u.new_token;
+
+    dst->token_id = hg_token_metadata_make_id(meta);
+    dst->expires_ns = 0;
+    dst->token_type = hg_token_metadata_type_code(meta->token_type);
+    dst->flags = meta->has_cluster_id ? 1u : 0u;
+    hg_raft_copy_str(dst->machine_uid,
+                     sizeof(dst->machine_uid),
+                     hg_token_metadata_pick_uid(meta));
+    hg_raft_copy_str(dst->token, sizeof(dst->token), meta->bootstrap_token);
+    dst->meta = *meta;
+
+    uint64_t idx = 0;
+    int rc = raft_log_append_entry(&entry, &idx);
+    if (rc != 0)
+        return rc;
+    return raft_log_commit_up_to(idx);
 }

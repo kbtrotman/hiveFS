@@ -28,6 +28,7 @@
 #include "hive_guard_kv.h"
 #include "hive_guard_erasure_code.h"
 #include "hive_guard_sn_tcp.h"
+#include "hive_guard_raft.h"
 #include "../common/hive_common_sql.h"
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
@@ -2130,4 +2131,285 @@ int hg_sql_snapshot_restore_artifact(const char *snapshot_dir,
     strncpy(out_path, dump_path, out_path_sz - 1);
     out_path[out_path_sz - 1] = '\0';
     return 0;
+}
+
+static void hg_sql_copy_field(char *dst, size_t dst_len, const char *src)
+{
+	if (!dst || dst_len == 0) {
+		return;
+	}
+	if (!src) {
+		dst[0] = '\0';
+		return;
+	}
+	strncpy(dst, src, dst_len - 1);
+	dst[dst_len - 1] = '\0';
+}
+
+static void hg_sql_normalize_timestamp(const char *src, char *dst, size_t dst_len)
+{
+	if (!dst || dst_len == 0) {
+		return;
+	}
+	if (!src || !*src) {
+		dst[0] = '\0';
+		return;
+	}
+
+	size_t len = strnlen(src, HIVE_GUARD_TOKEN_TS_LEN);
+	size_t out = 0;
+	for (size_t i = 0; i < len && out + 1 < dst_len; ++i) {
+		char c = src[i];
+		if (c == 'T')
+			c = ' ';
+		else if (c == 'Z')
+			break;
+		dst[out++] = c;
+	}
+	dst[out] = '\0';
+}
+
+static void hg_sql_escape_field(MYSQL *db,
+				char *dst,
+				size_t dst_len,
+				const char *src,
+				size_t max_src_len)
+{
+	if (!dst || dst_len == 0) {
+		return;
+	}
+	if (!db) {
+		dst[0] = '\0';
+		return;
+	}
+	if (!src)
+		src = "";
+
+	size_t len = strnlen(src, max_src_len);
+	if (dst_len <= 1) {
+		dst[0] = '\0';
+		return;
+	}
+
+	size_t max_copy = (dst_len - 1) / 2;
+	if (len > max_copy)
+		len = max_copy;
+
+	mysql_real_escape_string(db, dst, src, (unsigned long)len);
+}
+
+static uint32_t hg_sql_token_type_code(const char *type)
+{
+	if (!type || !type[0])
+		return 0;
+
+	uint32_t hash = 2166136261u;
+	size_t len = strnlen(type, HIVE_GUARD_TOKEN_TYPE_LEN);
+	for (size_t i = 0; i < len; ++i) {
+		hash ^= (uint32_t)(unsigned char)type[i];
+		hash *= 16777619u;
+	}
+	return hash;
+}
+
+static uint64_t
+hg_sql_token_metadata_make_id(const struct hive_guard_token_metadata *meta)
+{
+	if (!meta)
+		return 0;
+
+	const struct {
+		const char *value;
+		size_t max_len;
+	} fields[] = {
+		{ meta->tid, sizeof(meta->tid) },
+		{ meta->bootstrap_token, sizeof(meta->bootstrap_token) },
+		{ meta->host_mid, sizeof(meta->host_mid) },
+		{ meta->host_uuid, sizeof(meta->host_uuid) },
+	};
+
+	for (size_t i = 0; i < sizeof(fields) / sizeof(fields[0]); ++i) {
+		const char *val = fields[i].value;
+		if (!val || val[0] == '\0')
+			continue;
+
+		uint64_t hash = 1469598103934665603ULL;
+		size_t len = strnlen(val, fields[i].max_len);
+		for (size_t j = 0; j < len; ++j) {
+			hash ^= (uint64_t)(unsigned char)val[j];
+			hash *= 1099511628211ULL;
+		}
+		if (hash != 0)
+			return hash;
+	}
+	return 0;
+}
+
+int hg_sql_update_token_entry(const struct hive_guard_token_metadata *meta)
+{
+	if (!meta || meta->bootstrap_token[0] == '\0')
+		return -EINVAL;
+
+	MYSQL *db = hg_sql_get_db();
+	if (!db)
+		return -EIO;
+
+	const char *machine_uid = meta->host_mid[0] ? meta->host_mid : meta->host_uuid;
+
+	char issued_norm[HIVE_GUARD_TOKEN_TS_LEN];
+	char expires_norm[HIVE_GUARD_TOKEN_TS_LEN];
+	char approved_norm[HIVE_GUARD_TOKEN_TS_LEN];
+	hg_sql_normalize_timestamp(meta->issued_at, issued_norm, sizeof(issued_norm));
+	hg_sql_normalize_timestamp(meta->expires_at, expires_norm, sizeof(expires_norm));
+	hg_sql_normalize_timestamp(meta->approved_at, approved_norm, sizeof(approved_norm));
+
+	char token_sql[HIVE_GUARD_BOOTSTRAP_TOKEN_LEN * 2 + 1];
+	char type_sql[HIVE_GUARD_TOKEN_TYPE_LEN * 2 + 1];
+	char machine_sql[HIVE_GUARD_UID_LEN * 2 + 1];
+	char issued_sql[HIVE_GUARD_TOKEN_TS_LEN * 2 + 1];
+	char expires_sql[HIVE_GUARD_TOKEN_TS_LEN * 2 + 1];
+	char approved_sql[HIVE_GUARD_TOKEN_TS_LEN * 2 + 1];
+	char approved_by_sql[HIVE_USER_ID_LEN * 2 + 1];
+
+	hg_sql_escape_field(db, token_sql, sizeof(token_sql),
+			    meta->bootstrap_token, sizeof(meta->bootstrap_token));
+	hg_sql_escape_field(db, type_sql, sizeof(type_sql),
+			    meta->token_type, sizeof(meta->token_type));
+	hg_sql_escape_field(db, machine_sql, sizeof(machine_sql),
+			    machine_uid, HIVE_GUARD_UID_LEN);
+	hg_sql_escape_field(db, issued_sql, sizeof(issued_sql),
+			    issued_norm, sizeof(issued_norm));
+	hg_sql_escape_field(db, expires_sql, sizeof(expires_sql),
+			    expires_norm, sizeof(expires_norm));
+	hg_sql_escape_field(db, approved_sql, sizeof(approved_sql),
+			    approved_norm, sizeof(approved_norm));
+	hg_sql_escape_field(db, approved_by_sql, sizeof(approved_by_sql),
+			    meta->approved_by, sizeof(meta->approved_by));
+
+	char sql[1024];
+	int written = snprintf(sql, sizeof(sql),
+			       "INSERT INTO host_tokens "
+			       "(token, t_type, machine_uid, issued_at, expires_at, approved_at, approved_by) "
+			       "VALUES ('%s','%s','%s','%s','%s','%s','%s') "
+			       "ON DUPLICATE KEY UPDATE "
+			       "t_type=VALUES(t_type), machine_uid=VALUES(machine_uid), "
+			       "issued_at=VALUES(issued_at), expires_at=VALUES(expires_at), "
+			       "approved_at=VALUES(approved_at), approved_by=VALUES(approved_by), "
+			       "revoked=0, expired=0, used=0",
+			       token_sql,
+			       type_sql,
+			       machine_sql,
+			       issued_sql,
+			       expires_sql,
+			       approved_sql,
+			       approved_by_sql);
+	if (written < 0 || (size_t)written >= sizeof(sql))
+		return -ENOSPC;
+
+	if (mysql_query(db, sql) != 0) {
+		hifs_warning("hg_sql_update_token_entry: token upsert failed: %s",
+			     mysql_error(db));
+		return -EIO;
+	}
+
+	return 0;
+}
+
+int hg_sql_load_tokens(struct RaftTokenCommand **out_tokens, size_t *out_count)
+{
+	if (!out_tokens || !out_count)
+		return -EINVAL;
+
+	*out_tokens = NULL;
+	*out_count = 0;
+
+	const char *sql_query =
+		"SELECT token, t_type, machine_uid, "
+		"DATE_FORMAT(issued_at, '%Y-%m-%dT%H:%i:%sZ'), "
+		"DATE_FORMAT(expires_at, '%Y-%m-%dT%H:%i:%sZ'), "
+		"DATE_FORMAT(approved_at, '%Y-%m-%dT%H:%i:%sZ'), "
+		"approved_by, "
+		"COALESCE(UNIX_TIMESTAMP(expires_at), 0) "
+		"FROM host_tokens "
+		"WHERE revoked=0 AND expired=0";
+
+	MYSQL_RES *res = hifs_execute_sql(sql_query);
+	if (!res)
+		return -EIO;
+
+	my_ulonglong row_count = mysql_num_rows(res);
+	if (row_count == 0) {
+		mysql_free_result(res);
+		return 0;
+	}
+
+	if (row_count > SIZE_MAX)
+		row_count = SIZE_MAX;
+
+	struct RaftTokenCommand *tokens =
+		calloc((size_t)row_count, sizeof(*tokens));
+	if (!tokens) {
+		mysql_free_result(res);
+		return -ENOMEM;
+	}
+
+	MYSQL_ROW row;
+	size_t idx = 0;
+	while ((row = mysql_fetch_row(res)) != NULL && idx < (size_t)row_count) {
+		struct RaftTokenCommand *entry = &tokens[idx];
+		memset(entry, 0, sizeof(*entry));
+
+		struct hive_guard_token_metadata *meta = &entry->meta;
+		meta->cluster_id = 0;
+		meta->has_cluster_id = false;
+
+		hg_sql_copy_field(meta->bootstrap_token,
+				  sizeof(meta->bootstrap_token),
+				  row[0]);
+		hg_sql_copy_field(meta->token_type,
+				  sizeof(meta->token_type),
+				  row[1]);
+		hg_sql_copy_field(meta->host_mid,
+				  sizeof(meta->host_mid),
+				  row[2]);
+		hg_sql_copy_field(entry->machine_uid,
+				  sizeof(entry->machine_uid),
+				  row[2]);
+		hg_sql_copy_field(meta->issued_at,
+				  sizeof(meta->issued_at),
+				  row[3]);
+		hg_sql_copy_field(meta->expires_at,
+				  sizeof(meta->expires_at),
+				  row[4]);
+		hg_sql_copy_field(meta->approved_at,
+				  sizeof(meta->approved_at),
+				  row[5]);
+		hg_sql_copy_field(meta->approved_by,
+				  sizeof(meta->approved_by),
+				  row[6]);
+		hg_sql_copy_field(entry->token,
+				  sizeof(entry->token),
+				  row[0]);
+
+		entry->token_type = hg_sql_token_type_code(meta->token_type);
+		if (row[7] && row[7][0]) {
+			uint64_t secs = strtoull(row[7], NULL, 10);
+			entry->expires_ns = secs * 1000000000ULL;
+		} else {
+			entry->expires_ns = 0;
+		}
+
+		entry->token_id = hg_sql_token_metadata_make_id(meta);
+		++idx;
+	}
+	mysql_free_result(res);
+
+	if (idx == 0) {
+		free(tokens);
+		return 0;
+	}
+
+	*out_tokens = tokens;
+	*out_count = idx;
+	return 0;
 }

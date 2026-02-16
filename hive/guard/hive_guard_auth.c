@@ -22,6 +22,7 @@
 #include "hive_guard_auth.h"
 #include "hive_guard_sql.h"
 #include "hive_guard_sock.h"
+#include "hive_guard_sn_tcp.h"
 #include "../common/hive_common.h"
 #include "../../hifs_shared_defs.h"
 
@@ -125,12 +126,123 @@ static size_t base64url_encode_nopad(const uint8_t *in, size_t in_len, char *out
   return o;
 }
 
+static struct hive_guard_token_metadata g_last_token_meta;
+
+static int hive_guard_uuid_v4(char out[HIVE_GUARD_UUID_STR_LEN]) {
+  if (!out)
+    return -1;
+
+  int fd = open("/proc/sys/kernel/random/uuid", O_RDONLY | O_CLOEXEC);
+  if (fd < 0)
+    return -1;
+
+  size_t off = 0;
+  while (off < HIVE_GUARD_UUID_STR_LEN - 1) {
+    ssize_t r = read(fd, out + off, (HIVE_GUARD_UUID_STR_LEN - 1) - off);
+    if (r < 0) {
+      if (errno == EINTR)
+        continue;
+      close(fd);
+      return -1;
+    }
+    if (r == 0)
+      break;
+    off += (size_t)r;
+  }
+  close(fd);
+
+  while (off > 0 && (out[off - 1] == '\n' || out[off - 1] == '\r'))
+    --off;
+
+  if (off != HIVE_GUARD_UUID_STR_LEN - 1)
+    return -1;
+
+  out[off] = '\0';
+  return 0;
+}
+
+static int hive_guard_format_iso8601(time_t when,
+                                     char out[HIVE_GUARD_TOKEN_TS_LEN]) {
+  struct tm tm_utc;
+
+  if (!out)
+    return -1;
+  if (!gmtime_r(&when, &tm_utc))
+    return -1;
+  int written = snprintf(out,
+                         HIVE_GUARD_TOKEN_TS_LEN,
+                         "%04d-%02d-%02dT%02d:%02d:%02dZ",
+                         tm_utc.tm_year + 1900,
+                         tm_utc.tm_mon + 1,
+                         tm_utc.tm_mday,
+                         tm_utc.tm_hour,
+                         tm_utc.tm_min,
+                         tm_utc.tm_sec);
+  return (written > 0 &&
+          (size_t)written < HIVE_GUARD_TOKEN_TS_LEN) ? 0 : -1;
+}
+
+int hive_guard_generate_token_metadata(struct hive_guard_token_metadata *meta) {
+  struct hive_guard_token_metadata local;
+  if (meta)
+    local = *meta;
+  else
+    memset(&local, 0, sizeof(local));
+  struct timespec ts;
+
+  if (hive_guard_uuid_v4(local.tid) != 0)
+    return -1;
+  if (local.host_uuid[0] == '\0' &&
+      hive_guard_uuid_v4(local.host_uuid) != 0)
+    return -1;
+  if (clock_gettime(CLOCK_REALTIME, &ts) != 0) {
+    time_t fallback = time(NULL);
+    if (fallback == (time_t)-1)
+      return -1;
+    ts.tv_sec = fallback;
+    ts.tv_nsec = 0;
+  }
+
+  time_t now = (time_t)ts.tv_sec;
+  if (local.issued_at[0] == '\0') {
+    if (hive_guard_format_iso8601(now, local.issued_at) != 0)
+      return -1;
+  }
+  if (local.approved_at[0] == '\0')
+    memcpy(local.approved_at, local.issued_at, sizeof(local.approved_at));
+
+  if (local.expires_at[0] == '\0') {
+    int64_t now_sec = (int64_t)ts.tv_sec;
+    int64_t expires_sec = now_sec + (int64_t)HIVE_GUARD_TOKEN_EXPIRY_SECS;
+    if (expires_sec < now_sec)
+      expires_sec = now_sec;
+    time_t expires = (time_t)expires_sec;
+    if (hive_guard_format_iso8601(expires, local.expires_at) != 0)
+      return -1;
+  }
+
+  g_last_token_meta = local;
+  if (meta)
+    *meta = local;
+
+  return 0;
+}
+
+const struct hive_guard_token_metadata *
+hive_guard_get_last_token_metadata(void) {
+  return g_last_token_meta.tid[0] ? &g_last_token_meta : NULL;
+}
+
 // Public API: generate a 256-bit token as base64url (no padding).
 // out must be at least 44 bytes:
 // - 32 bytes -> base64 length ceil(32/3)*4 = 44, minus 1 padding char => 43
 // - plus NUL => 44
-int hive_guard_generate_node_token(char out[44]) {
+int hive_guard_generate_node_token(char out[44],
+                                   struct hive_guard_token_metadata *meta) {
   uint8_t raw[32];
+
+  if (hive_guard_generate_token_metadata(meta) != 0)
+    return -1;
 
   if (os_csprng_bytes(raw, sizeof(raw)) != 0) {
     secure_bzero(raw, sizeof(raw));
@@ -146,6 +258,24 @@ int hive_guard_generate_node_token(char out[44]) {
     return -1;
   }
 
+  if (meta) {
+    size_t copy = n;
+    if (copy >= sizeof(meta->bootstrap_token))
+      copy = sizeof(meta->bootstrap_token) - 1;
+    memcpy(meta->bootstrap_token, out, copy);
+    meta->bootstrap_token[copy] = '\0';
+    g_last_token_meta = *meta;
+  }
+
+  const struct hive_guard_token_metadata *meta_to_send =
+      meta ? meta : hive_guard_get_last_token_metadata();
+  if (meta_to_send &&
+      hg_send_token_metadata_to_leader(meta_to_send) != 0) {
+    secure_bzero(raw, sizeof(raw));
+    if (out)
+      secure_bzero(out, 44);
+    return -1;
+  }
   secure_bzero(raw, sizeof(raw));
   return 0;
 }

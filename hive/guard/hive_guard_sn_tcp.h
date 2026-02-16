@@ -19,6 +19,11 @@
 
 #include "hive_guard.h"
 
+#ifndef HIVE_GUARD_TOKEN_METADATA_FWD
+#define HIVE_GUARD_TOKEN_METADATA_FWD
+struct hive_guard_token_metadata;
+#endif
+
 #define HIFS_STRIPE_TCP_DEFAULT_PORT 17071
 
 typedef int (*hifs_sn_recv_cb)(uint32_t storage_node_id,
@@ -45,6 +50,8 @@ int hifs_sn_tcp_fetch(uint32_t storage_node_id,
 int tcp_send_file_to_new_node(const char *source_addr,
                               const char *local_path,
                               const char *new_node_addr);
+int hg_send_token_metadata_to_leader(
+        const struct hive_guard_token_metadata *meta);
 
 #include <stdlib.h>
 

@@ -10,6 +10,9 @@
 
 #include "hive_guard.h"
 #include "../common/hive_common_sql.h"
+#include "hive_guard_auth.h"
+
+struct RaftTokenCommand;
 
 /***********************
  * Database  Definitions
@@ -228,3 +231,6 @@ int hg_sql_snapshot_restore_artifact(const char *snapshot_dir,
                                    uint64_t snap_index,
                                    char *out_path,
                                    size_t out_path_sz);
+
+int hg_sql_update_token_entry(const struct hive_guard_token_metadata *meta);
+int hg_sql_load_tokens(struct RaftTokenCommand **out_tokens, size_t *out_count);

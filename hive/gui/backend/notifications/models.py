@@ -112,7 +112,7 @@ class Notification(models.Model):
         indexes = [
             models.Index(
                 fields=["schedule", "status"],
-                name="idx_notification_schedule_status",
+                name="idx_notif_sched_status",
             ),
             models.Index(fields=["notification_type"], name="idx_notification_type"),
             models.Index(fields=["audit_entry"], name="idx_notification_audit"),

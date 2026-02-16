@@ -41,6 +41,21 @@
 #define HIVE_METADATA_MIN_BYTES (200ULL * BYTES_PER_GIB)
 #define HIVE_GUARD_KV_MIN_BYTES (200ULL * BYTES_PER_GIB)
 #define HIVE_LOG_MIN_BYTES (50ULL * BYTES_PER_GIB)
+#define NEWTOKEN_TOKEN_LEN 43
+
+static const char *const g_newtoken_required_fields[] = {
+	"\"command\"",
+	"\"cluster_id\"",
+	"\"bootstrap_token\"",
+	"\"first_boot_ts\"",
+	"\"tid\"",
+	"\"t_type\"",
+	"\"host_mid\"",
+	"\"issued_at\"",
+	"\"expires_at\"",
+	"\"approved_at\"",
+	"\"approved_by\"",
+};
 
 struct hive_bootstrap_request {
 	char command[32];
@@ -171,6 +186,10 @@ static bool parse_json_string_value(const char *json, const char *key,
 				    char *out, size_t out_len);
 static bool parse_json_u64_value(const char *json, const char *key,
 				 uint64_t *out);
+static bool send_guard_request_with_reply(const char *json_payload,
+					  char *response, size_t response_sz);
+static bool try_handle_newtoken_request(int fd, const char *json_payload);
+static bool validate_newtoken_request(const char *json_payload);
 
 enum bootstrap_request_type g_pending_request_type =
 	BOOTSTRAP_REQ_UNKNOWN;
@@ -433,6 +452,94 @@ static bool forward_request_to_guard(const char *json_payload)
 	}
 	close(fd);
 	return ok;
+}
+
+static bool validate_newtoken_request(const char *json_payload)
+{
+	size_t len;
+	const char *start;
+	const char *end;
+
+	if (!json_payload)
+		return false;
+	len = strlen(json_payload);
+	if (len == 0 || len >= HIVE_BOOTSTRAP_MSG_MAX)
+		return false;
+	start = json_payload;
+	while (*start && isspace((unsigned char)*start))
+		++start;
+	if (*start != '{')
+		return false;
+	end = json_payload + len;
+	while (end > start && isspace((unsigned char)*(end - 1)))
+		--end;
+	if (end <= start || *(end - 1) != '}')
+		return false;
+	for (size_t i = 0; i < ARRAY_SIZE(g_newtoken_required_fields); ++i) {
+		if (!strstr(json_payload, g_newtoken_required_fields[i]))
+			return false;
+	}
+	return true;
+}
+
+static bool parse_guard_newtoken_response(const char *response,
+					  char *token, size_t token_sz)
+{
+	char command[32];
+
+	if (!response || !token || token_sz <= NEWTOKEN_TOKEN_LEN)
+		return false;
+	if (!parse_json_string_value(response, "command",
+				     command, sizeof(command)))
+		return false;
+	if (strcmp(command, "newtoken") != 0)
+		return false;
+	if (!parse_json_string_value(response, "bootstrap_token",
+				     token, token_sz))
+		return false;
+	return strlen(token) == NEWTOKEN_TOKEN_LEN;
+}
+
+static bool try_handle_newtoken_request(int fd, const char *json_payload)
+{
+	char command[32];
+	char guard_resp[256];
+	char token[NEWTOKEN_TOKEN_LEN + 1];
+	char reply[128];
+
+	if (!json_payload)
+		return false;
+	if (!parse_json_string_value(json_payload, "command",
+				     command, sizeof(command)))
+		return false;
+	if (strcmp(command, "newtoken") != 0)
+		return false;
+	if (!validate_newtoken_request(json_payload)) {
+		hive_common_sock_respond(fd, "ERR invalid newtoken payload\n");
+		return true;
+	}
+	if (!send_guard_request_with_reply(json_payload,
+					   guard_resp,
+					   sizeof(guard_resp))) {
+		hive_common_sock_respond(fd, "ERR hive_guard unavailable\n");
+		return true;
+	}
+	if (!parse_guard_newtoken_response(guard_resp,
+					   token, sizeof(token))) {
+		hive_common_sock_respond(fd, "ERR invalid newtoken response\n");
+		return true;
+	}
+	int written = snprintf(reply, sizeof(reply),
+			       "{\"command\":\"newtoken\","
+			       "\"bootstrap_token\":\"%s\"}\n",
+			       token);
+	if (written < 0 || (size_t)written >= sizeof(reply)) {
+		hive_common_sock_respond(fd,
+					 "ERR newtoken reply too large\n");
+		return true;
+	}
+	hive_common_sock_respond(fd, reply);
+	return true;
 }
 
 static bool send_guard_request_with_reply(const char *json_payload,
@@ -1540,6 +1647,8 @@ static bool process_client(int fd)
 	}
 	fprintf(stdout, "bootstrap_request: %s\n", buf);
 	fflush(stdout);
+	if (try_handle_newtoken_request(fd, buf))
+		return true;
 	if (!parse_bootstrap_request(buf, &req)) {
 		hive_common_sock_respond(fd, "ERR invalid JSON\n");
 		return false;
