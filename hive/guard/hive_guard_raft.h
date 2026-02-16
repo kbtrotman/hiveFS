@@ -261,6 +261,8 @@ struct RaftJoinSec {
     uint64_t min_nodes_req;
     uint32_t flags;
     uint32_t reserved;
+    char     cluster_name[GUARD_CLUSTER_NAME_LEN];
+    char     cluster_desc[GUARD_CLUSTER_DESC_LEN];
     char     cluster_state[GUARD_SOCK_STATE_LEN];
     char     database_state[GUARD_SOCK_STATE_LEN];
     char     kv_state[GUARD_SOCK_STATE_LEN];
@@ -277,6 +279,7 @@ struct RaftJoinSec {
     char     cduid[GUARD_SOCK_UID_LEN];
     char     machine_uid[GUARD_SOCK_UID_LEN];
     char     action[GUARD_SOCK_STATUS_LEN];
+    char     user_id[GUARD_SOCK_UID_LEN];
     int32_t  raft_replay;
     int32_t  reserved_i32;
 };

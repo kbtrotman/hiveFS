@@ -20,6 +20,8 @@ PAYLOAD_TEMPLATE = {
     "cluster_id": None,
     "cluster_state": UNCONFIGURED_STATE,
     "node_state": UNCONFIGURED_STATE,
+    "cluster_name": None,
+    "cluster_desc": None,
     "database_state": "configured",
     "kv_state": "configured",
     "cont1_state": "configured",
@@ -39,6 +41,7 @@ PAYLOAD_TEMPLATE = {
     "stage_of_config": 0,
     "ready_4_web_conf": None,
     "pub_key": None,
+    "user_id": None,
     "command": "status",
     "ok": True,
 }

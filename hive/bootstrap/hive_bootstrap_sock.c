@@ -66,6 +66,7 @@ struct hive_bootstrap_request {
 	char cluster_desc[201];
 	char node_name[100];
 	char join_token[201];
+	char user_id[64];
 	uint16_t min_nodes_req;
 	char raw_payload[HIVE_BOOTSTRAP_MSG_MAX];
 };
@@ -640,6 +641,7 @@ static bool build_cluster_join_payload(const struct hive_bootstrap_request *req,
 	char cluster_desc_buf[512];
 	char node_name_buf[160];
 	char join_token_buf[256];
+	char user_id_buf[80];
 	char raw_payload_buf[HIVE_BOOTSTRAP_MSG_MAX * 2];
 	const char *cluster_name_json =
 		json_string_or_null(req->cluster_name, cluster_name_buf,
@@ -653,6 +655,9 @@ static bool build_cluster_join_payload(const struct hive_bootstrap_request *req,
 	const char *join_token_json =
 		json_string_or_null(req->join_token, join_token_buf,
 			    sizeof(join_token_buf));
+	const char *user_id_json =
+		json_string_or_null(req->user_id, user_id_buf,
+			    sizeof(user_id_buf));
 	const char *raw_payload_json =
 		json_string_or_null(req->raw_payload, raw_payload_buf,
 			    sizeof(raw_payload_buf));
@@ -676,11 +681,13 @@ static bool build_cluster_join_payload(const struct hive_bootstrap_request *req,
 		"\"cluster_desc\":%s,"
 		"\"node_name\":%s,"
 		"\"join_token\":%s,"
+		"\"user_id\":%s,"
 		"\"raw_payload\":%s}",
 		cluster_name_json,
 		cluster_desc_json,
 		node_name_json,
 		join_token_json,
+		user_id_json,
 		raw_payload_json);
 	return n >= 0 && (size_t)n < buf_sz - off;
 }
@@ -835,7 +842,7 @@ static bool request_guard_status(const struct hive_bootstrap_request *req)
 	return apply_guard_status_response(response);
 }
 
-static bool build_local_node_join_payload(char *buf, size_t buf_sz)
+static bool build_local_node_join_payload(char *buf, size_t buf_sz, const char *user_id)
 {
 	if (!buf || buf_sz == 0)
 		return false;
@@ -855,6 +862,7 @@ static bool build_local_node_join_payload(char *buf, size_t buf_sz)
 	char hive_version_buf[32];
 	char patch_value_buf[8];
 	char patch_json_buf[16];
+	char user_id_buf[80];
 	char cduid_value[UUID_BUF_LEN];
 	char cduid_json_buf[UUID_BUF_LEN + 4];
 
@@ -922,6 +930,9 @@ static bool build_local_node_join_payload(char *buf, size_t buf_sz)
 	const char *patch_level_json =
 		json_string_or_null(patch_value_buf,
 				    patch_json_buf, sizeof(patch_json_buf));
+	const char *user_id_json =
+		json_string_or_null(user_id,
+				    user_id_buf, sizeof(user_id_buf));
 	size_t off = 0;
 
 	if (!build_join_payload_prefix(buf, buf_sz, "node_join",
@@ -944,7 +955,8 @@ static bool build_local_node_join_payload(char *buf, size_t buf_sz)
 		"\"config_progress\":%s,"
 		"\"config_msg\":%s,"
 		"\"hive_version\":%s,"
-		"\"hive_patch_level\":%s}",
+		"\"hive_patch_level\":%s,"
+		"\"user_id\":%s}",
 		database_state_json,
 		kv_state_json,
 		cont1_state_json,
@@ -956,16 +968,19 @@ static bool build_local_node_join_payload(char *buf, size_t buf_sz)
 		progress_json,
 		message_json,
 		hive_version_json,
-		patch_level_json);
+		patch_level_json,
+		user_id_json);
 	return n >= 0 && (size_t)n < buf_sz - off;
 }
 
-static bool forward_node_join_request(void)
+static bool forward_node_join_request(const struct hive_bootstrap_request *req)
 {
 	char payload[HIVE_BOOTSTRAP_MSG_MAX * 2];
 	char response[HIVE_BOOTSTRAP_MSG_MAX];
 
-	if (!build_local_node_join_payload(payload, sizeof(payload)))
+	const char *user_id = req ? req->user_id : NULL;
+
+	if (!build_local_node_join_payload(payload, sizeof(payload), user_id))
 		return false;
 	if (!send_guard_request_with_reply(payload, response,
 					   sizeof(response)))
@@ -1505,7 +1520,7 @@ static void configure_cluster(const struct hive_bootstrap_request *req)
 	if (!prepare_local_node(&local_node_cluster))
 		return;
 
-	if (!forward_node_join_request())
+	if (!forward_node_join_request(req))
 		return;
 
     
@@ -1806,6 +1821,9 @@ static const char *configure_status(void)
 		 "\"min_nodes_req\":%llu,"
 		 "\"bootstrap_token\":%s,"
 		 "\"first_boot_ts\":%s,"
+		 "\"num_of_attempts_this_stage\":%u,"
+		 "\"stage_of_config\":%u,"
+		 "\"ready_4_web_conf\":%s,"
 		 "\"hive_version\":%s,"
 		 "\"hive_patch_level\":%s,"
 		 "\"pub_key\":%s}",
@@ -1823,6 +1841,9 @@ static const char *configure_status(void)
 		 (unsigned long long)hbc.min_nodes_req,
 		 token_field,
 		 ts_field,
+		 (unsigned)hbc.num_attempts_this_stage,
+		 (unsigned)hbc.stage_of_config,
+		 hbc.ready_for_web_conf ? "true" : "false",
 		 hive_version_field,
 		 hive_patch_field,
 		 pub_key_field);
@@ -1855,6 +1876,15 @@ static bool parse_bootstrap_request(const char *json,
 				req->node_name, sizeof(req->node_name));
 	parse_json_string_value(json, "join_token",
 				req->join_token, sizeof(req->join_token));
+	parse_json_string_value(json, "user_id",
+				req->user_id, sizeof(req->user_id));
+	if (!req->user_id[0]) {
+		uint64_t user_id_val = 0;
+		if (parse_json_u64_value(json, "user_id", &user_id_val)) {
+			snprintf(req->user_id, sizeof(req->user_id),
+				 "%llu", (unsigned long long)user_id_val);
+		}
+	}
 	uint64_t min_nodes_val = 0;
 	if (parse_json_u64_value(json, "min_nodes_req", &min_nodes_val))
 		req->min_nodes_req = (uint16_t)min_nodes_val;

@@ -22,6 +22,14 @@
 #include "hive_guard_raft.h"
 #include "hive_guard_erasure_code.h"
 
+typedef struct {
+    int desc;
+    size_t k;
+    size_t m;
+    size_t w;
+    int checksum;
+    int initialized;
+} ec_ctx_t;
 
 static ec_ctx_t g_ec = { .desc = -1, .initialized = 0 };
 static bool g_ec_fallback = false;
