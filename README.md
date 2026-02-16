@@ -1,77 +1,48 @@
 # HiveFS
 
-**HiveFS** is a distributed, secure, SSD-optimized cluster filesystem designed for large-scale, multi-tenant environments where **clients and storage are strictly separated**, **metadata consistency is critical**, and **storage must scale independently of compute**. 
+HiveFS is a distributed, secure, SSD-optimized cluster filesystem designed for large-scale, multi-tenant environments where:
+
+- clients and storage are strictly separated
+- metadata consistency is critical
+- storage must scale independently of compute
 
 HiveFS departs from traditional clustered filesystem designs by prioritizing plane separation, performance determinism, and operational simplicity, using clustering as a foundation for virtualization rather than as a scaling mechanism.
 
-HiveFS is built from the ground up as a *shared-nothing* storage system with a **single global filesystem tree**, **strong cryptographic identity**, and a **flexible sharing model that goes beyond traditional cluster filesystems**. HiveFS is architected around modern SSD realities rather than legacy HDD assumptions. Instead of treating flash like a sector-rewritable disk, HiveFS **uses a key-value storage engine aligned with how SSDs manage block groups internally**, reducing write amplification and positioning the system to take advantage of emerging native KV-based storage technologies.
+HiveFS is built from the ground up as a *shared-nothing* storage system with a **single global filesystem tree**, **strong cryptographic identity**, and a **flexible sharing model that goes beyond traditional cluster filesystems**. HiveFS is architected around modern SSD realities rather than legacy HDD assumptions. Instead of treating flash like a sector-rewritable disk, HiveFS **uses a key-value storage engine aligned with how SSDs manage block groups internally**, reducing write amplification and positioning for emerging native KV to SSD technologies.
 
 
 > ⚠️ **Status:** HiveFS is under active development. The core architecture is largely implemented, but it is not yet production-ready. The GUI and extended features are in process currently.
 
 ---
 
-## Design goals
-
-HiveFS is designed around a few core principles:
-
-- Strict separation of client and storage nodes
-- Predictable performance on SSD that's aligned to SSD storage models
-- Strong security by default
-- Cloud-friendly *and* appliance-friendly deployment
-- All Storage Nodes are deliberately and strictly equal & interchangeable
-- Long-term scalability (exabyte → yottabyte class)
-- Reduction of management overhead through automation and good design
-- A clustered system can be both shared & non-shared: shared dirs/single-client mixed in the same FS
-- The filesystem **is also** the backup
-- Tree-based and non-tree alignment in the same system through file tagging
-
----
-
 ## Architecture overview
 
-### Clients and storage nodes are never the same
+**Clients and storage nodes are never the same**
 
 HiveFS enforces a hard separation between **clients** and **storage nodes (SNs)**:
 
 - A **storage node is never a client**
 - A **client is never a storage node**
-- There is **no practical limit** on the number of clients that can attach
+- The number of clients is limited only by connection load and number of SN nodes
 
 Clients connect using:
 
-- a **high-performance Linux kernel module**
+- a **high-performance Linux kernel module** (Windows kernel driver planned)
 - a user-space **security guard (“Hi-Command”)** responsible for authentication, authorization, and policy enforcement
 
-This design allows client access to scale independently, without coupling client load to storage topology.
+This design allows client numbers to scale independently, while keeping the load of each independant.
 
 ---
 
-### Shared-nothing storage nodes
+**Shared-nothing storage nodes**
 
-Each storage node is:
+Each storage node:
 
-- **Shared-nothing**
-- Backed by its own **commodity SSD**
-- The architecture doesn't limit the number of maximum nodes.
-- Adding nodes adds both bandwidth for reading/writing and capacity via internal commodity disk.
-- Installed via:
-  - Physical ISO
-  - AWS AMI
-  - Azure machine image
-
-Reads and writes may go through **any storage node**.  
-Cluster-wide metadata consistency is maintained via a **Raft-based replicated log**, ensuring all nodes converge on the same filesystem state.
-
-Data is stored in a **custom key-value store optimized for SSD workloads**, featuring:
-
-- delayed deletion
-- scheduled garbage collection
-- reduced write amplification
-
----
-
-### Redundancy and scalability
+- Operates independently
+- Uses its own commodity SSD
+- Adds capacity and bandwidth when added to the cluster
+- Reads and writes may pass through any node.
+- Cluster-wide metadata consistency is maintained via a Raft-based replicated log.
 
 HiveFS uses **4+2 erasure coding** to provide:
 
@@ -79,28 +50,35 @@ HiveFS uses **4+2 erasure coding** to provide:
 - efficient storage utilization
 - horizontal scalability
 
-The design explicitly targets extremely large deployments. While a final release is not yet available, the architecture allows for **exabyte- and beyond-scale storage**.
+Data is stored in a **custom key-value store optimized for SSD workloads**, featuring:
+
+- delayed deletion
+- scheduled garbage collection
+- reduced write amplification
+- The capacity of the **storage** layer is different from capacity of the virtual **filesystems**, which is set via:
+   -- User-Level (AD) quotas
+   -- Group level quotas
+   -- Three filesystem-size limiting quotas: soft, hard, and hard-stop
+
+The design explicitly allows extremely large **storage** layer deployments in the **exabyte- and beyond-scale**.
 
 ---
 
-## Security model
+**Security model**
 
-Security is a first-class concern in HiveFS.
+Security is intrinsic to HiveFS.
 
-- All communication can be encrypted using **256-bit TLS**
-- **Mutual TLS (mTLS)** is used for:
-  - node-to-node authentication
-  - client authentication
-- Identity is rooted in a **CA authority**, with explicit trust validation
-- Node & client adds are automated via crytographic tokens to ensure one-time, human-backed identity verification
+- All communication supports 256-bit TLS
+- Mutual TLS (mTLS) for node and client identity
+- CA-rooted trust validation
+- One-time cryptographic enrollment tokens
 
-There is no implicit trust between components.  
-Every node and client must prove its identity cryptographically.
-No realistic possibility of man-in-the-middle attacts.
+There is no implicit trust between components.
+Every node and client must cryptographically prove identity.
 
 ---
 
-## A single global filesystem tree — with flexibility
+**A single global filesystem tree — with flexibility**
 
 Unlike many clustered filesystems that are strictly shared-only, HiveFS exposes a **single global filesystem tree** that supports:
 
@@ -108,17 +86,97 @@ Unlike many clustered filesystems that are strictly shared-only, HiveFS exposes 
 - **Shared branches**
 - **Exported branches** (NFS, WebDAV, S3)
 
-HiveFS also introduces a **junctioning system** that allows parts of the tree to be dynamically re-grafted:
+A dynamic junctioning system allows:
+-Private paths to become shared
+-Subtrees to appear at different logical locations
+-Different clients to see different tree structures
 
-- Paths originally private to a single client can later be shared
-- Subtrees can be exposed at different locations for different clients or client groups
-- Not all clients are required to follow the same directory structure
-
-This makes HiveFS suitable for:
-
+This enables multi-tenant, hybrid private/shared storage without rigid structural constraints, which makes HiveFS suitable for:
 - multi-tenant environments
-- cross-team data sharing
+- cross-team/cross-security region data sharing
 - hybrid private/shared data layouts
+
+---
+
+**Deployment**
+
+HiveFS is designed as a **quasi-appliance**:
+
+- Core control services run directly on the host
+- User-facing services (API/UI) run in containers
+Deployable on physical hardware or cloud VMs
+
+HiveFS does not require Kubernetes and is not dependent on external orchestration frameworks.
+
+---
+
+## Design philosophy (The "What the [blank] were you thinking?")
+
+**HiveFS is written by a storage engineer, for storage engineers.**
+
+The design is influenced by years of operating large, complex storage systems that required constant human intervention to remain healthy. HiveFS intentionally prioritizes **operational sanity** over exposing endless tuning knobs and seperates physical storage from the logical filesystems, eliminating all traditional layers between the hardware and virtual filesystems, thereby reducing the cognitive load of managing them.
+
+This is the original philosophy used when this project was being first fleshed out:
+
+**1. Deterministic Performance**
+
+Through plane separation, SSD-optimized layout, and controlled metadata coordination, performance is treated as a first-class property of the system rather than a byproduct of scale.
+
+**Storage as a Native Discipline**
+
+HiveFS is designed around the realities of modern SSD storage rather than adapting legacy disk models The architecture begins at the storage layer and builds upward.
+
+**5. Security as a Core Primitive**
+
+Cryptography and identity validation are integrated into the control and data paths as foundational components.
+Security is not layered on top of the filesystem; it is intrinsic to cluster membership, communication, and data integrity.
+
+**6. Virtualization as Abstraction, Not Illusion**
+
+HiveFS decouples logical filesystems from physical topology.
+Through virtualization, storage domains can scale and evolve independently of hardware layout, reducing operational complexity while preserving performance guarantees.
+
+**7. Block-Oriented Foundation**
+
+HiveFS is block-native by design. Higher-level storage models and access patterns are supported as extensions, preserving efficiency and control at the lowest layer.
+
+**8. Integrated Redundancy**
+
+Redundancy, historical tracking, and durability mechanisms are embedded within the storage architecture itself.
+By treating resilience as intrinsic to the data plane, HiveFS reduces dependence on external backup workflows while preserving data integrity RPO/RTO. Today, all data goes to HDD or SSD for backup, therefore storage **is** the backup, and by treating it more effectively, we reduce the need for traditional backup.
+
+**9. Virtualization-First Architecture**
+
+HiveFS prioritizes virtual and logical isolation of the filesystems. Virtual & physical node storage should exist on the same system and should be sharable to all and de-duplicated across all data sources, whatever their platform.
+
+**10. Automation by Architecture**
+
+HiveFS is internally automated by design. Operational workflows, lifecycle events, and cluster coordination are implemented as intrinsic system behaviors, minimizing external orchestration requirements and reducing administrative overhead.
+
+*Example: proactive space management*
+
+As a concrete example, the metadata and snapshot volume manager intentionally maintains **reserved emergency capacity**.
+If a filesystem encounters a space-related error condition, HiveFS can:
+
+- automatically expand the affected filesystem to prevent immediate downtime
+- continue serving requests while operators are notified
+- allow reclaimed space to be returned later once the condition is resolved
+
+The goal is to prevent outages caused by recoverable conditions, without hiding the underlying complexities from operators.
+
+---
+
+### Designed to support experts, not replace them
+
+HiveFS is designed to reduce cognitive load for experienced operators:
+
+Automation is conservative and explainable
+
+Behavior is observable
+
+Failure modes are explicit
+
+The goal is not to hide complexity, but to eliminate unnecessary fragility and routine firefighting.
 
 ---
 
@@ -134,13 +192,7 @@ While HiveFS is still under active development, the following screenshots illust
 
 ![Cluster Dashboard](assets/Screenshot_20260123_192842.png)
 
-The main dashboard provides a high-level view of cluster performance and health, including:
-
-- aggregate I/O and throughput metrics
-- latency and utilization trends
-- early warning indicators for storage and node health
-
-This view is intended to give operators immediate feedback on cluster behavior without needing to inspect individual nodes.
+The main dashboard provides a high-level view of cluster performance and health.
 
 ---
 
@@ -148,13 +200,7 @@ This view is intended to give operators immediate feedback on cluster behavior w
 
 ![Global Filesystem Layout](assets/Screenshot_20260123_193037.png)
 
-This view shows the **single global filesystem tree**, including:
-
-- shared and node-specific branches
-- logical divisions of storage across the cluster
-- how data is organized independently of physical node boundaries
-
-The filesystem is presented as a unified hierarchy, even though data is physically distributed across shared-nothing storage nodes.
+This view shows the **single global filesystem tree**.
 
 ---
 
@@ -168,8 +214,6 @@ HiveFS includes native file versioning and tagging:
 - retains multiple historical snapshots of file contents
 - allows reverting files to earlier versions on demand
 
-This mechanism is designed to provide lightweight, filesystem-level version control without requiring external snapshot systems.
-
 ---
 
 ### Storage Node Health
@@ -178,135 +222,16 @@ This mechanism is designed to provide lightweight, filesystem-level version cont
 
 The node dashboard shows per-node health and status, including:
 
-- availability and responsiveness
-- storage utilization
-- participation in cluster quorum and metadata replication
-
-This view is intended to make node-level issues visible quickly while still encouraging operators to think in terms of the cluster as a whole.
-
----
-
-## Deployment philosophy
-
-HiveFS is designed as a **quasi-appliance**:
-
-- Core control services run directly on the host
-- User-facing services (API/UI) run in containers
-- Designed to operate on:
-  - physical hardware
-  - cloud instances with attached block storage
-
-While Kubernetes-based deployments may be supported in the future, HiveFS is **not dependent on Kubernetes** and does not require it to function correctly.
-
----
-
-## Design philosophy: operational sanity
-
-**HiveFS is written by a storage engineer, for storage engineers.**
-
-The design is heavily influenced by years of operating large, complex storage systems that were fragile, over-configured, or required constant human intervention to remain healthy. HiveFS intentionally prioritizes **operational sanity** over exposing endless tuning knobs.
-
-This is the original philosophy used when this project was being first fleshed out and wherever possible, systems are designed specifically for:
-
-**1. Deterministic Performance**
-
-HiveFS is designed for deterministic behavior under load.
-Through plane separation, SSD-optimized layout, and controlled metadata coordination, performance is treated as a first-class property of the system rather than a byproduct of scale.
-
-**2. Automation by Architecture**
-
-HiveFS is internally automated by design. Operational workflows, lifecycle events, and cluster coordination are implemented as intrinsic system behaviors, minimizing external orchestration requirements and reducing administrative overhead.
-
-**3. Self-Stabilizing Under Pressure**
-
-The system is engineered to maintain stability during contention, imbalance, and resource pressure.
-Load distribution, metadata control, and state reconciliation are designed to prevent cascading failures and preserve service continuity.
-
-**5. Storage as a Native Discipline**
-
-HiveFS treats emerging technologies (SSD) as they're designed to be seen, and not as the prior generation of technology was seen, optimizing for the realities of new architectures and discarding the retrofitting layers. It's designed from the lowest-level storage layer up.
-
-**6. Security as a Core Primitive**
-
-Cryptography and identity validation are integrated into the control and data paths as foundational components.
-Security is not layered on top of the filesystem; it is intrinsic to cluster membership, communication, and data integrity.
-
-**7. Virtualization as Abstraction, Not Illusion**
-
-HiveFS decouples logical filesystems from physical topology.
-Through virtualization, storage domains can scale and evolve independently of hardware layout, reducing operational complexity while preserving performance guarantees.
-
-**8. Block-Oriented Foundation**
-
-HiveFS is block-native by design. Higher-level storage models and access patterns are supported as extensions, preserving efficiency and control at the lowest layer.
-
-**9. Integrated Redundancy**
-
-Redundancy, historical tracking, and durability mechanisms are embedded within the storage architecture itself.
-By treating resilience as intrinsic to the data plane, HiveFS reduces dependence on external backup workflows while preserving data integrity RPO/RTO. Today, all data goes to HDD or SSD for backup, therefore storage **is** the backup, and by treating it more effectively, we reduce the need for traditional backup.
-
-**10. Virtualization-First Architecture**
-
-HiveFS prioritizes logical isolation and abstraction before introducing cluster complexity.
-Clustering is applied deliberately and only where it improves scale, resilience, or isolation—not as an architectural default.
-
-
-These philosophies do *not* mean HiveFS attempts to turn untrained users into storage engineers. Instead, the goal is to **reduce cognitive load**, minimize routine firefighting, and allow experienced operators to focus on real problems instead of babysitting the system, while future-protecting our IT investment.
-
----
-
-### Automation with intent
-
-HiveFS automates common operational tasks by default:
-
-- Installation is **fully hands-off** once initiated
-- Node enrollment, identity, and trust are handled automatically
-- Health monitoring and alerting are integrated into the core system
-
-Alerting is not treated as a passive reporting mechanism. Wherever possible, HiveFS attempts to **stabilize and repair the system first**, *while* alerts are being generated and distributed.
-
----
-
-### Example: proactive space management
-
-As a concrete example, the metadata and snapshot volume manager intentionally maintains **reserved emergency capacity**.
-
-If a filesystem encounters a space-related error condition, HiveFS can:
-
-- automatically expand the affected filesystem to prevent immediate downtime
-- continue serving requests while operators are notified
-- allow reclaimed space to be returned later once the condition is resolved
-
-The goal is to prevent avoidable outages caused by short-lived or recoverable conditions, without hiding the underlying issue from operators.
-
----
-
-### Designed to support experts, not replace them
-
-HiveFS does not attempt to abstract away storage engineering concepts entirely. Instead:
-
-- failure modes are explicit
-- behavior is observable
-- automation is conservative and explainable
-
-The system is designed to be **stress-reducing** for experienced operators — not to obscure reality or eliminate the need for understanding how storage works.
-
-In short, HiveFS aims to elevate the day-to-day operational experience for skilled storage engineers, rather than simplify the problem space beyond recognition.
-
 ---
 
 ## Project status
 
 HiveFS is currently:
 
-- under heavy development
-- stabilizing core identity and PKI systems
-- refining storage, garbage collection, and metadata handling
+Under heavy development
 
-If you are interested in:
+Stabilizing identity and PKI systems
 
-- distributed storage systems
-- filesystem design
-- secure cluster architectures
+Refining storage, garbage collection, and metadata handling
 
-…this project may be worth following or contributing to as it evolves.
+If you are interested in distributed storage systems, filesystem design, or secure cluster architectures, the project may be worth following as it evolves.
