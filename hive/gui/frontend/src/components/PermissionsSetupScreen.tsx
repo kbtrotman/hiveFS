@@ -1034,17 +1034,26 @@ export function PermissionsSetupDialog({
   return (
     <Dialog open={dialogOpen} onOpenChange={handleOpenChange}>
       {triggerNode ? <DialogTrigger asChild>{triggerNode}</DialogTrigger> : null}
-     <DialogContent className="w-[95vw] !max-w-7xl sm:!max-w-7xl h-[90vh] max-h-[90vh] overflow-hidden p-0">
+      <DialogContent
+        className="overflow-hidden rounded-2xl"
+        style={{
+          width: '96vw',
+          maxWidth: '1500px',
+          height: '95vh',
+          maxHeight: '95vh',
+          padding: 0,
+        }}
+      >
         <div className="flex h-full min-h-0">
-          <DialogHeader className="shrink-0 px-6 pt-6 pb-3">
+          <DialogHeader className="shrink-0 px-8 pt-8 pb-4">
             <DialogTitle>Permissions &amp; Access Control</DialogTitle>
             <DialogDescription>
               Create users, bundle them into groups, and assign roles across the HiveFS control plane.
             </DialogDescription>
           </DialogHeader>
-          <div className="min-h-0 flex-1 overflow-y-auto overflow-x-auto px-6 pb-6">
-            <Table className="min-w-[1100px]" />
-            <PermissionsSetupScreen initialTab={initialTab} className="pt-2" />
+          <div className="min-h-0 flex-1 overflow-y-auto overflow-x-auto px-8 pb-8">
+            <Table className="min-w-[1200px]" />
+            <PermissionsSetupScreen initialTab={initialTab} className="pt-4" />
           </div>
         </div>
       </DialogContent>

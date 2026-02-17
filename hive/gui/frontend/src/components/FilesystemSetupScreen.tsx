@@ -19,12 +19,7 @@ const titleGradientStyle: CSSProperties = {
 };
 
 const labelGradientStyle: CSSProperties = {
-  backgroundImage:
-    'linear-gradient(90deg, #f97316 0%, var(--foreground, #e5e7eb) 35%, #38bdf8 80%, #0ea5e9 100%)',
-  WebkitBackgroundClip: 'text',
-  backgroundClip: 'text',
-  WebkitTextFillColor: 'transparent',
-  color: 'transparent',
+  color: '#ffffff',
 };
 
 const DEFAULT_METADATA_TARGETS = ['Tier-0 NVMe', 'Tier-1 SSD', 'Object Archive'];
@@ -236,7 +231,7 @@ export function FilesystemSetupScreen({
         }
       } catch (err) {
         if (!ignore) {
-          setErrorMessage('Unable to load filesystem settings.');
+          console.error('Failed to load filesystem settings', err);
         }
       } finally {
         if (!ignore) {
@@ -343,14 +338,6 @@ export function FilesystemSetupScreen({
   return (
     <div className="flex h-full min-h-0 w-full flex-col bg-background text-foreground">
       <div className="flex flex-col items-center gap-3 px-6 pt-8 pb-4 text-center">
-        <p className="text-xs uppercase tracking-[0.3em] text-muted-foreground">Bootstrap</p>
-        <h1 className="text-3xl font-semibold" style={titleGradientStyle}>
-          Filesystem Initialization
-        </h1>
-        <p className="text-sm text-muted-foreground max-w-3xl">
-          Wire up cluster management policies, telemetry rollups, client-side protections, and
-          backend filesystem allocation — all in one pass.
-        </p>
         {statusMessage && <p className="text-xs text-emerald-400">{statusMessage}</p>}
         {errorMessage && <p className="text-xs text-destructive">{errorMessage}</p>}
       </div>
