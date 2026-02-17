@@ -19,12 +19,7 @@ const titleGradientStyle: CSSProperties = {
 };
 
 const labelGradientStyle: CSSProperties = {
-  backgroundImage:
-    'linear-gradient(90deg, #f97316 0%, var(--foreground, #e5e7eb) 35%, #38bdf8 80%, #0ea5e9 100%)',
-  WebkitBackgroundClip: 'text',
-  backgroundClip: 'text',
-  WebkitTextFillColor: 'transparent',
-  color: 'transparent',
+  color: '#ffffff',
 };
 
 const FALLBACK_INTERFACES = ['bond0', 'eth0', 'eth1', 'enp0s31f6'];

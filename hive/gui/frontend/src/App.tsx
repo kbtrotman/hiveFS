@@ -234,11 +234,22 @@ export default function App() {
               <div className="relative flex h-full w-full items-center justify-center px-2 py-2">
                 <div className="absolute inset-0 bg-background/80 backdrop-blur-sm" />
                 <div
-                  className={`relative z-10 flex min-h-0 flex-col overflow-hidden rounded-xl border border-border bg-card shadow-2xl ${
+                  className="relative z-10 flex min-h-0 flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl"
+                  style={
                     activeSetupView === 'permissions'
-                      ? 'h-[calc(100%-20px)] w-[calc(100%-20px)] max-w-[1400px]'
-                      : 'h-[calc(100%-30px)] w-[calc(100%-30px)] max-w-[1200px]'
-                  }`}
+                      ? {
+                          width: '96vw',
+                          maxWidth: '1500px',
+                          height: '95vh',
+                          maxHeight: '95vh',
+                        }
+                      : {
+                          width: '94vw',
+                          maxWidth: '1400px',
+                          height: '92vh',
+                          maxHeight: '92vh',
+                        }
+                  }
                 >
                   <div className="flex items-center justify-between border-b border-border px-6 py-4">
                     <div>
@@ -267,15 +278,18 @@ export default function App() {
                         initialSection={networkInitialSection}
                         onCancel={handleNetworkDialogCancel}
                         onSave={handleNetworkDialogSave}
-                      isSaving={networkIsSaving}
-                    />
-                  )}
-                  {activeSetupView === 'filesystem' && (
-                    <FilesystemSetupScreen initialTab={filesystemInitialTab} onSave={handleFilesystemDialogSave} />
-                  )}
-                  {activeSetupView === 'permissions' && (
-                    <PermissionsSetupScreen initialTab={permissionsInitialTab} />
-                  )}
+                        isSaving={networkIsSaving}
+                      />
+                    )}
+                    {activeSetupView === 'filesystem' && (
+                      <FilesystemSetupScreen
+                        initialTab={filesystemInitialTab}
+                        onSave={handleFilesystemDialogSave}
+                      />
+                    )}
+                    {activeSetupView === 'permissions' && (
+                      <PermissionsSetupScreen initialTab={permissionsInitialTab} />
+                    )}
                   </div>
                 </div>
               </div>
