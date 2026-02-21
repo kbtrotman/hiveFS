@@ -147,3 +147,80 @@ class StorageNodeDiskStats(models.Model):
             models.Index(fields=["disk_ts"], name="idx_disk_ts"),
             models.Index(fields=["node_id", "disk_name"], name="idx_node_disk"),
         ]
+
+class DiskStatus(models.Model):
+    MEDIA_SSD = "ssd"
+    MEDIA_HDD = "hdd"
+    MEDIA_PMEM = "pmem"
+    MEDIA_UNKNOWN = "unknown"
+    MEDIA_CHOICES = [
+        (MEDIA_SSD, "ssd"),
+        (MEDIA_HDD, "hdd"),
+        (MEDIA_PMEM, "pmem"),
+        (MEDIA_UNKNOWN, "unknown"),
+    ]
+
+    IFACE_SATA = "sata"
+    IFACE_SAS = "sas"
+    IFACE_NVME = "nvme"
+    IFACE_PCIE = "pcie"
+    IFACE_FC = "fc"
+    IFACE_USB = "usb"
+    IFACE_UNKNOWN = "unknown"
+    INTERFACE_CHOICES = [
+        (IFACE_SATA, "sata"),
+        (IFACE_SAS, "sas"),
+        (IFACE_NVME, "nvme"),
+        (IFACE_PCIE, "pcie"),
+        (IFACE_FC, "fc"),
+        (IFACE_USB, "usb"),
+        (IFACE_UNKNOWN, "unknown"),
+    ]
+
+    HEALTH_OK = "ok"
+    HEALTH_WARN = "warn"
+    HEALTH_CRIT = "crit"
+    HEALTH_UNKNOWN = "unknown"
+    HEALTH_CHOICES = [
+        (HEALTH_OK, "ok"),
+        (HEALTH_WARN, "warn"),
+        (HEALTH_CRIT, "crit"),
+        (HEALTH_UNKNOWN, "unknown"),
+    ]
+
+    node_id = models.PositiveIntegerField()
+    disk_name = models.CharField(max_length=64)
+    disk_serial = models.CharField(max_length=128, primary_key=True)
+    disk_slot = models.CharField(max_length=32, null=True, blank=True)
+    disk_enclosure = models.CharField(max_length=64, null=True, blank=True)
+    disk_path = models.CharField(max_length=128)
+    disk_model = models.CharField(max_length=128, null=True, blank=True)
+    disk_vendor = models.CharField(max_length=64, null=True, blank=True)
+    disk_firmware = models.CharField(max_length=64, null=True, blank=True)
+    disk_capacity_bytes = models.BigIntegerField()
+    media_type = models.CharField(max_length=7, choices=MEDIA_CHOICES, default=MEDIA_UNKNOWN)
+    interface_type = models.CharField(max_length=7, choices=INTERFACE_CHOICES, default=IFACE_UNKNOWN)
+    rpm = models.PositiveIntegerField(null=True, blank=True)
+    temperature_c = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    power_on_hours = models.PositiveIntegerField(null=True, blank=True)
+    smart_health = models.CharField(max_length=7, choices=HEALTH_CHOICES, default=HEALTH_OK)
+    status_reason = models.CharField(max_length=255, null=True, blank=True)
+    failure_count = models.PositiveIntegerField(default=0)
+    last_failure_ts = models.DateTimeField(null=True, blank=True)
+    paged_out = models.BooleanField(default=False)
+    paged_out_ts = models.DateTimeField(null=True, blank=True)
+    last_seen_ts = models.DateTimeField()
+    updated_at = models.DateTimeField()
+
+    class Meta:
+        managed = False
+        db_table = "v_disk_status"
+        indexes = [
+            models.Index(fields=["smart_health", "paged_out"], name="idx_disk_status_health"),
+            models.Index(fields=["last_seen_ts"], name="idx_disk_status_last_seen"),
+            models.Index(fields=["failure_count", "last_failure_ts"], name="idx_disk_status_failure"),
+        ]
+        unique_together = (
+            ("node_id", "disk_serial"),
+            ("node_id", "disk_name"),
+        )

@@ -5,7 +5,11 @@ tzdata==2025.1
 djangorestframework
 django-cors-headers
 django-extensions
+django-eventstream[drf]
 django-allauth
 dj-rest-auth
 mysqlclient
 requests
+requests
+daphne
+uuid 6

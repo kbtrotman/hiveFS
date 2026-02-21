@@ -1,4 +1,4 @@
-import { useState, type CSSProperties } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
@@ -16,6 +16,8 @@ const API_BASE =
   import.meta?.env?.VITE_BOOTSTRAP_API_BASE ?? 'http://localhost:8000/api/v1/bootstrap';
 const CLUSTER_INIT_URL = `${API_BASE}/init`;
 const NODE_JOIN_URL = `${API_BASE}/addnode`;
+// Base URL (no channel query string). Example: http://localhost:8000/events/
+const EVENTS_BASE = import.meta?.env?.VITE_BOOTSTRAP_EVENTS_URL ?? 'http://localhost:8000/events/';
 
 type ClusterInitializationScreenProps = {
   statusData?: any;
@@ -39,6 +41,9 @@ export function ClusterInitializationScreen({
   const [submittingAction, setSubmittingAction] = useState<string | null>(null);
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [eventMessages, setEventMessages] = useState<string[]>([]);
+  const [eventStreamError, setEventStreamError] = useState<string | null>(null);
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
 
   const normalizedUserId = userId === undefined || userId === null ? null : String(userId);
 
@@ -59,6 +64,39 @@ export function ClusterInitializationScreen({
     config_progress: statusData?.config_progress ?? '0%',
     config_msg: statusData?.config_msg ?? '',
     pub_key: statusData?.pub_key ?? null,
+  };
+
+  const buildEventStreamUrl = (channel: string) => {
+    const base = String(EVENTS_BASE).split('?')[0];
+    const sep = base.includes('?') ? '&' : '?';
+    return `${base}${sep}channel=${encodeURIComponent(channel)}`;
+  };
+
+  const formatEventLine = (raw: string) => {
+    // Supports either plain strings or JSON payloads from send_event.
+    // If the payload has a common message field, prefer that.
+    try {
+      const obj = JSON.parse(raw);
+      const msg =
+        obj?.msg ??
+        obj?.message ??
+        obj?.text ??
+        obj?.data?.msg ??
+        obj?.data?.message;
+
+      if (typeof msg === 'string' && msg.length > 0) {
+        const lvl = typeof obj?.level === 'string' ? obj.level.toUpperCase() : null;
+        const phase = typeof obj?.phase === 'string' ? obj.phase : null;
+        const prefixParts = [lvl, phase].filter(Boolean);
+        const prefix = prefixParts.length ? `[${prefixParts.join(':')}] ` : '';
+        return `${prefix}${msg}`;
+      }
+
+      // Fall back to a compact JSON string.
+      return JSON.stringify(obj);
+    } catch {
+      return raw;
+    }
   };
 
   const sendRequest = async (url: string, command: string, extra: Record<string, unknown>) => {
@@ -84,6 +122,20 @@ export function ClusterInitializationScreen({
       if (!response.ok || json?.ok === false) {
         throw new Error(json?.error || json?.message || 'Request failed');
       }
+
+      // If the backend returns a job id, switch the event stream to a per-job channel.
+      // Expected shapes: { job_id: "..." } or { jobId: "..." }.
+      const jobIdFromResponse =
+        (typeof json?.job_id === 'string' && json.job_id) ||
+        (typeof json?.jobId === 'string' && json.jobId) ||
+        null;
+
+      if (jobIdFromResponse) {
+        setActiveJobId(jobIdFromResponse);
+        setEventMessages([]);
+        setEventStreamError(null);
+      }
+
       setFeedbackMessage(`${command.replace(/_/g, ' ')} submitted successfully.`);
       onActionComplete?.();
     } catch (err) {
@@ -116,6 +168,47 @@ export function ClusterInitializationScreen({
   ) || 'To be Created...';
   const initDisabled = submittingAction === 'cluster_init';
   const joinDisabled = submittingAction === 'node_join';
+
+  // Connect to a per-job channel once the backend returns a job id.
+  // This keeps your normal API calls separate from the streaming GET.
+  useEffect(() => {
+    if (!activeJobId) return;
+
+    const channel = `job-${activeJobId}`;
+    const source = new EventSource(buildEventStreamUrl(channel), { withCredentials: true });
+
+    source.onmessage = (event) => {
+      const line = formatEventLine(event.data);
+      setEventMessages((prev) => {
+        const next = [...prev, line];
+        if (next.length > 200) next.shift();
+        return next;
+      });
+      setEventStreamError(null);
+    };
+
+    // Also handle typed events if you emit types like "log", "status", "progress".
+    const typedHandler = (event: MessageEvent) => {
+      const line = formatEventLine(event.data);
+      setEventMessages((prev) => {
+        const next = [...prev, line];
+        if (next.length > 200) next.shift();
+        return next;
+      });
+      setEventStreamError(null);
+    };
+    source.addEventListener('log', typedHandler);
+    source.addEventListener('status', typedHandler);
+    source.addEventListener('progress', typedHandler);
+
+    source.onerror = () => {
+      setEventStreamError('Disconnected from event stream. Retrying…');
+    };
+
+    return () => {
+      source.close();
+    };
+  }, [activeJobId]);
 
   return (
     <div className="w-full h-full bg-background text-foreground flex flex-col items-center px-6 py-6 gap-4">
@@ -263,6 +356,25 @@ export function ClusterInitializationScreen({
           </CardContent>
         </Card>
       </div>
+
+      <Card className="w-full max-w-6xl shadow-lg border-border">
+        <CardHeader>
+          <CardTitle className="text-xl" style={titleGradientStyle}>
+            Action Event Log:
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          <Label className="text-sm font-medium text-white">Live Events</Label>
+          <div className="h-48 overflow-y-auto rounded-md border border-border bg-card/60 px-3 py-2 text-xs font-mono text-white/90 whitespace-pre-wrap">
+            {eventMessages.length === 0
+              ? eventStreamError ?? (activeJobId ? 'Waiting for events…' : 'Start an action to begin streaming logs…')
+              : eventMessages.join('\n')}
+          </div>
+          {eventStreamError && eventMessages.length > 0 && (
+            <p className="text-xs text-amber-300">{eventStreamError}</p>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

@@ -1,8 +1,8 @@
 from rest_framework.response import Response
-from rest_framework.viewsets import ReadOnlyModelViewSet, ViewSet
+from rest_framework.viewsets import ViewSet
 
-from .models import Storage_Nodes, Storage_Node_Stats
-from .serializers import StorageNodeSerializer, StorageNodeStatSerializer
+from .models import HardwareStatus, Storage_Nodes, Storage_Node_Stats
+from .serializers import HardwareStatusSerializer, StorageNodeSerializer, StorageNodeStatSerializer
 
 
 class StorageNodeViewSet(ViewSet):
@@ -106,3 +106,33 @@ class StorageNodeStatViewSet(ViewSet):
             for stats in qs
         ]
         return Response(payload)
+
+
+class HardwareStatusViewSet(ViewSet):
+    """
+    Provides read-only hardware component state for nodes.
+    Supports filtering by node_id, component_type, and component_slot.
+    """
+
+    def list(self, request):
+        node_id = request.query_params.get("node_id")
+
+        if not node_id:
+            raw_query = (request.META.get("QUERY_STRING") or "").strip()
+            if raw_query and "=" not in raw_query:
+                node_id = raw_query.split("&", 1)[0]
+
+        component_type = request.query_params.get("component_type")
+        component_slot = request.query_params.get("component_slot")
+
+        filters = {}
+        if node_id:
+            filters["node_id"] = node_id
+        if component_type:
+            filters["component_type"] = component_type
+        if component_slot:
+            filters["component_slot"] = component_slot
+
+        qs = HardwareStatus.objects.filter(**filters).order_by("node_id", "component_type", "component_slot")
+        serializer = HardwareStatusSerializer(qs, many=True)
+        return Response(serializer.data)

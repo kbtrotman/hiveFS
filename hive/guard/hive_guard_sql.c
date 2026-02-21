@@ -718,7 +718,7 @@ bool hifs_store_fs_stat(uint64_t node_id,
 
 
 bool hifs_store_disk_stat(uint64_t node_id,
-			  uint64_t ts_unix,
+		  uint64_t ts_unix,
 			  const char *disk_name,
 			  const char *disk_path,
 			  uint64_t disk_size_bytes,
@@ -733,7 +733,7 @@ bool hifs_store_disk_stat(uint64_t node_id,
 			  uint64_t io_ms,
 			  uint64_t weighted_io_ms,
 			  const char *fs_path,
-			  const char *health)
+	const char *health)
 {
 	if (!sqldb.sql_init || !sqldb.conn)
 		return false;
@@ -784,6 +784,123 @@ bool hifs_store_disk_stat(uint64_t node_id,
 	if (written <= 0 || written >= (int)sizeof(sql_query))
 		return false;
 
+	return hifs_metadata_async_execute(sql_query);
+}
+
+bool hg_sql_disk_status_upsert(uint64_t node_id, const hg_disk_status_row_t *row)
+{
+	if (!row || !sqldb.sql_init || !sqldb.conn)
+		return false;
+	char *name_q = hifs_get_quoted_value(row->disk_name[0] ? row->disk_name : "unknown");
+	char *serial_q = hifs_get_quoted_value(row->disk_serial[0] ? row->disk_serial : "unknown");
+	char *path_q = hifs_get_quoted_value(row->disk_path[0] ? row->disk_path : "unknown");
+	char *model_q = row->disk_model[0] ? hifs_get_quoted_value(row->disk_model) : NULL;
+	char *vendor_q = row->disk_vendor[0] ? hifs_get_quoted_value(row->disk_vendor) : NULL;
+	char *fw_q = row->disk_firmware[0] ? hifs_get_quoted_value(row->disk_firmware) : NULL;
+	char *media_q = hifs_get_quoted_value(row->media_type[0] ? row->media_type : "unknown");
+	char *iface_q = hifs_get_quoted_value(row->interface_type[0] ? row->interface_type : "unknown");
+	char *health_q = hifs_get_quoted_value(row->smart_health[0] ? row->smart_health : "unknown");
+	char *reason_q = row->status_reason[0] ? hifs_get_quoted_value(row->status_reason) : NULL;
+	const char *name_use = name_q ? name_q : "unknown";
+	const char *serial_use = serial_q ? serial_q : "unknown";
+	const char *path_use = path_q ? path_q : "unknown";
+	const char *model_use = model_q ? model_q : "NULL";
+	const char *vendor_use = vendor_q ? vendor_q : "NULL";
+	const char *fw_use = fw_q ? fw_q : "NULL";
+	const char *media_use = media_q ? media_q : "unknown";
+	const char *iface_use = iface_q ? iface_q : "unknown";
+	const char *health_use = health_q ? health_q : "unknown";
+	const char *reason_use = reason_q ? reason_q : "NULL";
+	char sql_query[MAX_QUERY_SIZE];
+	int written = snprintf(sql_query, sizeof(sql_query),
+			      "INSERT INTO disk_status (node_id, disk_name, disk_serial, disk_path, "
+			      "disk_model, disk_vendor, disk_firmware, disk_capacity_bytes, media_type, interface_type, "
+			      "smart_health, status_reason) VALUES (%llu, '%s', '%s', '%s', %s, %s, %s, %llu, '%s', '%s', '%s', %s) "
+			      "ON DUPLICATE KEY UPDATE disk_path=VALUES(disk_path), disk_model=VALUES(disk_model), "
+			      "disk_vendor=VALUES(disk_vendor), disk_firmware=VALUES(disk_firmware), "
+			      "disk_capacity_bytes=VALUES(disk_capacity_bytes), media_type=VALUES(media_type), "
+			      "interface_type=VALUES(interface_type), smart_health=VALUES(smart_health), "
+			      "status_reason=VALUES(status_reason), last_seen_ts=NOW(), updated_at=NOW()",
+			      (unsigned long long)node_id,
+			      name_use,
+			      serial_use,
+			      path_use,
+			      model_use,
+			      vendor_use,
+			      fw_use,
+			      (unsigned long long)row->capacity_bytes,
+			      media_use,
+			      iface_use,
+			      health_use,
+			      reason_use);
+	free(name_q);
+	free(serial_q);
+	free(path_q);
+	free(model_q);
+	free(vendor_q);
+	free(fw_q);
+	free(media_q);
+	free(iface_q);
+	free(health_q);
+	free(reason_q);
+	if (written <= 0 || written >= (int)sizeof(sql_query))
+		return false;
+	return hifs_metadata_async_execute(sql_query);
+}
+
+bool hg_sql_hw_status_upsert(uint64_t node_id, const hg_hw_component_row_t *row,
+				   const char *telemetry_json)
+{
+	if (!row || !sqldb.sql_init || !sqldb.conn)
+		return false;
+	char *type_q = hifs_get_quoted_value(row->component_type ? row->component_type : "other");
+	char *slot_q = hifs_get_quoted_value(row->component_slot[0] ? row->component_slot : "system");
+	char *serial_q = row->component_serial[0] ? hifs_get_quoted_value(row->component_serial) : NULL;
+	char *vendor_q = row->component_vendor[0] ? hifs_get_quoted_value(row->component_vendor) : NULL;
+	char *model_q = row->component_model[0] ? hifs_get_quoted_value(row->component_model) : NULL;
+	char *state_q = hifs_get_quoted_value(row->health_state[0] ? row->health_state : "unknown");
+	char *reason_q = row->health_reason[0] ? hifs_get_quoted_value(row->health_reason) : NULL;
+	char *flags_q = hifs_get_quoted_value(row->status_flags[0] ? row->status_flags : "");
+	char *telemetry_q = (telemetry_json && telemetry_json[0]) ? hifs_get_quoted_value(telemetry_json) : NULL;
+	const char *type_use = type_q ? type_q : "other";
+	const char *slot_use = slot_q ? slot_q : "system";
+	const char *serial_use = serial_q ? serial_q : "NULL";
+	const char *vendor_use = vendor_q ? vendor_q : "NULL";
+	const char *model_use = model_q ? model_q : "NULL";
+	const char *state_use = state_q ? state_q : "unknown";
+	const char *reason_use = reason_q ? reason_q : "NULL";
+	const char *flags_use = flags_q ? flags_q : "";
+	const char *telemetry_use = telemetry_q ? telemetry_q : "NULL";
+	char sql_query[MAX_QUERY_SIZE];
+	int written = snprintf(sql_query, sizeof(sql_query),
+			      "INSERT INTO hardware_status (node_id, component_type, component_slot, component_serial, "
+			      "component_vendor, component_model, health_state, health_reason, status_flags, telemetry_json) "
+			      "VALUES (%llu, '%s', '%s', %s, %s, %s, '%s', %s, '%s', %s) "
+			      "ON DUPLICATE KEY UPDATE component_serial=VALUES(component_serial), "
+			      "component_vendor=VALUES(component_vendor), component_model=VALUES(component_model), "
+			      "health_state=VALUES(health_state), health_reason=VALUES(health_reason), "
+			      "status_flags=VALUES(status_flags), telemetry_json=VALUES(telemetry_json), last_seen_ts=NOW()",
+			      (unsigned long long)node_id,
+			      type_use,
+			      slot_use,
+			      serial_use,
+			      vendor_use,
+			      model_use,
+			      state_use,
+			      reason_use,
+			      flags_use,
+			      telemetry_use);
+	free(type_q);
+	free(slot_q);
+	free(serial_q);
+	free(vendor_q);
+	free(model_q);
+	free(state_q);
+	free(reason_q);
+	free(flags_q);
+	free(telemetry_q);
+	if (written <= 0 || written >= (int)sizeof(sql_query))
+		return false;
 	return hifs_metadata_async_execute(sql_query);
 }
 

@@ -10,15 +10,29 @@
 
 #include <pthread.h>
 #include <errno.h>
+#include <ctype.h>
 
 #include <dirent.h>
 #include <sys/statvfs.h>
 #include <sys/stat.h>
+#include <sys/un.h>
+#include <sys/socket.h>
+#include <sys/time.h>
 #include <limits.h>
 
 #include "hive_guard_stats.h"
 #include "hive_guard_sql.h"
 #include "hive_guard.h"
+
+#ifndef ARRAY_SIZE
+#define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
+#endif
+
+#ifndef MSG_NOSIGNAL
+#define MSG_NOSIGNAL 0
+#endif
+
+static int hg_read_sysfs_u64(const char *path, uint64_t *out);
 
 hg_stats_counters_t g_stats = {0};
 
@@ -192,6 +206,528 @@ static const char *hg_health_from_pcts(double fs_used_pct, double in_used_pct, u
 	return "ok";
 }
 
+#define HG_HW_STATUS_INTERVAL_SEC 60
+#define HG_MAX_TRACKED_DISKS 128
+#define HG_MAX_TRACKED_COMPONENTS 32
+
+typedef struct {
+	char key[96];
+	char state[8];
+} hg_status_cache_entry_t;
+
+typedef struct {
+	char disk_name[64];
+	char disk_serial[128];
+	char disk_path[128];
+	char disk_model[128];
+	char disk_vendor[64];
+	char disk_firmware[64];
+	char media_type[16];
+	char interface_type[16];
+	char smart_health[8];
+	char status_reason[256];
+	uint64_t capacity_bytes;
+} hg_disk_status_row_t;
+
+typedef struct {
+	const char *component_type;
+	char component_slot[32];
+	char component_model[128];
+	char component_vendor[64];
+	char component_serial[64];
+	char health_state[8];
+	char health_reason[256];
+	char status_flags[128];
+} hg_hw_component_row_t;
+
+static hg_status_cache_entry_t g_disk_alert_cache[HG_MAX_TRACKED_DISKS];
+static hg_status_cache_entry_t g_hw_alert_cache[HG_MAX_TRACKED_COMPONENTS];
+
+static void hg_trim_whitespace(char *buf)
+{
+	if (!buf)
+		return;
+	char *start = buf;
+	while (*start && isspace((unsigned char)*start))
+		++start;
+	if (start != buf)
+		memmove(buf, start, strlen(start) + 1);
+	char *end = buf + strlen(buf);
+	while (end > buf && isspace((unsigned char)end[-1]))
+		*--end = '\0';
+}
+
+static bool hg_read_sysfs_line(const char *path, char *buf, size_t buf_sz)
+{
+	if (!path || !buf || buf_sz == 0)
+		return false;
+	FILE *f = fopen(path, "r");
+	if (!f)
+		return false;
+	bool ok = fgets(buf, buf_sz, f) != NULL;
+	fclose(f);
+	if (!ok)
+		return false;
+	hg_trim_whitespace(buf);
+	return buf[0] != '\0';
+}
+
+static char *hg_sql_quote_string(const char *value)
+{
+	if (!value)
+		return NULL;
+	char *raw = hifs_get_quoted_value(value);
+	if (!raw)
+		return NULL;
+	if (raw[0] == '\'' || raw[0] == '"')
+		return raw;
+	size_t len = strlen(raw);
+	char *wrapped = malloc(len + 3);
+	if (!wrapped) {
+		free(raw);
+		return NULL;
+	}
+	wrapped[0] = '\'';
+	memcpy(wrapped + 1, raw, len);
+	wrapped[len + 1] = '\'';
+	wrapped[len + 2] = '\0';
+	free(raw);
+	return wrapped;
+}
+
+static bool hg_state_is_alert(const char *state)
+{
+	if (!state || !state[0])
+		return false;
+	return (strcmp(state, "warn") == 0) || (strcmp(state, "crit") == 0) ||
+	       (strcmp(state, "offline") == 0);
+}
+
+static bool hg_state_cache_should_alert(hg_status_cache_entry_t *cache, size_t cap,
+				       const char *key, const char *new_state)
+{
+	if (!cache || !key || !key[0] || !new_state || !new_state[0])
+		return false;
+	size_t empty = cap;
+	for (size_t i = 0; i < cap; ++i) {
+		if (!cache[i].key[0]) {
+			if (empty == cap)
+				empty = i;
+			continue;
+		}
+		if (strcmp(cache[i].key, key) != 0)
+			continue;
+		bool prev_alert = hg_state_is_alert(cache[i].state);
+		bool new_alert = hg_state_is_alert(new_state);
+		bool state_changed = strcmp(cache[i].state, new_state) != 0;
+		hifs_safe_strcpy(cache[i].state, sizeof(cache[i].state), new_state);
+		return new_alert && (state_changed || !prev_alert);
+	}
+	if (empty >= cap)
+		empty = cap - 1;
+	hifs_safe_strcpy(cache[empty].key, sizeof(cache[empty].key), key);
+	hifs_safe_strcpy(cache[empty].state, sizeof(cache[empty].state), new_state);
+	return hg_state_is_alert(new_state);
+}
+
+static void hg_json_escape(const char *src, char *dst, size_t dst_sz)
+{
+	if (!dst || dst_sz == 0)
+		return;
+	size_t j = 0;
+	if (!src)
+		src = "";
+	for (size_t i = 0; src[i] && j + 2 < dst_sz; ++i) {
+		unsigned char c = (unsigned char)src[i];
+		switch (c) {
+		case '\\':
+		case '"':
+			dst[j++] = '\\';
+			dst[j++] = (char)c;
+			break;
+		case '\n':
+			dst[j++] = '\\';
+			dst[j++] = 'n';
+			break;
+		case '\r':
+			dst[j++] = '\\';
+			dst[j++] = 'r';
+			break;
+		case '\t':
+			dst[j++] = '\\';
+			dst[j++] = 't';
+			break;
+		default:
+			if (c < 0x20) {
+				if (j + 6 >= dst_sz)
+					goto done;
+				j += (size_t)snprintf(dst + j, dst_sz - j, "\\u%04x", c);
+			} else {
+				dst[j++] = (char)c;
+			}
+			break;
+		}
+	}
+done:
+	dst[j] = '\0';
+}
+
+static void hg_send_bootstrap_alert(const char *component, const char *severity,
+					 const char *message)
+{
+	if (!component || !*component || !severity || !*severity || !message || !*message)
+		return;
+	int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+	if (fd < 0)
+		return;
+	struct sockaddr_un addr = {0};
+	addr.sun_family = AF_UNIX;
+	strncpy(addr.sun_path, HIVE_BOOTSTRAP_SOCK_PATH, sizeof(addr.sun_path) - 1);
+	struct timeval tv = { .tv_sec = 0, .tv_usec = 250000 };
+	setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+	setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+	if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
+		close(fd);
+		return;
+	}
+	char comp_buf[256];
+	char sev_buf[32];
+	char msg_buf[512];
+	hg_json_escape(component, comp_buf, sizeof(comp_buf));
+	hg_json_escape(severity, sev_buf, sizeof(sev_buf));
+	hg_json_escape(message, msg_buf, sizeof(msg_buf));
+	char payload[1024];
+	int written = snprintf(payload, sizeof(payload),
+			       "{\"command\":\"alert\",\"component\":\"%s\","
+			       "\"severity\":\"%s\",\"message\":\"%s\"}\n",
+			       comp_buf, sev_buf, msg_buf);
+	if (written > 0 && written < (int)sizeof(payload))
+		send(fd, payload, (size_t)written, MSG_NOSIGNAL);
+	char resp[256];
+	(void)recv(fd, resp, sizeof(resp), 0);
+	close(fd);
+}
+
+static const char *hg_disk_media_type(const char *dev, unsigned int rotational)
+{
+	if (dev && strncmp(dev, "pmem", 4) == 0)
+		return "pmem";
+	if (rotational == 0)
+		return "ssd";
+	if (rotational == 1)
+		return "hdd";
+	return "unknown";
+}
+
+static const char *hg_disk_interface_type(const char *dev)
+{
+	if (!dev)
+		return "unknown";
+	if (!strncmp(dev, "nvme", 4))
+		return "nvme";
+	if (!strncmp(dev, "sd", 2) || !strncmp(dev, "xvd", 3) || !strncmp(dev, "vd", 2))
+		return "sata";
+	if (!strncmp(dev, "pmem", 4))
+		return "pcie";
+	return "unknown";
+}
+
+static bool hg_disk_status_upsert(uint64_t node_id, const hg_disk_status_row_t *row)
+{
+	if (!row || !sqldb.sql_init || !sqldb.conn)
+		return false;
+	char *name_q = hg_sql_quote_string(row->disk_name);
+	char *serial_q = hg_sql_quote_string(row->disk_serial);
+	char *path_q = hg_sql_quote_string(row->disk_path);
+	char *model_q = row->disk_model[0] ? hg_sql_quote_string(row->disk_model) : NULL;
+	char *vendor_q = row->disk_vendor[0] ? hg_sql_quote_string(row->disk_vendor) : NULL;
+	char *fw_q = row->disk_firmware[0] ? hg_sql_quote_string(row->disk_firmware) : NULL;
+	char *media_q = hg_sql_quote_string(row->media_type[0] ? row->media_type : "unknown");
+	char *iface_q = hg_sql_quote_string(row->interface_type[0] ? row->interface_type : "unknown");
+	char *health_q = hg_sql_quote_string(row->smart_health[0] ? row->smart_health : "unknown");
+	char *reason_q = row->status_reason[0] ? hg_sql_quote_string(row->status_reason) : NULL;
+	const char *name_use = name_q ? name_q : "'unknown'";
+	const char *serial_use = serial_q ? serial_q : "'unknown'";
+	const char *path_use = path_q ? path_q : "'unknown'";
+	const char *model_use = model_q ? model_q : "NULL";
+	const char *vendor_use = vendor_q ? vendor_q : "NULL";
+	const char *fw_use = fw_q ? fw_q : "NULL";
+	const char *media_use = media_q ? media_q : "'unknown'";
+	const char *iface_use = iface_q ? iface_q : "'unknown'";
+	const char *health_use = health_q ? health_q : "'unknown'";
+	const char *reason_use = reason_q ? reason_q : "NULL";
+	char sql_query[MAX_QUERY_SIZE];
+	int written = snprintf(sql_query, sizeof(sql_query), HG_SQL_DISK_STATUS_UPSERT,
+			       (unsigned long long)node_id,
+			       name_use,
+			       serial_use,
+			       path_use,
+			       model_use,
+			       vendor_use,
+			       fw_use,
+			       (unsigned long long)row->capacity_bytes,
+			       media_use,
+			       iface_use,
+			       health_use,
+			       reason_use);
+	free(name_q);
+	free(serial_q);
+	free(path_q);
+	free(model_q);
+	free(vendor_q);
+	free(fw_q);
+	free(media_q);
+	free(iface_q);
+	free(health_q);
+	free(reason_q);
+	if (written <= 0 || written >= (int)sizeof(sql_query))
+		return false;
+	return hifs_metadata_async_execute(sql_query);
+}
+
+static bool hg_hw_status_upsert(uint64_t node_id, const hg_hw_component_row_t *row,
+			        const char *telemetry_json)
+{
+	if (!row || !sqldb.sql_init || !sqldb.conn)
+		return false;
+	char *type_q = hg_sql_quote_string(row->component_type ? row->component_type : "other");
+	char *slot_q = hg_sql_quote_string(row->component_slot);
+	char *serial_q = row->component_serial[0] ? hg_sql_quote_string(row->component_serial) : NULL;
+	char *vendor_q = row->component_vendor[0] ? hg_sql_quote_string(row->component_vendor) : NULL;
+	char *model_q = row->component_model[0] ? hg_sql_quote_string(row->component_model) : NULL;
+	char *state_q = hg_sql_quote_string(row->health_state[0] ? row->health_state : "unknown");
+	char *reason_q = row->health_reason[0] ? hg_sql_quote_string(row->health_reason) : NULL;
+	char *flags_q = row->status_flags[0] ? hg_sql_quote_string(row->status_flags) : hg_sql_quote_string("");
+	char *telemetry_q = (telemetry_json && telemetry_json[0]) ? hg_sql_quote_string(telemetry_json) : NULL;
+	const char *type_use = type_q ? type_q : "'other'";
+	const char *slot_use = slot_q ? slot_q : "'system'";
+	const char *serial_use = serial_q ? serial_q : "NULL";
+	const char *vendor_use = vendor_q ? vendor_q : "NULL";
+	const char *model_use = model_q ? model_q : "NULL";
+	const char *state_use = state_q ? state_q : "'unknown'";
+	const char *reason_use = reason_q ? reason_q : "NULL";
+	const char *flags_use = flags_q ? flags_q : "''";
+	const char *telemetry_use = telemetry_q ? telemetry_q : "NULL";
+	char sql_query[MAX_QUERY_SIZE];
+	int written = snprintf(sql_query, sizeof(sql_query), HG_SQL_HARDWARE_STATUS_UPSERT,
+			       (unsigned long long)node_id,
+			       type_use,
+			       slot_use,
+			       serial_use,
+			       vendor_use,
+			       model_use,
+			       state_use,
+			       reason_use,
+			       flags_use,
+			       telemetry_use);
+	free(type_q);
+	free(slot_q);
+	free(serial_q);
+	free(vendor_q);
+	free(model_q);
+	free(state_q);
+	free(reason_q);
+	free(flags_q);
+	free(telemetry_q);
+	if (written <= 0 || written >= (int)sizeof(sql_query))
+		return false;
+	return hifs_metadata_async_execute(sql_query);
+}
+
+static bool hg_disk_should_skip(const char *dev)
+{
+	if (!dev || !dev[0])
+		return true;
+	return (!strncmp(dev, "loop", 4) || !strncmp(dev, "ram", 3) ||
+		!strncmp(dev, "zram", 4) || !strncmp(dev, "dm-", 3) ||
+		!strncmp(dev, "md", 2) || !strncmp(dev, "sr", 2));
+}
+
+static void hg_fill_disk_row(const char *dev, hg_disk_status_row_t *row)
+{
+	memset(row, 0, sizeof(*row));
+	if (!dev)
+		return;
+	hifs_safe_strcpy(row->disk_name, sizeof(row->disk_name), dev);
+	hg_build_dev_path(row->disk_path, sizeof(row->disk_path), dev);
+	char path[PATH_MAX];
+	snprintf(path, sizeof(path), "/sys/block/%s/size", dev);
+	uint64_t sectors = 0;
+	if (hg_read_sysfs_u64(path, &sectors) != 0)
+		sectors = 0;
+	snprintf(path, sizeof(path), "/sys/block/%s/queue/hw_sector_size", dev);
+	uint64_t sectsz = 512;
+	(void)hg_read_sysfs_u64(path, &sectsz);
+	row->capacity_bytes = sectors * sectsz;
+	snprintf(path, sizeof(path), "/sys/block/%s/device/serial", dev);
+	if (!hg_read_sysfs_line(path, row->disk_serial, sizeof(row->disk_serial)))
+		hifs_safe_strcpy(row->disk_serial, sizeof(row->disk_serial), row->disk_name);
+	snprintf(path, sizeof(path), "/sys/block/%s/device/model", dev);
+	(void)hg_read_sysfs_line(path, row->disk_model, sizeof(row->disk_model));
+	snprintf(path, sizeof(path), "/sys/block/%s/device/vendor", dev);
+	(void)hg_read_sysfs_line(path, row->disk_vendor, sizeof(row->disk_vendor));
+	static const char *fw_paths[] = { "firmware_rev", "fwrev", "rev" };
+	for (size_t i = 0; i < ARRAY_SIZE(fw_paths); ++i) {
+		snprintf(path, sizeof(path), "/sys/block/%s/device/%s", dev, fw_paths[i]);
+		if (hg_read_sysfs_line(path, row->disk_firmware, sizeof(row->disk_firmware)))
+			break;
+	}
+	snprintf(path, sizeof(path), "/sys/block/%s/queue/rotational", dev);
+	uint64_t rotational = 1;
+	(void)hg_read_sysfs_u64(path, &rotational);
+	const char *media = hg_disk_media_type(dev, (unsigned int)rotational);
+	hifs_safe_strcpy(row->media_type, sizeof(row->media_type), media);
+	const char *iface = hg_disk_interface_type(dev);
+	hifs_safe_strcpy(row->interface_type, sizeof(row->interface_type), iface);
+	snprintf(path, sizeof(path), "/sys/block/%s/device/state", dev);
+	char state_buf[64] = {0};
+	bool have_state = hg_read_sysfs_line(path, state_buf, sizeof(state_buf));
+	snprintf(path, sizeof(path), "/sys/block/%s/device/device_blocked", dev);
+	uint64_t blocked = 0;
+	(void)hg_read_sysfs_u64(path, &blocked);
+	bool warn = false;
+	bool crit = false;
+	row->status_reason[0] = '\0';
+	if (!have_state) {
+		crit = true;
+		hifs_safe_strcpy(row->status_reason, sizeof(row->status_reason), "state_unavailable");
+	} else if (strcmp(state_buf, "running") != 0 && strcmp(state_buf, "live") != 0) {
+		crit = true;
+		snprintf(row->status_reason, sizeof(row->status_reason), "state=%s", state_buf);
+	} else if (blocked > 0) {
+		warn = true;
+		snprintf(row->status_reason, sizeof(row->status_reason), "device_blocked=%llu", (unsigned long long)blocked);
+	}
+	const char *health = crit ? "crit" : (warn ? "warn" : "ok");
+	hifs_safe_strcpy(row->smart_health, sizeof(row->smart_health), health);
+}
+
+static void hg_record_disk_status(uint64_t node_id)
+{
+	DIR *dir = opendir("/sys/block");
+	if (!dir)
+		return;
+	struct dirent *de;
+	while ((de = readdir(dir)) != NULL) {
+		const char *dev = de->d_name;
+		if (dev[0] == '.' || hg_disk_should_skip(dev))
+			continue;
+		hg_disk_status_row_t row;
+		hg_fill_disk_row(dev, &row);
+		if (!row.disk_name[0])
+			continue;
+		(void)hg_disk_status_upsert(node_id, &row);
+		char component_key[96];
+		snprintf(component_key, sizeof(component_key), "disk:%s", row.disk_name);
+		if (!row.status_reason[0])
+			hifs_safe_strcpy(row.status_reason, sizeof(row.status_reason), "disk healthy");
+		if (hg_state_cache_should_alert(g_disk_alert_cache, ARRAY_SIZE(g_disk_alert_cache),
+					 component_key, row.smart_health)) {
+			hg_send_bootstrap_alert(component_key, row.smart_health, row.status_reason);
+		}
+	}
+	closedir(dir);
+}
+
+static pthread_once_t g_cpu_model_once = PTHREAD_ONCE_INIT;
+static char g_cpu_model[128];
+
+static void hg_load_cpu_model(void)
+{
+	FILE *f = fopen("/proc/cpuinfo", "r");
+	if (!f)
+		return;
+	char line[256];
+	while (fgets(line, sizeof(line), f)) {
+		if (strncmp(line, "model name", 10) != 0)
+			continue;
+		char *colon = strchr(line, ':');
+		if (!colon)
+			continue;
+		++colon;
+		hg_trim_whitespace(colon);
+		hifs_safe_strcpy(g_cpu_model, sizeof(g_cpu_model), colon);
+		break;
+	}
+	fclose(f);
+}
+
+static const char *hg_cpu_model_string(void)
+{
+	pthread_once(&g_cpu_model_once, hg_load_cpu_model);
+	return g_cpu_model[0] ? g_cpu_model : "CPU";
+}
+
+static const char *hg_health_from_percent(double pct)
+{
+	if (pct >= 95.0)
+		return "crit";
+	if (pct >= 85.0)
+		return "warn";
+	return "ok";
+}
+
+static void hg_record_hw_components(uint64_t node_id)
+{
+	uint64_t mem_used = atomic_load(&g_stats.mem_used_counter);
+	uint64_t mem_avail = atomic_load(&g_stats.mem_avail_counter);
+	uint64_t mem_total = mem_used + mem_avail;
+	double mem_pct = mem_total ? ((double)mem_used * 100.0) / (double)mem_total : 0.0;
+	unsigned int cpu_pct = (unsigned int)atomic_load(&g_stats.cpu_counter);
+	char telemetry[256];
+	hg_hw_component_row_t rows[2] = {0};
+	size_t nrows = 0;
+	rows[nrows].component_type = "cpu";
+	hifs_safe_strcpy(rows[nrows].component_slot, sizeof(rows[nrows].component_slot), "socket0");
+	hifs_safe_strcpy(rows[nrows].component_model, sizeof(rows[nrows].component_model), hg_cpu_model_string());
+	rows[nrows].health_state[0] = '\0';
+	hifs_safe_strcpy(rows[nrows].health_state, sizeof(rows[nrows].health_state), hg_health_from_percent(cpu_pct));
+	snprintf(rows[nrows].health_reason, sizeof(rows[nrows].health_reason),
+		 "CPU utilization %u%%", cpu_pct);
+	snprintf(telemetry, sizeof(telemetry), "{\"utilization\":%u}", cpu_pct);
+	(void)hg_hw_status_upsert(node_id, &rows[nrows], telemetry);
+	char component_key[96];
+	snprintf(component_key, sizeof(component_key), "hw:cpu:%s", rows[nrows].component_slot);
+	if (hg_state_cache_should_alert(g_hw_alert_cache, ARRAY_SIZE(g_hw_alert_cache),
+					 component_key, rows[nrows].health_state)) {
+		hg_send_bootstrap_alert(component_key, rows[nrows].health_state,
+					 rows[nrows].health_reason);
+	}
+	++nrows;
+	rows[nrows].component_type = "memory";
+	hifs_safe_strcpy(rows[nrows].component_slot, sizeof(rows[nrows].component_slot), "system");
+	hifs_safe_strcpy(rows[nrows].component_model, sizeof(rows[nrows].component_model), "system-memory");
+	const char *mem_health = hg_health_from_percent(mem_pct);
+	hifs_safe_strcpy(rows[nrows].health_state, sizeof(rows[nrows].health_state), mem_health);
+	uint64_t used_mb = mem_used / 1024ULL;
+	uint64_t total_mb = mem_total / 1024ULL;
+	snprintf(rows[nrows].health_reason, sizeof(rows[nrows].health_reason),
+		 "Memory utilization %.1f%% (%llu/%llu MiB)", mem_pct,
+		 (unsigned long long)used_mb, (unsigned long long)(total_mb ? total_mb : 0));
+	snprintf(telemetry, sizeof(telemetry),
+		 "{\"used_kb\":%llu,\"avail_kb\":%llu}",
+		 (unsigned long long)mem_used, (unsigned long long)mem_avail);
+	(void)hg_hw_status_upsert(node_id, &rows[nrows], telemetry);
+	snprintf(component_key, sizeof(component_key), "hw:memory:%s", rows[nrows].component_slot);
+	if (hg_state_cache_should_alert(g_hw_alert_cache, ARRAY_SIZE(g_hw_alert_cache),
+					 component_key, rows[nrows].health_state)) {
+		hg_send_bootstrap_alert(component_key, rows[nrows].health_state,
+					 rows[nrows].health_reason);
+	}
+}
+
+static void hg_hw_status_tick(uint64_t node_id)
+{
+	static time_t last_tick = 0;
+	if (node_id == 0)
+		return;
+	time_t now = time(NULL);
+	if (last_tick != 0 && (now - last_tick) < HG_HW_STATUS_INTERVAL_SEC)
+		return;
+	last_tick = now;
+	hg_record_disk_status(node_id);
+	hg_record_hw_components(node_id);
+}
 static void hg_collect_filesystem_stats(uint64_t node_id)
 {
 	/* Default mount list matches prior Python collector */
@@ -761,13 +1297,16 @@ static void *hg_stats_thread_main(void *arg)
         // 7) Persist filesystem/disk health snapshots if we know our node id
         uint64_t node_id = storage_node_id ? (uint64_t)storage_node_id : 0;
         if (node_id != 0) {
-            hg_collect_filesystem_stats(node_id);
-            hg_collect_disk_stats(node_id);
-            last_fs_sample_node = node_id;
-        } else if (last_fs_sample_node != 0) {
-            hg_collect_filesystem_stats(last_fs_sample_node);
-            hg_collect_disk_stats(last_fs_sample_node);
-        }
+		hg_collect_filesystem_stats(node_id);
+		hg_collect_disk_stats(node_id);
+		last_fs_sample_node = node_id;
+	} else if (last_fs_sample_node != 0) {
+		hg_collect_filesystem_stats(last_fs_sample_node);
+		hg_collect_disk_stats(last_fs_sample_node);
+	}
+	uint64_t hw_node_id = node_id ? node_id : last_fs_sample_node;
+	if (hw_node_id)
+		hg_hw_status_tick(hw_node_id);
 
         // 7) Persist one row
         (void)hifs_store_stats(&s);

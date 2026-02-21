@@ -35,6 +35,31 @@ struct RaftTokenCommand;
 
 #include "../../hifs_shared_defs.h"
 
+typedef struct {
+	char disk_name[64];
+	char disk_serial[128];
+	char disk_path[128];
+	char disk_model[128];
+	char disk_vendor[64];
+	char disk_firmware[64];
+	char media_type[16];
+	char interface_type[16];
+	char smart_health[8];
+	char status_reason[256];
+	uint64_t capacity_bytes;
+} hg_disk_status_row_t;
+
+typedef struct {
+	const char *component_type;
+	char component_slot[32];
+	char component_model[128];
+	char component_vendor[64];
+	char component_serial[64];
+	char health_state[8];
+	char health_reason[256];
+	char status_flags[128];
+} hg_hw_component_row_t;
+
 #define DB_HOST     NULL
 #define DB_NAME     "hive_meta"
 #define DB_USER     "hiveadmin"
@@ -148,22 +173,27 @@ bool hifs_store_fs_stat(uint64_t node_id,
  * Insert one row per block device per sampling interval.
  */
 bool hifs_store_disk_stat(uint64_t node_id,
-			  uint64_t ts_unix,
-			  const char *disk_name,
-			  const char *disk_path,
-			  uint64_t disk_size_bytes,
-			  unsigned int disk_rotational,
-			  uint64_t reads_completed,
-			  uint64_t writes_completed,
-			  uint64_t read_bytes,
-			  uint64_t write_bytes,
-			  uint64_t read_ms,
-			  uint64_t write_ms,
-			  uint64_t io_in_progress,
-			  uint64_t io_ms,
-			  uint64_t weighted_io_ms,
-			  const char *fs_path,
-			  const char *health);
+		  uint64_t ts_unix,
+		  const char *disk_name,
+		  const char *disk_path,
+		  uint64_t disk_size_bytes,
+		  unsigned int disk_rotational,
+		  uint64_t reads_completed,
+		  uint64_t writes_completed,
+		  uint64_t read_bytes,
+		  uint64_t write_bytes,
+		  uint64_t read_ms,
+		  uint64_t write_ms,
+		  uint64_t io_in_progress,
+		  uint64_t io_ms,
+		  uint64_t weighted_io_ms,
+		  const char *fs_path,
+		  const char *health);
+
+/* disk & hardware status upserts */
+bool hg_sql_disk_status_upsert(uint64_t node_id, const hg_disk_status_row_t *row);
+bool hg_sql_hw_status_upsert(uint64_t node_id, const hg_hw_component_row_t *row,
+				   const char *telemetry_json);
 
 MYSQL *hg_sql_get_db(void);
 int get_host_info(void);

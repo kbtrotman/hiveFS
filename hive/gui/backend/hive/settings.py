@@ -41,6 +41,7 @@ INTERNAL_IPS = [
 # Application definition
 
 INSTALLED_APPS = [
+    "daphne",
     'corsheaders',
     'django.contrib.admin',
     'django.contrib.auth',
@@ -68,6 +69,7 @@ INSTALLED_APPS = [
     'nodes',
     'disk',
     'api',
+    "django_eventstream",
     'allauth.socialaccount.providers.okta',
     'allauth.socialaccount.providers.microsoft',
 ]
@@ -258,5 +260,7 @@ ACCOUNT_UNIQUE_EMAIL = True
 ACCOUNT_CONFIRM_EMAIL_ON_GET = True
 ACCOUNT_EMAIL_CONFIRMATION_AUTHENTICATED_REDIRECT_URL = 'http://localhost:8000/api/v1/accounts/auth/login/'
 LOGIN_URL = 'http://localhost:8000/api/v1/accounts/auth/login/'
-ACCOUNT_AUTHENTICATION_METHOD = "username_email"
+ACCOUNT_LOGIN_METHODS = {'email', 'username'}
 ACCOUNT_SIGNUP_FIELDS = ['email*', 'username*', 'password1*', 'password2*']
+
+ASGI_APPLICATION = "hive.asgi.application"
