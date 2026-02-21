@@ -89,6 +89,7 @@
 #endif
 #ifndef HIVE_BOOTSTRAP_BACKLOG
 #define HIVE_BOOTSTRAP_BACKLOG   4
+#define HIVE_JOB_ID_LEN          64
 #endif
 
 
@@ -103,6 +104,7 @@ enum hive_bootstrap_stage {
 
 struct hive_bootstrap_config {
 	uint64_t cluster_id;
+	char job_id[HIVE_JOB_ID_LEN];
 	char cluster_state[15];
 	char database_state[15];
 	char kv_state[15];

@@ -345,6 +345,72 @@ CREATE TABLE IF NOT EXISTS storage_node_disk_stats (
   KEY idx_node_disk_ts (node_id, disk_name, disk_ts)
 ) ENGINE=InnoDB;
 
+CREATE TABLE IF NOT EXISTS disk_status (
+  node_id             INT UNSIGNED NOT NULL,
+  disk_name           VARCHAR(64) NOT NULL,
+  disk_serial         VARCHAR(128) NOT NULL,
+  disk_slot           VARCHAR(32) NULL,
+  disk_enclosure      VARCHAR(64) NULL,
+  disk_path           VARCHAR(128) NOT NULL,
+  disk_model          VARCHAR(128) NULL,
+  disk_vendor         VARCHAR(64) NULL,
+  disk_firmware       VARCHAR(64) NULL,
+  disk_capacity_bytes BIGINT UNSIGNED NOT NULL,
+  media_type          ENUM('ssd','hdd','pmem','unknown') NOT NULL DEFAULT 'unknown',
+  interface_type      ENUM('sata','sas','nvme','pcie','fc','usb','unknown') NOT NULL DEFAULT 'unknown',
+  rpm                 INT UNSIGNED NULL,
+  temperature_c       DECIMAL(5,2) NULL,
+  power_on_hours      INT UNSIGNED NULL,
+  smart_health        ENUM('ok','warn','crit','unknown') NOT NULL DEFAULT 'ok',
+  status_reason       VARCHAR(255) NULL,
+  failure_count       INT UNSIGNED NOT NULL DEFAULT 0,
+  last_failure_ts     TIMESTAMP NULL,
+  paged_out           TINYINT(1) NOT NULL DEFAULT 0,
+  paged_out_ts        TIMESTAMP NULL,
+  last_seen_ts        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                          ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (node_id, disk_serial),
+  UNIQUE KEY u_node_disk_name (node_id, disk_name),
+  KEY idx_disk_status_health (smart_health, paged_out),
+  KEY idx_disk_status_last_seen (last_seen_ts),
+  KEY idx_disk_status_failure (failure_count, last_failure_ts)
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS hardware_status (
+  node_id             INT UNSIGNED NOT NULL,
+  component_type      ENUM('cpu','memory','nic','psu','fan','controller','disk','sensor','backplane','chassis','other')
+                          NOT NULL DEFAULT 'other',
+  component_slot      VARCHAR(64) NOT NULL,
+  component_serial    VARCHAR(128) NULL,
+  component_vendor    VARCHAR(64) NULL,
+  component_model     VARCHAR(128) NULL,
+  firmware_version    VARCHAR(64) NULL,
+  health_state        ENUM('ok','warn','crit','offline','unknown') NOT NULL DEFAULT 'ok',
+  health_reason       VARCHAR(255) NULL,
+  status_flags        SET('overtemp','undervolt','overvolt','fan_fail','ecc_error','link_down','firmware_mismatch','predictive_failure','power_cycle_required','maintenance')
+                          NOT NULL DEFAULT '',
+  temperature_c       DECIMAL(5,2) NULL,
+  voltage_v           DECIMAL(6,3) NULL,
+  current_a           DECIMAL(6,3) NULL,
+  power_w             DECIMAL(7,3) NULL,
+  fan_rpm             INT UNSIGNED NULL,
+  error_count         INT UNSIGNED NOT NULL DEFAULT 0,
+  last_error_ts       TIMESTAMP NULL,
+  telemetry_json      JSON NULL,
+  paged_down          TINYINT(1) NOT NULL DEFAULT 0,
+  paged_down_ts       TIMESTAMP NULL,
+  first_seen_ts       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_seen_ts        TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                          ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (node_id, component_type, component_slot),
+  KEY idx_hw_status_node_health (node_id, health_state),
+  KEY idx_hw_status_serial (component_serial),
+  KEY idx_hw_status_errors (error_count, last_error_ts),
+  KEY idx_hw_status_paged (paged_down, paged_down_ts),
+  KEY idx_hw_status_updated (last_seen_ts)
+) ENGINE=InnoDB;
+
 CALL ensure_stats_column_coverage();
 DROP PROCEDURE IF EXISTS ensure_stats_column_coverage;
 
@@ -661,7 +727,8 @@ END//
 USE hive_api;
 
 -- Virtual Entities only in the API DB.
-
+CREATE OR REPLACE VIEW v_disk_status AS SELECT * FROM hive_meta.disk_status;
+CREATE OR REPLACE VIEW v_hardware_status AS SELECT * FROM hive_meta.hardware_status;
 CREATE OR REPLACE VIEW v_meta_snapshots AS SELECT * FROM hive_meta.meta_snapshots;
 CREATE OR REPLACE VIEW v_dentries AS SELECT * FROM hive_meta.volume_dentries;
 CREATE OR REPLACE VIEW v_inodes   AS SELECT * FROM hive_meta.volume_inodes;

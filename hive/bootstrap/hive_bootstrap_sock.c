@@ -61,6 +61,7 @@ struct hive_bootstrap_request {
 	char command[32];
 	uint64_t cluster_id;
 	uint64_t node_id;
+	char job_id[HIVE_JOB_ID_LEN];
 	char cluster_state[16];
 	char cluster_name[30];
 	char cluster_desc[201];
@@ -608,6 +609,7 @@ static bool build_join_payload_prefix(char *buf, size_t buf_sz,
 				       uint64_t node_id,
 				       uint64_t min_nodes_req,
 				       const char *cluster_state_json,
+				       const char *job_id_json,
 				       size_t *written)
 {
 	if (!buf || buf_sz == 0 || !command || !cluster_state_json)
@@ -619,12 +621,14 @@ static bool build_join_payload_prefix(char *buf, size_t buf_sz,
 		"\"cluster_id\":%llu,"
 		"\"node_id\":%llu,"
 		"\"min_nodes_req\":%llu,"
-		"\"cluster_state\":%s,",
+		"\"cluster_state\":%s,"
+		"\"job_id\":%s,",
 		command,
 		(unsigned long long)cluster_id,
 		(unsigned long long)node_id,
 		(unsigned long long)min_nodes,
-		cluster_state_json);
+		cluster_state_json,
+		job_id_json ? job_id_json : "null");
 	if (n < 0 || (size_t)n >= buf_sz)
 		return false;
 	if (written)
@@ -643,6 +647,7 @@ static bool build_cluster_join_payload(const struct hive_bootstrap_request *req,
 	char join_token_buf[256];
 	char user_id_buf[80];
 	char raw_payload_buf[HIVE_BOOTSTRAP_MSG_MAX * 2];
+	char job_id_buf[HIVE_JOB_ID_LEN * 2];
 	const char *cluster_name_json =
 		json_string_or_null(req->cluster_name, cluster_name_buf,
 			    sizeof(cluster_name_buf));
@@ -661,6 +666,9 @@ static bool build_cluster_join_payload(const struct hive_bootstrap_request *req,
 	const char *raw_payload_json =
 		json_string_or_null(req->raw_payload, raw_payload_buf,
 			    sizeof(raw_payload_buf));
+	const char *job_id_json =
+		json_string_or_null(req->job_id, job_id_buf,
+			    sizeof(job_id_buf));
 	const char *cluster_state_ptr =
 		req->cluster_state[0] ? req->cluster_state : NULL;
 	char cluster_state_buf[32];
@@ -673,6 +681,7 @@ static bool build_cluster_join_payload(const struct hive_bootstrap_request *req,
 					req->node_id,
 					req->min_nodes_req,
 					cluster_state_json,
+					job_id_json,
 					&off))
 		return false;
 	int n = snprintf(
@@ -812,15 +821,21 @@ static bool build_status_payload(const struct hive_bootstrap_request *req,
 	if (!req || !buf || buf_sz == 0)
 		return false;
 	char raw_payload_buf[HIVE_BOOTSTRAP_MSG_MAX * 2];
+	char job_id_buf[HIVE_JOB_ID_LEN * 2];
 	const char *raw_payload_json =
 		json_string_or_null(req->raw_payload, raw_payload_buf,
 				    sizeof(raw_payload_buf));
+	const char *job_id_json =
+		json_string_or_null(hbc.job_id, job_id_buf,
+				    sizeof(job_id_buf));
 	int n = snprintf(
 		buf, buf_sz,
 		"{\"command\":\"status\","
+		"\"job_id\":%s,"
 		"\"cluster_id\":%llu,"
 		"\"node_id\":%llu,"
 		"\"raw_payload\":%s}",
+		job_id_json,
 		(unsigned long long)req->cluster_id,
 		(unsigned long long)req->node_id,
 		raw_payload_json);
@@ -865,6 +880,7 @@ static bool build_local_node_join_payload(char *buf, size_t buf_sz, const char *
 	char user_id_buf[80];
 	char cduid_value[UUID_BUF_LEN];
 	char cduid_json_buf[UUID_BUF_LEN + 4];
+	char job_id_buf[HIVE_JOB_ID_LEN * 2];
 
 	if (!ensure_uuid_file(HIVE_NODE_CLUST_UUID, cduid_value, sizeof(cduid_value)))
 		return false;
@@ -933,6 +949,9 @@ static bool build_local_node_join_payload(char *buf, size_t buf_sz, const char *
 	const char *user_id_json =
 		json_string_or_null(user_id,
 				    user_id_buf, sizeof(user_id_buf));
+	const char *job_id_json =
+		json_string_or_null(hbc.job_id,
+				    job_id_buf, sizeof(job_id_buf));
 	size_t off = 0;
 
 	if (!build_join_payload_prefix(buf, buf_sz, "node_join",
@@ -940,6 +959,7 @@ static bool build_local_node_join_payload(char *buf, size_t buf_sz, const char *
 				       hbc.storage_node_id,
 				       hbc.min_nodes_req,
 				       cluster_state_json,
+				       job_id_json,
 				       &off))
 		return false;
 	int n = snprintf(
@@ -1597,6 +1617,11 @@ static bool dispatch_bootstrap_request(const struct hive_bootstrap_request *req,
 	if (ok_message_out)
 		*ok_message_out = NULL;
 
+	if (req->job_id[0]) {
+		hive_bootstrap_update_string_field("job_id", req->job_id);
+		safe_copy(hbc.job_id, sizeof(hbc.job_id), req->job_id);
+	}
+
 	if (is_invalid_node_join_request(req)) {
 		set_invalid_node_join_state();
 		if (ok_message_out)
@@ -1733,6 +1758,7 @@ static const char *configure_status(void)
 	char hive_version_buf[32];
 	char hive_patch_buf[32];
 	char patch_str[8];
+	char job_id_buf[HIVE_JOB_ID_LEN * 2];
 	struct stat st;
 	const char *config_state = json_escape_string(g_config_state,
 						      state_buf,
@@ -1749,6 +1775,7 @@ static const char *configure_status(void)
 	const char *hive_version_field;
 	const char *hive_patch_field;
 	const char *pub_key_field = "null";
+	const char *job_id_field;
 	const char *status_text = (config_state && *config_state)
 		? config_state : "IDLE";
 	int version = 0;
@@ -1776,12 +1803,15 @@ static const char *configure_status(void)
 					  token_buf, sizeof(token_buf));
 	ts_field = json_string_or_null(hbc.first_boot_ts,
 				       ts_buf, sizeof(ts_buf));
+	job_id_field = json_string_or_null(hbc.job_id,
+					   job_id_buf, sizeof(job_id_buf));
 
 	if (stat(g_socket_path, &st) != 0) {
-		snprintf(status_buf, sizeof(status_buf),
-			 "{\"ok\":false,"
-			 "\"command\":\"status\","
-			 "\"status\":\"IN_ERROR\","
+	snprintf(status_buf, sizeof(status_buf),
+		 "{\"ok\":false,"
+		 "\"command\":\"status\","
+		 "\"job_id\":%s,"
+		 "\"status\":\"IN_ERROR\","
 			 "\"config_status\":\"IN_ERROR\","
 			 "\"config_progress\":\"0%%\","
 			 "\"config_msg\":\"NO BOOTSTRAPS\","
@@ -1798,6 +1828,7 @@ static const char *configure_status(void)
 			 "\"hive_version\":%s,"
 			 "\"hive_patch_level\":%s,"
 			 "\"pub_key\":%s}",
+			 job_id_field,
 			 hive_version_field,
 			 hive_patch_field,
 			 pub_key_field);
@@ -1807,6 +1838,7 @@ static const char *configure_status(void)
 	snprintf(status_buf, sizeof(status_buf),
 		 "{\"ok\":true,"
 		 "\"command\":\"status\","
+		 "\"job_id\":%s,"
 		 "\"status\":\"%s\","
 		 "\"config_status\":\"%s\","
 		 "\"config_progress\":\"%s\","
@@ -1827,6 +1859,7 @@ static const char *configure_status(void)
 		 "\"hive_version\":%s,"
 		 "\"hive_patch_level\":%s,"
 		 "\"pub_key\":%s}",
+		 job_id_field,
 		 status_text,
 		 config_state,
 		 progress_text,
@@ -1865,6 +1898,8 @@ static bool parse_bootstrap_request(const char *json,
 				req->command, sizeof(req->command));
 	parse_json_u64_value(json, "cluster_id", &req->cluster_id);
 	parse_json_u64_value(json, "clister_id", &req->cluster_id);
+	parse_json_string_value(json, "job_id",
+				req->job_id, sizeof(req->job_id));
 	parse_json_string_value(json, "cluster_state",
 				req->cluster_state, sizeof(req->cluster_state));
 	parse_json_string_value(json, "cluster_name",

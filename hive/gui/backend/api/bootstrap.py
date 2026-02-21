@@ -1,6 +1,10 @@
 import json
+import logging
 import socket
 
+from django_eventstream import send_event
+
+logger = logging.getLogger(__name__)
 SOCK_PATH = "/run/hive_bootstrap.sock"
 MAX_RESPONSE = 4096
 
@@ -15,7 +19,9 @@ BOOTSTRAP_STATE_FIELDS = (
 CRITICAL_STATE_FIELDS = tuple(field for field in BOOTSTRAP_STATE_FIELDS
                               if field != "cluster_state")
 UNCONFIGURED_STATE = "unconfigured"
+EVENT_CHANNEL_PREFIX = "job-"
 PAYLOAD_TEMPLATE = {
+    "job_id": None,
     "node_id": None,
     "cluster_id": None,
     "cluster_state": UNCONFIGURED_STATE,
@@ -49,6 +55,15 @@ PAYLOAD_TEMPLATE = {
 
 class BootstrapError(Exception):
     pass
+
+from uuid6 import uuid7
+
+def generate_job_id() -> str:
+    """
+    Generate a time-ordered UUIDv7 job ID.
+    Returns a string.
+    """
+    return str(uuid7())
 
 
 def _normalize_payload(payload: dict | None) -> dict | None:
@@ -164,11 +179,41 @@ def call_bootstrap(op: str,
                    args: dict | None = None,
                    timeout: float = 5.0) -> dict:
     payload = _normalize_payload(args)
+    job_id: str | None = None
+    if payload is not None:
+        # Only commands that mutate state should get new job ids.
+        if op not in {"status", "stat", "alive"}:
+            job_id = payload.get("job_id") or generate_job_id()
+            payload["job_id"] = job_id
+            _emit_job_event(job_id, "status", f"{op} dispatched",
+                            state=payload.get("config_status"))
+
     if payload is not None and _needs_component_configuration(payload):
         result = _call_with_reconfigure(op, payload, timeout)
     else:
         result = _send_bootstrap_command(op, payload, timeout)
-    return _normalize_response(result)
+    normalized = _normalize_response(result)
+    if job_id:
+        normalized.setdefault("job_id", job_id)
+        _emit_job_event(
+            job_id,
+            "log",
+            normalized.get("config_msg") or f"{op} acknowledged",
+            status=normalized.get("config_status"),
+            progress=normalized.get("config_progress"),
+        )
+    return normalized
+
+
+def _emit_job_event(job_id: str | None, event_type: str, message: str, **extra):
+    if not job_id:
+        return
+    payload = {"job_id": job_id, "msg": message}
+    payload.update({k: v for k, v in extra.items() if v is not None})
+    try:
+        send_event(f"{EVENT_CHANNEL_PREFIX}{job_id}", event_type, payload)
+    except Exception as exc:
+        logger.warning("bootstrap job event emit failed: %s", exc)
 
 
 def call_addnode(op: str,

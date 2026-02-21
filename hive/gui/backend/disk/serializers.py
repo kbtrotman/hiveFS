@@ -1,5 +1,11 @@
 from rest_framework import serializers
-from .models import Storage_Nodes, Storage_Node_Stats, StorageNodeFsStats, StorageNodeDiskStats
+from .models import (
+    DiskStatus,
+    Storage_Nodes,
+    Storage_Node_Stats,
+    StorageNodeFsStats,
+    StorageNodeDiskStats,
+)
 
 class StorageNodeSerializer(serializers.ModelSerializer):
     class Meta:
@@ -88,4 +94,33 @@ class StorageNodeDiskStatsSerializer(serializers.ModelSerializer):
             "io_ms",
             "fs_path",
             "health",
+        ]
+
+class DiskStatusSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DiskStatus
+        fields = [
+            "node_id",
+            "disk_name",
+            "disk_serial",
+            "disk_slot",
+            "disk_enclosure",
+            "disk_path",
+            "disk_model",
+            "disk_vendor",
+            "disk_firmware",
+            "disk_capacity_bytes",
+            "media_type",
+            "interface_type",
+            "rpm",
+            "temperature_c",
+            "power_on_hours",
+            "smart_health",
+            "status_reason",
+            "failure_count",
+            "last_failure_ts",
+            "paged_out",
+            "paged_out_ts",
+            "last_seen_ts",
+            "updated_at",
         ]

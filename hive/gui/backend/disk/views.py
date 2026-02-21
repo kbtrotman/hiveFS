@@ -8,8 +8,20 @@ from django.utils.dateparse import parse_datetime
 from rest_framework.generics import ListAPIView
 from rest_framework.permissions import IsAuthenticated 
 
-from .models import Storage_Nodes, Storage_Node_Stats, StorageNodeFsStats, StorageNodeDiskStats
-from .serializers import StorageNodeSerializer, StorageNodeStatSerializer, StorageNodeFsStatsSerializer, StorageNodeDiskStatsSerializer
+from .models import (
+    DiskStatus,
+    Storage_Nodes,
+    Storage_Node_Stats,
+    StorageNodeFsStats,
+    StorageNodeDiskStats,
+)
+from .serializers import (
+    DiskStatusSerializer,
+    StorageNodeSerializer,
+    StorageNodeStatSerializer,
+    StorageNodeFsStatsSerializer,
+    StorageNodeDiskStatsSerializer,
+)
 class DiskNodeViewSet(ViewSet):
     """
     Gets the HiveFS Disk Capacities View (all nodes or by node_id).
@@ -204,3 +216,47 @@ class StorageNodeDiskStatsListView(ListAPIView):
             qs = qs.filter(health=health)
 
         return _apply_common_filters(qs, self.request, ts_field="disk_ts")
+
+class DiskStatusListView(ListAPIView):
+    permission_classes = [IsAuthenticated]  # adjust
+    serializer_class = DiskStatusSerializer
+
+    def get_queryset(self):
+        qs = DiskStatus.objects.all()
+
+        node_id = self.request.query_params.get("node_id")
+        if node_id:
+            try:
+                qs = qs.filter(node_id=int(node_id))
+            except ValueError:
+                pass
+
+        disk_name = self.request.query_params.get("disk_name")
+        if disk_name:
+            qs = qs.filter(disk_name=disk_name)
+
+        disk_serial = self.request.query_params.get("disk_serial")
+        if disk_serial:
+            qs = qs.filter(disk_serial=disk_serial)
+
+        media_type = self.request.query_params.get("media_type")
+        if media_type:
+            qs = qs.filter(media_type=media_type)
+
+        interface_type = self.request.query_params.get("interface_type")
+        if interface_type:
+            qs = qs.filter(interface_type=interface_type)
+
+        smart_health = self.request.query_params.get("smart_health")
+        if smart_health:
+            qs = qs.filter(smart_health=smart_health)
+
+        paged_out = self.request.query_params.get("paged_out")
+        if paged_out is not None:
+            normalized = paged_out.lower()
+            if normalized in ("1", "true", "yes"):
+                qs = qs.filter(paged_out=True)
+            elif normalized in ("0", "false", "no"):
+                qs = qs.filter(paged_out=False)
+
+        return _apply_common_filters(qs, self.request, ts_field="updated_at")

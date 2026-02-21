@@ -346,6 +346,8 @@ static void apply_node_config(const char *json)
 
 	if (parse_json_u64_value(json, "storage_node_id", &val))
 		hbc.storage_node_id = (unsigned int)val;
+	parse_json_string_value(json, "job_id",
+		hbc.job_id, sizeof(hbc.job_id));
 	if (parse_json_u64_value(json, "cluster_id", &val))
 		hbc.cluster_id = (unsigned int)val;
 	parse_json_string_value(json, "cluster_state",
@@ -502,6 +504,7 @@ static bool ensure_ready_flag_for_stage(uint32_t stage)
 static bool normalize_stage_from_states(void)
 {
 	uint32_t desired_stage;
+	bool was_complete = (hbc.stage_of_config >= HIVE_STAGE_COMPLETE);
 
 	if (!is_state_configured(hbc.database_state))
 		desired_stage = HIVE_STAGE_DATABASE;
@@ -516,6 +519,8 @@ static bool normalize_stage_from_states(void)
 		desired_stage = HIVE_STAGE_WEB_READY;
 
 	if (desired_stage != hbc.stage_of_config) {
+		if (was_complete && desired_stage < HIVE_STAGE_COMPLETE)
+			return ensure_ready_flag_for_stage(hbc.stage_of_config);
 		if (!set_stage_field(desired_stage))
 			return false;
 		if (!set_stage_attempts_field(0))
@@ -1144,34 +1149,37 @@ int main(void)
 	if (!ensure_ready_flag_for_stage(hbc.stage_of_config))
 		return 1;
 
-	if (hbc.stage_of_config >= HIVE_STAGE_WEB_READY &&
-	    hbc.stage_of_config < HIVE_STAGE_COMPLETE) {
-		int rc = -1;
+	if (hbc.stage_of_config >= HIVE_STAGE_WEB_READY) {
+		unsigned int attempt = 0;
 
-		for (unsigned int attempt = 0; attempt < MAX_STAGE_ATTEMPTS;
-		     ++attempt) {
+		for (;;) {
 			fprintf(stderr,
 				"bootstrap: listening for cluster/node requests (attempt %u)\n",
 				attempt + 1);
 			fflush(stderr);
-			rc = hive_bootstrap_sock_run(NULL);
+			int rc = hive_bootstrap_sock_run(NULL);
+
 			if (rc == 0) {
 				fprintf(stderr,
-					"bootstrap: request handled, continuing startup\n");
+					"bootstrap: request handled, continuing to monitor\n");
 				if (!reload_node_config_and_normalize())
 					return 1;
-				break;
+				attempt = 0;
+				continue;
 			}
+
 			fprintf(stderr,
 				"bootstrap: socket listener failed (attempt %u)\n",
 				attempt + 1);
-		}
-
-		if (rc != 0) {
-			fprintf(stderr,
-				"bootstrap: failed to initialize cluster/node after %u attempts; please contact support\n",
-				MAX_STAGE_ATTEMPTS);
-			return 1;
+			++attempt;
+			if (attempt >= MAX_STAGE_ATTEMPTS) {
+				fprintf(stderr,
+					"bootstrap: persistent socket failures; backing off before retry\n");
+				attempt = 0;
+				sleep(60);
+			} else {
+				sleep(5);
+			}
 		}
 	}
 

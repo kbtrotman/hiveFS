@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Storage_Nodes, Storage_Node_Stats
+from .models import HardwareStatus, Storage_Nodes, Storage_Node_Stats
 
 class StorageNodeSerializer(serializers.ModelSerializer):
     class Meta:
@@ -9,9 +9,9 @@ class StorageNodeSerializer(serializers.ModelSerializer):
             "node_name", 
             "node_address", 
             "node_uid",
-            "node_serial", 
-            "node_guard_port", 
-            "node_data_port"
+            "node_serial",
+            "node_guard_port",
+            "node_data_port",
             "last_heartbeat",
             "hive_version",
             "fenced",
@@ -40,3 +40,32 @@ class StorageNodeStatSerializer(serializers.ModelSerializer):
             "s_net_out",
             "avg_latency",
             ]
+
+
+class HardwareStatusSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = HardwareStatus
+        fields = [
+            "node_id",
+            "component_type",
+            "component_slot",
+            "component_serial",
+            "component_vendor",
+            "component_model",
+            "firmware_version",
+            "health_state",
+            "health_reason",
+            "status_flags",
+            "temperature_c",
+            "voltage_v",
+            "current_a",
+            "power_w",
+            "fan_rpm",
+            "error_count",
+            "last_error_ts",
+            "telemetry_json",
+            "paged_down",
+            "paged_down_ts",
+            "first_seen_ts",
+            "last_seen_ts",
+        ]

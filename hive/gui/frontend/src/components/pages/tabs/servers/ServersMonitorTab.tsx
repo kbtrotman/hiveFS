@@ -3,7 +3,15 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../..
 import { Button } from '../../../ui/button';
 import { Badge } from '../../../ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../../ui/table';
-import { Server, Plus, Power, PowerOff, MoreVertical } from 'lucide-react';
+import { Server, Power, PowerOff, MoreVertical, Cpu, HardDrive, Network } from 'lucide-react';
+import {
+  aggregateStatsByNode,
+  formatTimestamp,
+  getNodeLabel,
+  safeNumber,
+  sumStatField,
+  useDiskStats,
+} from '../../../useDiskStats';
 
 interface StorageNode {
   key: string;
@@ -43,11 +51,18 @@ interface StorageNodeStats {
 
 const API_BASE = import.meta?.env?.VITE_NODES_API_BASE_URL ?? 'http://localhost:8000/api/v1';
 
+const formatNumber = (value: number, options?: Intl.NumberFormatOptions) =>
+  Number.isFinite(value) ? new Intl.NumberFormat(undefined, options).format(value) : '—';
+
 export function ServersMonitorTab() {
   const [nodes, setNodes] = useState<StorageNode[]>([]);
   const [stats, setStats] = useState<Record<string, StorageNodeStats>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const {
+    stats: perfStats,
+    isLoading: perfLoading,
+  } = useDiskStats();
 
   useEffect(() => {
     let isMounted = true;
@@ -107,6 +122,32 @@ export function ServersMonitorTab() {
     };
   }, [nodes]);
 
+  const aggregated = useMemo(() => aggregateStatsByNode(perfStats), [perfStats]);
+
+  const perfOverview = useMemo(() => {
+    const nodeCount = aggregated.length;
+    const avgCpu =
+      nodeCount > 0
+        ? aggregated.reduce((sum, stat) => sum + safeNumber(stat.cpu), 0) / nodeCount
+        : 0;
+    const throughput = sumStatField(aggregated, 't_throughput');
+    const avgLatency =
+      nodeCount > 0
+        ? aggregated.reduce((sum, stat) => sum + safeNumber(stat.avg_rd_latency), 0) / nodeCount
+        : 0;
+
+    return { nodeCount, avgCpu, throughput, avgLatency };
+  }, [aggregated]);
+
+  const topCpu = useMemo(
+    () =>
+      aggregated
+        .slice()
+        .sort((a, b) => safeNumber(b.cpu) - safeNumber(a.cpu))
+        .slice(0, 5),
+    [aggregated],
+  );
+
   const formatPercent = (value?: number | null, fractionDigits = 0) => {
     if (value === null || value === undefined || Number.isNaN(value)) return '—';
     return `${value.toFixed(fractionDigits)}%`;
@@ -130,60 +171,111 @@ export function ServersMonitorTab() {
 
   const resolveStatus = (node: StorageNode) => (node.fenced ? 'fenced' : 'running');
 
+  const combinedStats = [
+    {
+      key: 'total-nodes',
+      label: 'Total Nodes',
+      value: isLoading ? '…' : totalNodes,
+      icon: <Server className="w-5 h-5 text-blue-500" />,
+    },
+    {
+      key: 'running-nodes',
+      label: 'Running',
+      value: isLoading ? '…' : runningNodes,
+      icon: <Power className="w-5 h-5 text-green-500" />,
+    },
+    {
+      key: 'stopped-nodes',
+      label: 'Stopped',
+      value: isLoading ? '…' : stoppedNodes,
+      icon: <PowerOff className="w-5 h-5 text-red-500" />,
+    },
+    {
+      key: 'cluster-health',
+      label: 'Cluster Health',
+      value: isLoading ? '—' : clusterHealth,
+      icon: <Server className="w-5 h-5 text-green-500" />,
+    },
+    {
+      key: 'active-nodes',
+      label: 'Active Nodes',
+      value: perfLoading ? '—' : perfOverview.nodeCount,
+      icon: <Server className="w-5 h-5 text-emerald-500" />,
+    },
+    {
+      key: 'avg-cpu',
+      label: 'Avg CPU Load',
+      value: perfLoading ? '—' : `${perfOverview.avgCpu.toFixed(1)}%`,
+      icon: <Cpu className="w-5 h-5 text-blue-500" />,
+    },
+    {
+      key: 'throughput',
+      label: 'Total Throughput',
+      value: perfLoading ? '—' : `${formatNumber(perfOverview.throughput)} MB/s`,
+      icon: <HardDrive className="w-5 h-5 text-purple-500" />,
+    },
+    {
+      key: 'avg-latency',
+      label: 'Avg Read Latency',
+      value: perfLoading ? '—' : `${formatNumber(perfOverview.avgLatency, { maximumFractionDigits: 2 })} ms`,
+      icon: <Network className="w-5 h-5 text-orange-500" />,
+    },
+  ];
+
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <div>
-          <h2>Node Management</h2>
-          <p className="text-muted-foreground">Monitor and manage your HiveFS node cluster</p>
-        </div>
-        <Button>
-          <Plus className="w-4 h-4 mr-2" />
-          Add Node
-        </Button>
+      <div>
+        <h2>Node Monitor</h2>
+        <p className="text-muted-foreground">Monitor and manage your HiveFS node cluster</p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Total Nodes</p>
-                <p className="mt-2">{isLoading ? '…' : totalNodes}</p>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8 2xl:grid-cols-8">
+        {combinedStats.map((stat) => (
+          <Card key={stat.key}>
+            <CardContent className="pt-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">{stat.label}</p>
+                  <p className="mt-2">{stat.value}</p>
+                </div>
+                {stat.icon}
               </div>
-              <Server className="w-5 h-5 text-blue-500" />
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Running</p>
-                <p className="mt-2 text-green-500">{isLoading ? '…' : runningNodes}</p>
-              </div>
-              <Power className="w-5 h-5 text-green-500" />
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-muted-foreground">Stopped</p>
-                <p className="mt-2 text-red-500">{isLoading ? '…' : stoppedNodes}</p>
-              </div>
-              <PowerOff className="w-5 h-5 text-red-500" />
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-6">
-            <p className="text-sm text-muted-foreground">Cluster Health</p>
-            <p className="mt-2 text-green-500">{isLoading ? '—' : clusterHealth}</p>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        ))}
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Top Utilization</CardTitle>
+          <CardDescription>Nodes driving the highest CPU usage</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {perfLoading ? (
+            <p className="text-sm text-muted-foreground">Loading node metrics…</p>
+          ) : topCpu.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No stats to display.</p>
+          ) : (
+            topCpu.map((stat, index) => (
+              <div
+                key={stat.key ?? stat.node_id ?? index}
+                className="flex items-center justify-between p-3 border border-border rounded-md"
+              >
+                <div>
+                  <p>{getNodeLabel(stat)}</p>
+                  <p className="text-sm text-muted-foreground">
+                    {stat.s_ts ? formatTimestamp(stat.s_ts) : 'No timestamp'}
+                  </p>
+                </div>
+                <div className="text-right">
+                  <p className="text-sm text-muted-foreground">CPU</p>
+                  <p className="text-sm">{safeNumber(stat.cpu).toFixed(1)}%</p>
+                </div>
+              </div>
+            ))
+          )}
+        </CardContent>
+      </Card>
 
       {error && (
         <div className="rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">

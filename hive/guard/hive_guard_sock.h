@@ -30,6 +30,7 @@ struct hive_guard_sock_join_sec {
 	uint64_t cluster_id;
 	uint64_t node_id;
 	uint64_t min_nodes_req;
+	char job_id[HIVE_JOB_ID_LEN];
 	char cluster_name[GUARD_CLUSTER_NAME_LEN];
 	char cluster_desc[GUARD_CLUSTER_DESC_LEN];
 	char cluster_state[GUARD_SOCK_STATE_LEN];
@@ -72,6 +73,7 @@ struct hive_guard_join_context {
 	const char *kv_state;
 	const char *cont1_state;
 	const char *cont2_state;
+	const char *job_id;
 	uint64_t min_nodes_required;
 	uint32_t flags;
 	const char *first_boot_ts;

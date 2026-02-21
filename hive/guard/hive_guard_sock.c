@@ -413,6 +413,7 @@ int hive_guard_distribute_node_tokens(const struct hive_guard_join_context *ctx)
 	char cont1_state_buf[32];
 	char cont2_state_buf[32];
 	char cduid_field[GUARD_SOCK_UID_LEN * 2];
+	char job_id_field[HIVE_JOB_ID_LEN * 2];
 
 	const char *node_id_json =
 		json_number_or_null(node_id_buf, sizeof(node_id_buf),
@@ -443,6 +444,8 @@ int hive_guard_distribute_node_tokens(const struct hive_guard_join_context *ctx)
 		sizeof(hive_patch_field));
 	const char *cduid_json = json_string_or_null(
 		ctx->cduid, cduid_field, sizeof(cduid_field));
+	const char *job_id_json = json_string_or_null(
+		ctx->job_id, job_id_field, sizeof(job_id_field));
 
 	json_escape_string(default_state(ctx->cluster_state, "unconfigured"),
 			   cluster_state_buf, sizeof(cluster_state_buf));
@@ -462,7 +465,8 @@ int hive_guard_distribute_node_tokens(const struct hive_guard_join_context *ctx)
 			  strlen(config_msg_json) +
 			  strlen(hive_version_json) +
 			  strlen(hive_patch_json) +
-			  strlen(cduid_json);
+			  strlen(cduid_json) +
+			  strlen(job_id_json);
 	json = malloc(json_cap);
 	if (!json)
 		goto cleanup;
@@ -474,6 +478,7 @@ int hive_guard_distribute_node_tokens(const struct hive_guard_join_context *ctx)
 		"\"hive_patch_level\":%s,"
 		"\"node_id\":%s,"
 		"\"cluster_id\":%s,"
+		"\"job_id\":%s,"
 		"\"cluster_state\":\"%s\","
 		"\"database_state\":\"%s\","
 		"\"kv_state\":\"%s\","
@@ -491,6 +496,7 @@ int hive_guard_distribute_node_tokens(const struct hive_guard_join_context *ctx)
 		hive_patch_json,
 		node_id_json,
 		cluster_id_json,
+		job_id_json,
 		cluster_state_buf,
 		database_state_buf,
 		kv_state_buf,
@@ -738,6 +744,9 @@ static bool guard_sock_parse_join_request(const char *json,
 	guard_sock_parse_string_value(json, "cluster_desc",
 				      out->cluster_desc,
 				      sizeof(out->cluster_desc));
+	guard_sock_parse_string_value(json, "job_id",
+				      out->job_id,
+				      sizeof(out->job_id));
 	guard_sock_parse_string_value(json, "cluster_state",
 				      out->cluster_state,
 				      sizeof(out->cluster_state));
@@ -819,6 +828,9 @@ static bool guard_sock_parse_cluster_join(const char *json,
 	guard_sock_parse_string_value(json, "cluster_desc",
 				      out->cluster_desc,
 				      sizeof(out->cluster_desc));
+	guard_sock_parse_string_value(json, "job_id",
+				      out->job_id,
+				      sizeof(out->job_id));
 	guard_sock_parse_string_value(json, "cluster_state",
 				      out->cluster_state,
 				      sizeof(out->cluster_state));
@@ -888,6 +900,8 @@ static int guard_sock_handle_node_join(const struct hive_guard_sock_join_sec *re
 	hbc.cluster_id = req->cluster_id;
 	hbc.storage_node_id = (uint32_t)req->node_id;
 	hbc.min_nodes_req = req->min_nodes_req;
+	guard_sock_copy_field(hbc.job_id, sizeof(hbc.job_id),
+			      req->job_id, "");
 	guard_sock_copy_field(hbc.cluster_state, sizeof(hbc.cluster_state),
 			      req->cluster_state, "unconfigured");
 	guard_sock_copy_field(hbc.database_state, sizeof(hbc.database_state),
@@ -946,6 +960,8 @@ static int guard_sock_handle_cluster_join(const struct hive_guard_sock_cluster_j
 	hbc.cluster_id = req->cluster_id;
 	hbc.storage_node_id = req->node_id ? (uint32_t)req->node_id : 1U;
 	hbc.min_nodes_req = min_nodes;
+	guard_sock_copy_field(hbc.job_id, sizeof(hbc.job_id),
+			      req->job_id, "");
 	guard_sock_copy_field(hbc.cluster_state, sizeof(hbc.cluster_state),
 			      req->cluster_state, "configuring");
 	guard_sock_copy_field(hbc.bootstrap_token,
@@ -1115,6 +1131,7 @@ static int guard_sock_handle_join_sec(const struct hive_guard_sock_join_sec *req
 		.hive_patch_level = req->hive_patch_level[0]
 			? req->hive_patch_level : NULL,
 		.user_id = req->user_id[0] ? req->user_id : NULL,
+		.job_id = req->job_id[0] ? req->job_id : NULL,
 	};
 	if (req->action[0] && strcmp(req->action, "node_join") == 0)
 		return guard_sock_handle_node_join(req);
