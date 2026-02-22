@@ -5,12 +5,14 @@ import { Badge } from '../../../ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../../ui/table';
 import { Server, Power, PowerOff, MoreVertical, Cpu, HardDrive, Network } from 'lucide-react';
 import {
+  HardwareStatusRecord,
   aggregateStatsByNode,
   formatTimestamp,
   getNodeLabel,
   safeNumber,
   sumStatField,
   useDiskStats,
+  useHardwareStatus,
 } from '../../../useDiskStats';
 
 interface StorageNode {
@@ -63,6 +65,11 @@ export function ServersMonitorTab() {
     stats: perfStats,
     isLoading: perfLoading,
   } = useDiskStats();
+  const {
+    hardwareStatus,
+    isLoading: hardwareLoading,
+    error: hardwareError,
+  } = useHardwareStatus();
 
   useEffect(() => {
     let isMounted = true;
@@ -353,6 +360,130 @@ export function ServersMonitorTab() {
           </Table>
         </CardContent>
       </Card>
+
+      <HardwareStatusCard
+        records={hardwareStatus}
+        isLoading={hardwareLoading}
+        error={hardwareError}
+      />
     </div>
+  );
+}
+
+type HardwareStatusCardProps = {
+  records: HardwareStatusRecord[];
+  isLoading: boolean;
+  error: string | null;
+};
+
+function HardwareStatusCard({ records, isLoading, error }: HardwareStatusCardProps) {
+  const rows = (records ?? []).slice(0, 200);
+
+  const healthVariant = (value?: string | null) => {
+    const normalized = (value ?? '').toLowerCase();
+    if (normalized === 'crit' || normalized === 'critical' || normalized === 'offline') {
+      return 'destructive';
+    }
+    if (normalized === 'warn' || normalized === 'warning') {
+      return 'secondary';
+    }
+    return 'default';
+  };
+
+  const formatMetrics = (record: HardwareStatusRecord) => {
+    const parts: string[] = [];
+    if (Number.isFinite(Number(record.temperature_c))) {
+      parts.push(`${Number(record.temperature_c).toFixed(1)}°C`);
+    }
+    if (Number.isFinite(Number(record.fan_rpm))) {
+      parts.push(`${formatNumber(Number(record.fan_rpm), { maximumFractionDigits: 0 })} rpm`);
+    }
+    if (Number.isFinite(Number(record.power_w))) {
+      parts.push(`${Number(record.power_w).toFixed(1)} W`);
+    }
+    return parts.length > 0 ? parts.join(' • ') : '—';
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Hardware Status</CardTitle>
+        <CardDescription>Component health across all storage nodes</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {error && (
+          <div className="mb-4 rounded-md border border-destructive/40 bg-destructive/10 px-4 py-2 text-sm text-destructive">
+            {error}
+          </div>
+        )}
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Node</TableHead>
+                <TableHead>Component</TableHead>
+                <TableHead>Slot</TableHead>
+                <TableHead>Model</TableHead>
+                <TableHead>Health</TableHead>
+                <TableHead>Metrics</TableHead>
+                <TableHead>Last Seen</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {isLoading ? (
+                <TableRow>
+                  <TableCell colSpan={7} className="text-center text-muted-foreground">
+                    Loading hardware status…
+                  </TableCell>
+                </TableRow>
+              ) : rows.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={7} className="text-center text-muted-foreground">
+                    No hardware telemetry available.
+                  </TableCell>
+                </TableRow>
+              ) : (
+                rows.map((record, index) => {
+                  const key =
+                    `${record.node_id ?? 'na'}-${record.component_type ?? 'unknown'}-${record.component_slot ?? index}`;
+                  return (
+                    <TableRow key={key}>
+                      <TableCell>{record.node_id ?? '—'}</TableCell>
+                      <TableCell className="capitalize">
+                        {record.component_type ?? '—'}
+                      </TableCell>
+                      <TableCell>{record.component_slot ?? '—'}</TableCell>
+                      <TableCell>
+                        <div className="flex flex-col">
+                          <span>{record.component_model ?? '—'}</span>
+                          <span className="text-xs text-muted-foreground">
+                            {record.component_vendor ?? record.firmware_version ?? ''}
+                          </span>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={healthVariant(record.health_state)}>
+                          {(record.health_state ?? 'unknown').toUpperCase()}
+                        </Badge>
+                        {record.health_reason && (
+                          <p className="mt-1 text-xs text-muted-foreground">{record.health_reason}</p>
+                        )}
+                        {record.status_flags && (
+                          <p className="mt-1 text-xs text-muted-foreground">{record.status_flags}</p>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">{formatMetrics(record)}</TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {formatTimestamp(record.last_seen_ts ?? record.last_error_ts ?? undefined)}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
+              )}
+            </TableBody>
+          </Table>
+        </div>
+      </CardContent>
+    </Card>
   );
 }

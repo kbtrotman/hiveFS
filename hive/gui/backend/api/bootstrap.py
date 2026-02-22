@@ -1,6 +1,10 @@
 import json
 import logging
+import os
 import socket
+import subprocess
+import sys
+from pathlib import Path
 
 from django_eventstream import send_event
 
@@ -20,6 +24,8 @@ CRITICAL_STATE_FIELDS = tuple(field for field in BOOTSTRAP_STATE_FIELDS
                               if field != "cluster_state")
 UNCONFIGURED_STATE = "unconfigured"
 EVENT_CHANNEL_PREFIX = "job-"
+EVENT_STREAM_SCRIPT = Path(__file__).with_name("api-eventstream.py")
+
 PAYLOAD_TEMPLATE = {
     "job_id": None,
     "node_id": None,
@@ -57,6 +63,8 @@ class BootstrapError(Exception):
     pass
 
 from uuid6 import uuid7
+
+EVENT_LOG_DIR = Path("/tmp")
 
 def generate_job_id() -> str:
     """
@@ -180,10 +188,16 @@ def call_bootstrap(op: str,
                    timeout: float = 5.0) -> dict:
     payload = _normalize_payload(args)
     job_id: str | None = None
+    job_id_created = False
     if payload is not None:
         # Only commands that mutate state should get new job ids.
         if op not in {"status", "stat", "alive"}:
-            job_id = payload.get("job_id") or generate_job_id()
+            existing_job_id = payload.get("job_id")
+            if existing_job_id:
+                job_id = existing_job_id
+            else:
+                job_id = generate_job_id()
+                job_id_created = True
             payload["job_id"] = job_id
             _emit_job_event(job_id, "status", f"{op} dispatched",
                             state=payload.get("config_status"))
@@ -194,7 +208,11 @@ def call_bootstrap(op: str,
         result = _send_bootstrap_command(op, payload, timeout)
     normalized = _normalize_response(result)
     if job_id:
-        normalized.setdefault("job_id", job_id)
+        normalized["job_id"] = job_id
+        logger.info("bootstrap job %s response status=%s progress=%s",
+                    job_id,
+                    normalized.get("config_status"),
+                    normalized.get("config_progress"))
         _emit_job_event(
             job_id,
             "log",
@@ -202,6 +220,8 @@ def call_bootstrap(op: str,
             status=normalized.get("config_status"),
             progress=normalized.get("config_progress"),
         )
+        if job_id_created:
+            _launch_eventstream_worker(job_id)
     return normalized
 
 
@@ -214,6 +234,34 @@ def _emit_job_event(job_id: str | None, event_type: str, message: str, **extra):
         send_event(f"{EVENT_CHANNEL_PREFIX}{job_id}", event_type, payload)
     except Exception as exc:
         logger.warning("bootstrap job event emit failed: %s", exc)
+
+
+def _launch_eventstream_worker(job_id: str) -> None:
+    if not job_id:
+        return
+    if not EVENT_STREAM_SCRIPT.exists():
+        logger.warning("eventstream script not found at %s", EVENT_STREAM_SCRIPT)
+        return
+    env = os.environ.copy()
+    env.setdefault("DJANGO_SETTINGS_MODULE", "hive.settings")
+    log_path = EVENT_LOG_DIR / f"hive_eventstream_{job_id}.log"
+    try:
+        subprocess.Popen(
+            [
+                sys.executable,
+                str(EVENT_STREAM_SCRIPT),
+                "--job-id",
+                job_id,
+                "--log-file",
+                str(log_path),
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            close_fds=True,
+            env=env,
+        )
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.warning("failed to launch eventstream worker for %s: %s", job_id, exc)
 
 
 def call_addnode(op: str,

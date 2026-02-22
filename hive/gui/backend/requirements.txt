@@ -7,9 +7,11 @@ django-cors-headers
 django-extensions
 django-eventstream[drf]
 django-allauth
+django-redis
 dj-rest-auth
 mysqlclient
 requests
 requests
 daphne
-uuid 6
+uuid6
+redis

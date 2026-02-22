@@ -26,6 +26,10 @@ services:
     environment:
       DJANGO_SETTINGS_MODULE: "src.config.settings"
       PYTHONUNBUFFERED: "1"
+      REDIS_HOST: "redis"
+      REDIS_PORT: "6379"
+      REDIS_CACHE_DB: "1"
+      EVENTSTREAM_REDIS_DB: "0"
 
       # DB via unix socket
       DB_SOCKET_PATH: "${DB_SOCKET_PATH:-/run/mysqld/mysqld.sock}"
@@ -40,6 +44,8 @@ services:
     # No published ports in prod (private only)
     expose:
       - "8000"
+    depends_on:
+      - redis
     networks:
       - webnet
 
@@ -53,7 +59,22 @@ services:
     # group_add:
     #   - "${MYSQL_GID}"
 
+  redis:
+    image: redis:7-alpine
+    container_name: hive-redis
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    expose:
+      - "6379"
+    volumes:
+      - redis-prod-data:/data
+    networks:
+      - webnet
+
 networks:
   webnet:
     driver: bridge
     internal: true
+
+volumes:
+  redis-prod-data:

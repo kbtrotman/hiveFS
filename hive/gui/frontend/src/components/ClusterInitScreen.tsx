@@ -119,6 +119,7 @@ export function ClusterInitializationScreen({
         body: JSON.stringify(payload),
       });
       const json = await response.json().catch(() => ({}));
+      console.debug("bootstrap response", json);
       if (!response.ok || json?.ok === false) {
         throw new Error(json?.error || json?.message || 'Request failed');
       }
@@ -144,6 +145,15 @@ export function ClusterInitializationScreen({
       setSubmittingAction(null);
     }
   };
+
+  // If backend status payload already contains a job_id (e.g., page reload),
+  // automatically connect to that channel.
+  useEffect(() => {
+    const backendJobId = typeof statusData?.job_id === 'string' ? statusData.job_id : null;
+    if (backendJobId && backendJobId !== activeJobId) {
+      setActiveJobId(backendJobId);
+    }
+  }, [statusData?.job_id, activeJobId]);
 
   const handleClusterInit = () => {
     sendRequest(CLUSTER_INIT_URL, 'cluster_init', {
@@ -175,6 +185,7 @@ export function ClusterInitializationScreen({
     if (!activeJobId) return;
 
     const channel = `job-${activeJobId}`;
+    console.debug("connecting to event stream channel", channel);
     const source = new EventSource(buildEventStreamUrl(channel), { withCredentials: true });
 
     source.onmessage = (event) => {
@@ -206,6 +217,7 @@ export function ClusterInitializationScreen({
     };
 
     return () => {
+      console.debug("closing event stream", channel);
       source.close();
     };
   }, [activeJobId]);

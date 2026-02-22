@@ -304,7 +304,12 @@ export function DiskManageTab() {
           <h2>Disk Management</h2>
           <p className="text-muted-foreground">Monitor storage volumes and manage filesystem paths</p>
         </div>
-        <Button>Add Volume</Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline">Offline Disk</Button>
+          <Button variant="outline">Online Disk</Button>
+          <Button variant="outline">Upgrade Firmware</Button>
+          <Button>Add Disk</Button>
+        </div>
       </div>
 
       {/* Top 4 cards */}

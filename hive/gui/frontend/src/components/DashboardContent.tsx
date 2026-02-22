@@ -6,6 +6,7 @@ import { HomeComponentCreatorTab } from './pages/tabs/home/HomeComponentCreatorT
 import { ClusterManageTab } from './pages/tabs/cluster/ClusterManageTab';
 import { ClusterMonitorTab } from './pages/tabs/cluster/ClusterMonitorTab';
 import { ClusterPerformanceTab } from './pages/tabs/cluster/ClusterPerformanceTab';
+import { ClusterFSTab } from './pages/tabs/cluster/ClusterFSTab';
 import { ClusterClientsTab } from './pages/tabs/cluster/ClusterClientsTab';
 import { ServersManageTab } from './pages/tabs/servers/ServersManageTab';
 import { ServersMonitorTab } from './pages/tabs/servers/ServersMonitorTab';
@@ -49,6 +50,7 @@ const sidebarTabComponents: Record<string, Record<string, ComponentType>> = {
     compo_creator: HomeComponentCreatorTab,
   },
   cluster: {
+    filesystem: ClusterFSTab,
     manage: ClusterManageTab,
     monitor: ClusterMonitorTab,
     performance: ClusterPerformanceTab,

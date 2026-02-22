@@ -10,6 +10,10 @@ services:
       # Django settings
       DJANGO_SETTINGS_MODULE: "src.config.settings"
       PYTHONUNBUFFERED: "1"
+      REDIS_HOST: "redis"
+      REDIS_PORT: "6379"
+      REDIS_CACHE_DB: "1"
+      EVENTSTREAM_REDIS_DB: "0"
 
       # DB via unix socket (set these in an .env for convenience)
       DB_SOCKET_PATH: "${DB_SOCKET_PATH:-/run/mysqld/mysqld.sock}"
@@ -26,6 +30,18 @@ services:
     # Optional: expose backend only on localhost for debugging
     ports:
       - "127.0.0.1:8000:8000"
+    depends_on:
+      - redis
+    networks:
+      - fe_be
+
+  redis:
+    image: redis:7-alpine
+    container_name: hive-redis-dev
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    volumes:
+      - redis-dev-data:/data
     networks:
       - fe_be
 
@@ -49,3 +65,6 @@ services:
 networks:
   fe_be:
     driver: bridge
+
+volumes:
+  redis-dev-data:

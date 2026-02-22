@@ -1,3 +1,5 @@
+import logging
+
 from rest_framework.response import Response
 from rest_framework.viewsets import ViewSet
 from rest_framework.views import APIView
@@ -5,6 +7,8 @@ from rest_framework.response import Response
 from rest_framework import status as http_status
 from .bootstrap import call_bootstrap, BootstrapError
 from .newtoken import request_newtoken
+
+logger = logging.getLogger(__name__)
 class BootstrapStatusView(APIView):
     authentication_classes = []  # allow pre-login if desired
     permission_classes = []      # tighten later
@@ -23,6 +27,10 @@ class BootstrapInitView(APIView):
     def post(self, request):
         try:
             r = call_bootstrap("cluster_init", request.data)
+            job_id = r.get("job_id")
+            if job_id:
+                logger.info("cluster_init job_id=%s response_status=%s",
+                            job_id, r.get("config_status"))
             return Response(r)
         except BootstrapError as e:
             return Response({"ok": False, "error": str(e)}, status=http_status.HTTP_502_BAD_GATEWAY)
@@ -63,5 +71,4 @@ class NewTokenView(APIView):
             r = request_newtoken(request.data)
             return Response(r)
         except BootstrapError as e:
-            return Response({"ok": False, "error": str(e)}, status=http_status.HTTP_502_BAD_GATEWAY)   
-    
+            return Response({"ok": False, "error": str(e)}, status=http_status.HTTP_502_BAD_GATEWAY)

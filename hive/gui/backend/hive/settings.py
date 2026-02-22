@@ -51,13 +51,13 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'django.contrib.sites',
     'django_extensions',
-    'allauth',
+    'dj_rest_auth.registration', # For registration endpoints
+    'rest_framework.authtoken',
     'allauth.account',
     'allauth.socialaccount',
     'rest_framework',
-    'rest_framework.authtoken',
     'dj_rest_auth',
-    'dj_rest_auth.registration', # For registration endpoints
+    'allauth',
     'notifications',
     'settings',
     'accounts',
@@ -177,6 +177,22 @@ DATABASES = {
     }
 }
 
+# settings.py
+
+# Redis configuration shared by cache + eventstream
+REDIS_HOST = os.getenv("REDIS_HOST", "127.0.0.1")
+REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
+REDIS_CACHE_DB = os.getenv("REDIS_CACHE_DB", "1")
+
+CACHES = {
+    "default": {
+        "BACKEND": "django_redis.cache.RedisCache",
+        "LOCATION": f"redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_CACHE_DB}",
+        "OPTIONS": {
+            "CLIENT_CLASS": "django_redis.client.DefaultClient",
+        },
+    }
+}
 
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
@@ -215,6 +231,17 @@ STATIC_URL = 'static/'
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+# Eventstream / Redis configuration
+EVENTSTREAM_REDIS_HOST = os.getenv("EVENTSTREAM_REDIS_HOST", REDIS_HOST)
+EVENTSTREAM_REDIS_PORT = int(os.getenv("EVENTSTREAM_REDIS_PORT", REDIS_PORT))
+EVENTSTREAM_REDIS_DB = int(os.getenv("EVENTSTREAM_REDIS_DB", "0"))
+
+EVENTSTREAM_REDIS = {
+    "host": EVENTSTREAM_REDIS_HOST,
+    "port": EVENTSTREAM_REDIS_PORT,
+    "db": EVENTSTREAM_REDIS_DB,
+}
 APPEND_SLASH = False
 
 CORS_ALLOW_ALL_ORIGINS = True

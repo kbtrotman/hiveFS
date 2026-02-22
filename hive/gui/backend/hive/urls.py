@@ -24,7 +24,7 @@ from monitor.views import MonitorRootView
 from tenant.views import TenantRootView
 from nodes.views import StorageNodeViewSet, StorageNodeStatViewSet, HardwareStatusViewSet
 from disk.views import DiskNodeViewSet, DiskNodeStatViewSet, StorageNodeFsStatsListView, StorageNodeDiskStatsListView, DiskStatusListView
-from api.views import BootstrapError, BootstrapInitView, BootstrapStatusView, AddNodeView, AddForeignerView, NewTokenView
+from api.views import BootstrapInitView, BootstrapStatusView, AddNodeView, AddForeignerView, NewTokenView
 from accounts.views import (
     GroupMembershipViewSet,
     GroupViewSet,
@@ -35,7 +35,8 @@ from accounts.views import (
     SAMLViewSet,
     MFAViewSet,
 )
-import django_eventstream
+from django_eventstream import views as eventstream_views
+from django.contrib.auth.decorators import login_not_required
 
 router = DefaultRouter(trailing_slash=False)
 router.register(r'tree', TreeNodeViewSet, basename='tree')
@@ -75,6 +76,6 @@ urlpatterns = [
     path("api/v1/health/fs", StorageNodeFsStatsListView.as_view(), name="fs-stats"),
     path("api/v1/health/disks", StorageNodeDiskStatsListView.as_view(), name="disk-stats"),
     path("api/v1/health/disk_status", DiskStatusListView.as_view(), name="disk-status"),
-    path("events/", include(django_eventstream.urls)),
+    path("events/", login_not_required(eventstream_views.events)),
     path('admin/', admin.site.urls),
 ]

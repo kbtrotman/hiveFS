@@ -265,3 +265,164 @@ export function useDiskStats(pollInterval = 0): UseDiskStatsResult {
     [stats, isLoading, error, fetchStats, lastUpdated],
   );
 }
+
+export interface DiskStatusRecord {
+  node_id?: number | null;
+  disk_name?: string | null;
+  disk_serial?: string | null;
+  disk_slot?: string | null;
+  disk_enclosure?: string | null;
+  disk_model?: string | null;
+  disk_vendor?: string | null;
+  disk_firmware?: string | null;
+  disk_capacity_bytes?: number | null;
+  media_type?: string | null;
+  interface_type?: string | null;
+  rpm?: number | null;
+  temperature_c?: number | null;
+  power_on_hours?: number | null;
+  smart_health?: string | null;
+  status_reason?: string | null;
+  failure_count?: number | null;
+  last_failure_ts?: string | null;
+  paged_out?: boolean | number | null;
+  paged_out_ts?: string | null;
+  last_seen_ts?: string | null;
+  updated_at?: string | null;
+}
+
+export interface UseDiskStatusResult {
+  diskStatus: DiskStatusRecord[];
+  isLoading: boolean;
+  error: string | null;
+  refresh: () => Promise<void>;
+}
+
+export function useDiskStatus(pollInterval = 0): UseDiskStatusResult {
+  const [diskStatus, setDiskStatus] = useState<DiskStatusRecord[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const fetchStatus = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API_BASE}/health/disk_status`);
+      if (!res.ok) {
+        throw new Error(`Failed to load disk status (${res.status})`);
+      }
+      const payload: DiskStatusRecord[] = await res.json();
+      if (!mountedRef.current) return;
+      setDiskStatus(Array.isArray(payload) ? payload : []);
+    } catch (err) {
+      if (!mountedRef.current) return;
+      setError(err instanceof Error ? err.message : 'Unable to load disk status');
+    } finally {
+      if (mountedRef.current) {
+        setIsLoading(false);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchStatus();
+    if (pollInterval <= 0) return;
+    const id = window.setInterval(fetchStatus, pollInterval);
+    return () => window.clearInterval(id);
+  }, [fetchStatus, pollInterval]);
+
+  return useMemo(
+    () => ({
+      diskStatus,
+      isLoading,
+      error,
+      refresh: fetchStatus,
+    }),
+    [diskStatus, isLoading, error, fetchStatus],
+  );
+}
+
+export interface HardwareStatusRecord {
+  node_id?: number | null;
+  component_type?: string | null;
+  component_slot?: string | null;
+  component_serial?: string | null;
+  component_vendor?: string | null;
+  component_model?: string | null;
+  firmware_version?: string | null;
+  health_state?: string | null;
+  health_reason?: string | null;
+  status_flags?: string | null;
+  temperature_c?: number | null;
+  fan_rpm?: number | null;
+  power_w?: number | null;
+  paged_down?: boolean | number | null;
+  paged_down_ts?: string | null;
+  last_seen_ts?: string | null;
+  last_error_ts?: string | null;
+}
+
+export interface UseHardwareStatusResult {
+  hardwareStatus: HardwareStatusRecord[];
+  isLoading: boolean;
+  error: string | null;
+  refresh: () => Promise<void>;
+}
+
+export function useHardwareStatus(pollInterval = 0): UseHardwareStatusResult {
+  const [hardwareStatus, setHardwareStatus] = useState<HardwareStatusRecord[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const fetchStatus = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API_BASE}/health/hw_status`);
+      if (!res.ok) {
+        throw new Error(`Failed to load hardware status (${res.status})`);
+      }
+      const payload: HardwareStatusRecord[] = await res.json();
+      if (!mountedRef.current) return;
+      setHardwareStatus(Array.isArray(payload) ? payload : []);
+    } catch (err) {
+      if (!mountedRef.current) return;
+      setError(err instanceof Error ? err.message : 'Unable to load hardware status');
+    } finally {
+      if (mountedRef.current) {
+        setIsLoading(false);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchStatus();
+    if (pollInterval <= 0) return;
+    const id = window.setInterval(fetchStatus, pollInterval);
+    return () => window.clearInterval(id);
+  }, [fetchStatus, pollInterval]);
+
+  return useMemo(
+    () => ({
+      hardwareStatus,
+      isLoading,
+      error,
+      refresh: fetchStatus,
+    }),
+    [hardwareStatus, isLoading, error, fetchStatus],
+  );
+}

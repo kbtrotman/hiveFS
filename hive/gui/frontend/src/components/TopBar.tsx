@@ -40,6 +40,7 @@ const tabs = [
   { id: 'clients', label: 'Clients' },
   { id: 'monitor', label: 'Monitor' },
   { id: 'manage', label: 'Manage' },
+  { id: 'filesystem', label: 'Filesystem' },
   { id: 'performance', label: 'Performance' },
   { id: 'access', label: 'Access' },
   { id: 'audit', label: 'Audit' },
@@ -68,7 +69,7 @@ const tabs = [
 // Define which tabs are available for each sidebar item
 const tabAvailability: Record<string, string[]> = {
   home: ['dashboard', 'dash_setup', 'compo_creator'],
-  cluster: ['manage', 'monitor', 'performance', 'clients'],
+  cluster: ['manage', 'monitor', 'filesystem', 'performance', 'clients'],
   servers: ['manage', 'monitor', 'performance'],
   disk: ['manage', 'monitor', 'performance'],
   security: ['access', 'audit', 'api_access', 'logs'],
