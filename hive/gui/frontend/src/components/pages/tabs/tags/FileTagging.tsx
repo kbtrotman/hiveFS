@@ -344,7 +344,7 @@ export function FileTaggingTab() {
       </div>
 
       {/* Metrics Strip */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Card className="border-primary/10 bg-gradient-to-b from-background/80 to-background shadow-lg shadow-primary/10">
           <CardContent className="pt-4">
             <div className="flex items-center justify-between">
@@ -399,53 +399,53 @@ export function FileTaggingTab() {
         </Card>
       </div>
 
-      {/* Category Distribution */}
-      <Card className="border-primary/10 bg-gradient-to-b from-background/80 to-background shadow-lg shadow-primary/10">
-        <CardHeader>
-          <CardTitle className="text-foreground/90 flex items-center gap-2">
-            <BarChart3 className="w-5 h-5" />
-            Tag Categories Distribution
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-4 gap-4">
-            {categoryCounts
-              .filter((cat) => cat.count > 0)
-              .map((cat) => (
-                <div
-                  key={cat.value}
-                  className="border rounded-lg p-3 bg-muted/20"
-                  style={{ borderColor: cat.color + '40' }}
-                >
-                  <div className="flex items-center justify-between mb-2">
-                    <Badge
-                      variant="outline"
-                      className="text-xs"
-                      style={{ borderColor: cat.color, color: cat.color }}
-                    >
-                      {cat.label}
-                    </Badge>
-                    <span className="text-lg font-semibold">{cat.count}</span>
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+        {/* Category Distribution */}
+        <Card className="border-primary/10 bg-gradient-to-b from-background/80 to-background shadow-lg shadow-primary/10">
+          <CardHeader>
+            <CardTitle className="text-foreground/90 flex items-center gap-2">
+              <BarChart3 className="w-5 h-5" />
+              Tag Categories Distribution
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+              {categoryCounts
+                .filter((cat) => cat.count > 0)
+                .map((cat) => (
+                  <div
+                    key={cat.value}
+                    className="border rounded-lg p-3 bg-muted/20"
+                    style={{ borderColor: cat.color + '40' }}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <Badge
+                        variant="outline"
+                        className="text-xs"
+                        style={{ borderColor: cat.color, color: cat.color }}
+                      >
+                        {cat.label}
+                      </Badge>
+                      <span className="text-lg font-semibold">{cat.count}</span>
+                    </div>
+                    <div className="w-full bg-muted rounded-full h-2">
+                      <div
+                        className="h-2 rounded-full transition-all"
+                        style={{
+                          width: `${(cat.count / totalTags) * 100}%`,
+                          backgroundColor: cat.color,
+                        }}
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {((cat.count / totalTags) * 100).toFixed(1)}% of tags
+                    </p>
                   </div>
-                  <div className="w-full bg-muted rounded-full h-2">
-                    <div
-                      className="h-2 rounded-full transition-all"
-                      style={{
-                        width: `${(cat.count / totalTags) * 100}%`,
-                        backgroundColor: cat.color,
-                      }}
-                    />
-                  </div>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {((cat.count / totalTags) * 100).toFixed(1)}% of tags
-                  </p>
-                </div>
-              ))}
-          </div>
-        </CardContent>
-      </Card>
+                ))}
+            </div>
+          </CardContent>
+        </Card>
 
-      <div className="grid grid-cols-2 gap-6">
         {/* Tag Hierarchy Tree */}
         <Card className="border-primary/10 bg-gradient-to-b from-background/80 to-background shadow-lg shadow-primary/10">
           <CardHeader>
@@ -475,8 +475,8 @@ export function FileTaggingTab() {
           </CardHeader>
           <CardContent className="space-y-4">
             {/* Filters */}
-            <div className="grid grid-cols-3 gap-3">
-              <div>
+            <div className="flex flex-wrap gap-3">
+              <div className="w-full min-w-[200px] flex-1 md:max-w-xs">
                 <Label htmlFor="search-tags" className="text-xs text-muted-foreground">
                   Search
                 </Label>
@@ -492,7 +492,7 @@ export function FileTaggingTab() {
                 </div>
               </div>
 
-              <div>
+              <div className="w-full min-w-[180px] flex-1 md:max-w-xs">
                 <Label htmlFor="filter-category" className="text-xs text-muted-foreground">
                   Category
                 </Label>
@@ -511,7 +511,7 @@ export function FileTaggingTab() {
                 </Select>
               </div>
 
-              <div>
+              <div className="w-full min-w-[180px] flex-1 md:max-w-xs">
                 <Label htmlFor="sort-by" className="text-xs text-muted-foreground">
                   Sort By
                 </Label>
@@ -593,58 +593,58 @@ export function FileTaggingTab() {
             </p>
           </CardContent>
         </Card>
-      </div>
 
-      {/* Top Tags by Usage */}
-      <Card className="border-primary/10 bg-gradient-to-b from-background/80 to-background shadow-lg shadow-primary/10">
-        <CardHeader>
-          <CardTitle className="text-foreground/90 flex items-center gap-2">
-            <TrendingUp className="w-5 h-5" />
-            Top Tags by Usage
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-3">
-            {tagDefinitions
-              .sort((a, b) => b.fileCount - a.fileCount)
-              .slice(0, 10)
-              .map((tag, index) => (
-                <div key={tag.id} className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center flex-shrink-0">
-                    <span className="text-sm font-semibold text-muted-foreground">
-                      {index + 1}
+        {/* Top Tags by Usage */}
+        <Card className="border-primary/10 bg-gradient-to-b from-background/80 to-background shadow-lg shadow-primary/10">
+          <CardHeader>
+            <CardTitle className="text-foreground/90 flex items-center gap-2">
+              <TrendingUp className="w-5 h-5" />
+              Top Tags by Usage
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {tagDefinitions
+                .sort((a, b) => b.fileCount - a.fileCount)
+                .slice(0, 10)
+                .map((tag, index) => (
+                  <div key={tag.id} className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center flex-shrink-0">
+                      <span className="text-sm font-semibold text-muted-foreground">
+                        {index + 1}
+                      </span>
+                    </div>
+                    <Badge
+                      variant="outline"
+                      className="text-xs"
+                      style={{ borderColor: tag.color, color: tag.color }}
+                    >
+                      <Tag className="w-3 h-3 mr-1" />
+                      {tag.name}
+                    </Badge>
+                    <div className="flex-1">
+                      <div className="w-full bg-muted rounded-full h-2">
+                        <div
+                          className="h-2 rounded-full transition-all"
+                          style={{
+                            width: `${(tag.fileCount / mostUsedTag.fileCount) * 100}%`,
+                            backgroundColor: tag.color,
+                          }}
+                        />
+                      </div>
+                    </div>
+                    <span className="text-sm font-medium w-24 text-right">
+                      {tag.fileCount.toLocaleString()} files
+                    </span>
+                    <span className="text-xs text-muted-foreground w-16 text-right">
+                      {((tag.fileCount / totalTaggedFiles) * 100).toFixed(1)}%
                     </span>
                   </div>
-                  <Badge
-                    variant="outline"
-                    className="text-xs"
-                    style={{ borderColor: tag.color, color: tag.color }}
-                  >
-                    <Tag className="w-3 h-3 mr-1" />
-                    {tag.name}
-                  </Badge>
-                  <div className="flex-1">
-                    <div className="w-full bg-muted rounded-full h-2">
-                      <div
-                        className="h-2 rounded-full transition-all"
-                        style={{
-                          width: `${(tag.fileCount / mostUsedTag.fileCount) * 100}%`,
-                          backgroundColor: tag.color,
-                        }}
-                      />
-                    </div>
-                  </div>
-                  <span className="text-sm font-medium w-24 text-right">
-                    {tag.fileCount.toLocaleString()} files
-                  </span>
-                  <span className="text-xs text-muted-foreground w-16 text-right">
-                    {((tag.fileCount / totalTaggedFiles) * 100).toFixed(1)}%
-                  </span>
-                </div>
-              ))}
-          </div>
-        </CardContent>
-      </Card>
+                ))}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }

@@ -14,7 +14,6 @@ import {
   HardDrive,
   TrendingUp,
   Layers,
-  Clock,
   Shield,
 } from 'lucide-react';
 
@@ -29,7 +28,6 @@ export function VersionSettingsTab() {
     retainedSize: 1.2 * 1024 * 1024 * 1024 * 1024, // 1.2 TB
     versionedFiles: 45231,
     averageVersionsPerFile: 8.3,
-    oldestVersion: '14 days ago',
   };
 
   const formatBytes = (bytes: number) => {
@@ -77,7 +75,7 @@ export function VersionSettingsTab() {
       </div>
 
       {/* Metrics Strip */}
-      <div className="grid grid-cols-5 gap-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Card className="border-primary/10 bg-gradient-to-b from-background/80 to-background shadow-lg shadow-primary/10">
           <CardContent className="pt-4">
             <div className="flex items-center justify-between">
@@ -91,7 +89,6 @@ export function VersionSettingsTab() {
             </div>
           </CardContent>
         </Card>
-
         <Card className="border-primary/10 bg-gradient-to-b from-background/80 to-background shadow-lg shadow-primary/10">
           <CardContent className="pt-4">
             <div className="flex items-center justify-between">
@@ -103,7 +100,6 @@ export function VersionSettingsTab() {
             </div>
           </CardContent>
         </Card>
-
         <Card className="border-primary/10 bg-gradient-to-b from-background/80 to-background shadow-lg shadow-primary/10">
           <CardContent className="pt-4">
             <div className="flex items-center justify-between">
@@ -117,7 +113,6 @@ export function VersionSettingsTab() {
             </div>
           </CardContent>
         </Card>
-
         <Card className="border-primary/10 bg-gradient-to-b from-background/80 to-background shadow-lg shadow-primary/10">
           <CardContent className="pt-4">
             <div className="flex items-center justify-between">
@@ -129,21 +124,9 @@ export function VersionSettingsTab() {
             </div>
           </CardContent>
         </Card>
-
-        <Card className="border-primary/10 bg-gradient-to-b from-background/80 to-background shadow-lg shadow-primary/10">
-          <CardContent className="pt-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs text-muted-foreground">Oldest Version</p>
-                <p className="text-xl font-semibold mt-1">{metrics.oldestVersion}</p>
-              </div>
-              <Clock className="w-7 h-7 text-cyan-500 opacity-50" />
-            </div>
-          </CardContent>
-        </Card>
       </div>
 
-      <div className="grid grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         {/* Retention Period Settings */}
         <Card className="border-primary/10 bg-gradient-to-b from-background/80 to-background shadow-lg shadow-primary/10">
           <CardHeader>
@@ -153,7 +136,7 @@ export function VersionSettingsTab() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div>
+            <div className="max-w-xs">
               <Label htmlFor="retention-days" className="text-sm">
                 Time-Based Retention
               </Label>
@@ -201,7 +184,7 @@ export function VersionSettingsTab() {
               </div>
             </div>
 
-            <Button onClick={handleSaveRetention} className="w-full">
+            <Button onClick={handleSaveRetention} className="w-full sm:w-auto">
               <Check className="w-4 h-4 mr-2" />
               Save Retention Policy
             </Button>
@@ -225,7 +208,7 @@ export function VersionSettingsTab() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div>
+            <div className="max-w-xs">
               <Label htmlFor="max-storage" className="text-sm">
                 Maximum Versioning Storage
               </Label>
@@ -251,7 +234,7 @@ export function VersionSettingsTab() {
             </div>
 
             {maxStorageSize === 'custom' && (
-              <div>
+              <div className="max-w-xs">
                 <Label htmlFor="custom-storage" className="text-sm">
                   Custom Storage Limit (GB)
                 </Label>
@@ -343,7 +326,7 @@ export function VersionSettingsTab() {
               </div>
             </div>
 
-            <Button onClick={handleSaveStorageLimit} className="w-full">
+            <Button onClick={handleSaveStorageLimit} className="w-full sm:w-auto">
               <Check className="w-4 h-4 mr-2" />
               Save Storage Limit
             </Button>
@@ -360,7 +343,8 @@ export function VersionSettingsTab() {
       </div>
 
       {/* Additional Info */}
-      <Card className="border-primary/10 bg-gradient-to-b from-background/80 to-background shadow-lg shadow-primary/10">
+      <div className="max-w-5xl">
+        <Card className="border-primary/10 bg-gradient-to-b from-background/80 to-background shadow-lg shadow-primary/10">
         <CardHeader>
           <CardTitle className="text-foreground/90 flex items-center gap-2">
             <Settings className="w-5 h-5" />
@@ -372,7 +356,7 @@ export function VersionSettingsTab() {
             <p className="text-sm text-foreground/90">
               Both retention policies work together to manage version storage:
             </p>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="bg-muted/30 rounded p-3 border border-border">
                 <p className="text-sm font-medium mb-2 flex items-center gap-2">
                   <History className="w-4 h-4" />
@@ -402,8 +386,9 @@ export function VersionSettingsTab() {
               </p>
             </div>
           </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }
