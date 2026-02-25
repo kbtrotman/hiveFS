@@ -18,7 +18,7 @@ class AuditEntry(models.Model):
 
     class Meta:
         managed = False
-        db_table = "audit_entries"
+        db_table = "v_audits"
         indexes = [
             models.Index(fields=["user_id", "created_at"], name="idx_audit_user"),
             models.Index(fields=["page_name", "setting_name"], name="idx_audit_page_setting"),

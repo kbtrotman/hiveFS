@@ -425,14 +425,74 @@ CREATE TABLE IF NOT EXISTS volume_stats (
     REFERENCES volume_superblocks(volume_id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
+CREATE TABLE IF NOT EXISTS notifications (
+  notification_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  schedule_id BIGINT UNSIGNED NOT NULL,
+  audit_entry_id BIGINT UNSIGNED DEFAULT NULL,
+  notification_type ENUM('email','ticket','webhook') NOT NULL DEFAULT 'email',
+  subject VARCHAR(255) NOT NULL,
+  body TEXT DEFAULT NULL,
+  payload JSON DEFAULT NULL,
+  status ENUM('pending','queued','sent','failed','cancelled') NOT NULL DEFAULT 'pending',
+  w_status ENUM('new', 'acknowledged', 'working', 'pending wait', 'review', 'resolved', 'closed') NOT NULL DEFAULT 'new',
+  priority ENUM('low','normal','high') NOT NULL DEFAULT 'normal',
+  next_attempt_at TIMESTAMP(6) NULL DEFAULT NULL,
+  last_attempt_at TIMESTAMP(6) NULL DEFAULT NULL,
+  attempt_count INT UNSIGNED NOT NULL DEFAULT 0,
+  created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  updated_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+  PRIMARY KEY (notification_id),
+  KEY idx_notification_schedule_status (schedule_id, status),
+  KEY idx_notification_type (notification_type),
+  KEY idx_notification_audit (audit_entry_id),
+  CONSTRAINT fk_notifications_schedule
+    FOREIGN KEY (schedule_id) REFERENCES schedules(schedule_id)
+      ON DELETE CASCADE,
+  CONSTRAINT fk_notifications_audit
+    FOREIGN KEY (audit_entry_id) REFERENCES audit_entries(audit_entry_id)
+      ON DELETE SET NULL
+) ENGINE=InnoDB;
+
 CREATE TABLE IF NOT EXISTS alerts (
-  id               INT UNSIGNED KEY,
-  a_lvl            INT UNSIGNED DEFAULT 0,
-  a_class          INT UNSIGNED DEFAULT 0,
-  a_comp           INT UNSIGNED DEFAULT 0,
-  a_msg            VARCHAR(200) DEFAULT NULL,
-  a_desc           VARCHAR(200) DEFAULT NULL,
-  a_ts             TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+  alert_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  schedule_id BIGINT UNSIGNED NOT NULL,
+  source VARCHAR(128) NOT NULL,
+  title VARCHAR(255) NOT NULL,
+  message TEXT NOT NULL,
+  severity ENUM('info','warning','critical') NOT NULL DEFAULT 'info',
+  status ENUM('triggered','acknowledged','resolved','suppressed') NOT NULL DEFAULT 'triggered',
+  w_status ENUM('new', 'acknowledged', 'working', 'pending wait', 'review', 'resolved', 'closed') NOT NULL DEFAULT 'new',
+  triggered_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  acknowledged_at TIMESTAMP(6) NULL DEFAULT NULL,
+  resolved_at TIMESTAMP(6) NULL DEFAULT NULL,
+  created_by BIGINT UNSIGNED DEFAULT NULL,
+  metadata JSON DEFAULT NULL,
+  PRIMARY KEY (alert_id),
+  KEY idx_alert_schedule_status (schedule_id, status),
+  KEY idx_alert_severity (severity),
+  CONSTRAINT fk_alerts_schedule
+    FOREIGN KEY (schedule_id) REFERENCES schedules(schedule_id)
+      ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS audit_entries (
+  audit_entry_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  user_id BIGINT UNSIGNED NOT NULL,
+  username VARCHAR(150) NOT NULL,
+  user_display_name VARCHAR(255) DEFAULT NULL,
+  page_name VARCHAR(128) NOT NULL,
+  setting_name VARCHAR(128) NOT NULL,
+  previous_value TEXT DEFAULT NULL,
+  new_value TEXT DEFAULT NULL,
+  change_summary TEXT DEFAULT NULL,
+  change_context JSON DEFAULT NULL,
+  request_ip VARCHAR(64) DEFAULT NULL,
+  request_id CHAR(36) DEFAULT NULL,
+  created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  PRIMARY KEY (audit_entry_id),
+  KEY idx_audit_user (user_id, created_at),
+  KEY idx_audit_page_setting (page_name, setting_name),
+  KEY idx_audit_request (request_id)
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS shard_map (
@@ -727,6 +787,9 @@ END//
 USE hive_api;
 
 -- Virtual Entities only in the API DB.
+CREATE OR REPLACE VIEW v_notifications AS SELECT * FROM hive_meta.notifications;
+CREATE OR REPLACE VIEW v_alerts AS SELECT * FROM hive_meta.alerts;
+CREATE OR REPLACE VIEW v_audits AS SELECT * FROM hive_meta.audit_entries;
 CREATE OR REPLACE VIEW v_disk_status AS SELECT * FROM hive_meta.disk_status;
 CREATE OR REPLACE VIEW v_hardware_status AS SELECT * FROM hive_meta.hardware_status;
 CREATE OR REPLACE VIEW v_meta_snapshots AS SELECT * FROM hive_meta.meta_snapshots;
@@ -997,76 +1060,6 @@ CREATE TABLE IF NOT EXISTS schedules (
   PRIMARY KEY (schedule_id),
   UNIQUE KEY uk_schedule_name (schedule_name),
   KEY idx_schedule_active (is_active, start_at)
-) ENGINE=InnoDB;
-
-CREATE TABLE IF NOT EXISTS audit_entries (
-  audit_entry_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  user_id BIGINT UNSIGNED NOT NULL,
-  username VARCHAR(150) NOT NULL,
-  user_display_name VARCHAR(255) DEFAULT NULL,
-  page_name VARCHAR(128) NOT NULL,
-  setting_name VARCHAR(128) NOT NULL,
-  previous_value TEXT DEFAULT NULL,
-  new_value TEXT DEFAULT NULL,
-  change_summary TEXT DEFAULT NULL,
-  change_context JSON DEFAULT NULL,
-  request_ip VARCHAR(64) DEFAULT NULL,
-  request_id CHAR(36) DEFAULT NULL,
-  created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-  PRIMARY KEY (audit_entry_id),
-  KEY idx_audit_user (user_id, created_at),
-  KEY idx_audit_page_setting (page_name, setting_name),
-  KEY idx_audit_request (request_id)
-) ENGINE=InnoDB;
-
-CREATE TABLE IF NOT EXISTS notifications (
-  notification_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  schedule_id BIGINT UNSIGNED NOT NULL,
-  audit_entry_id BIGINT UNSIGNED DEFAULT NULL,
-  notification_type ENUM('email','ticket','webhook') NOT NULL DEFAULT 'email',
-  subject VARCHAR(255) NOT NULL,
-  body TEXT DEFAULT NULL,
-  payload JSON DEFAULT NULL,
-  status ENUM('pending','queued','sent','failed','cancelled') NOT NULL DEFAULT 'pending',
-  w_status ENUM('new', 'acknowledged', 'working', 'pending wait', 'review', 'resolved', 'closed') NOT NULL DEFAULT 'new',
-  priority ENUM('low','normal','high') NOT NULL DEFAULT 'normal',
-  next_attempt_at TIMESTAMP(6) NULL DEFAULT NULL,
-  last_attempt_at TIMESTAMP(6) NULL DEFAULT NULL,
-  attempt_count INT UNSIGNED NOT NULL DEFAULT 0,
-  created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-  updated_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
-  PRIMARY KEY (notification_id),
-  KEY idx_notification_schedule_status (schedule_id, status),
-  KEY idx_notification_type (notification_type),
-  KEY idx_notification_audit (audit_entry_id),
-  CONSTRAINT fk_notifications_schedule
-    FOREIGN KEY (schedule_id) REFERENCES schedules(schedule_id)
-      ON DELETE CASCADE,
-  CONSTRAINT fk_notifications_audit
-    FOREIGN KEY (audit_entry_id) REFERENCES audit_entries(audit_entry_id)
-      ON DELETE SET NULL
-) ENGINE=InnoDB;
-
-CREATE TABLE IF NOT EXISTS alerts (
-  alert_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  schedule_id BIGINT UNSIGNED NOT NULL,
-  source VARCHAR(128) NOT NULL,
-  title VARCHAR(255) NOT NULL,
-  message TEXT NOT NULL,
-  severity ENUM('info','warning','critical') NOT NULL DEFAULT 'info',
-  status ENUM('triggered','acknowledged','resolved','suppressed') NOT NULL DEFAULT 'triggered',
-  w_status ENUM('new', 'acknowledged', 'working', 'pending wait', 'review', 'resolved', 'closed') NOT NULL DEFAULT 'new',
-  triggered_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-  acknowledged_at TIMESTAMP(6) NULL DEFAULT NULL,
-  resolved_at TIMESTAMP(6) NULL DEFAULT NULL,
-  created_by BIGINT UNSIGNED DEFAULT NULL,
-  metadata JSON DEFAULT NULL,
-  PRIMARY KEY (alert_id),
-  KEY idx_alert_schedule_status (schedule_id, status),
-  KEY idx_alert_severity (severity),
-  CONSTRAINT fk_alerts_schedule
-    FOREIGN KEY (schedule_id) REFERENCES schedules(schedule_id)
-      ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS email_targets (

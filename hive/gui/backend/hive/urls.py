@@ -19,11 +19,12 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from tree.views import TreeNodeViewSet
 from settings.views import SettingsRootView
-from audit.views import AuditRootView
+from audit.views import AuditEntryViewSet
 from monitor.views import MonitorRootView
 from tenant.views import TenantRootView
 from nodes.views import StorageNodeViewSet, StorageNodeStatViewSet, HardwareStatusViewSet
 from disk.views import DiskNodeViewSet, DiskNodeStatViewSet, StorageNodeFsStatsListView, StorageNodeDiskStatsListView, DiskStatusListView
+from notifications.views import AlertViewSet, NotificationViewSet
 from api.views import BootstrapInitView, BootstrapStatusView, AddNodeView, AddForeignerView, NewTokenView
 from accounts.views import (
     GroupMembershipViewSet,
@@ -41,7 +42,7 @@ from django.contrib.auth.decorators import login_not_required
 router = DefaultRouter(trailing_slash=False)
 router.register(r'tree', TreeNodeViewSet, basename='tree')
 router.register(r'settings', SettingsRootView, basename='settings')
-router.register(r'audit', AuditRootView, basename='audit')
+router.register(r'audit', AuditEntryViewSet, basename='audit')
 router.register(r'monitor', MonitorRootView, basename='monitor')
 router.register(r'tenant', TenantRootView, basename='tenant')
 router.register(r'nodes', StorageNodeViewSet, basename='nodes')
@@ -55,6 +56,8 @@ router.register(r"roles", RoleViewSet, basename="role")
 router.register(r"ldap", LDAPViewSet, basename="ldap")
 router.register(r"saml", SAMLViewSet, basename="saml")
 router.register(r"mfa", MFAViewSet, basename="mfa")
+router.register(r"notifications", NotificationViewSet, basename="notification")
+router.register(r"alerts", AlertViewSet, basename="alert")
 
 
 router.register(

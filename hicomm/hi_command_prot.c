@@ -235,6 +235,11 @@ static int hifs_compare_sb_newer(const struct hifs_volume_superblock *a,
 static int hifs_compare_dentry_newer(const struct hifs_volume_dentry *a,
 				    const struct hifs_volume_dentry *b)
 {
+	uint32_t a_gen = a ? a->d_generational_epoch : 0;
+	uint32_t b_gen = b ? b->d_generational_epoch : 0;
+	if (a_gen != b_gen)
+		return (a_gen > b_gen) ? 1 : -1;
+
 	uint32_t a_epoch = a ? a->de_epoch : 0;
 	uint32_t b_epoch = b ? b->de_epoch : 0;
 	if (a_epoch != b_epoch)
@@ -277,6 +282,11 @@ static int hifs_compare_inode_newer(const struct hifs_inode_wire *a,
 static int hifs_compare_root_newer(const struct hifs_volume_root_dentry *a,
 				   const struct hifs_volume_root_dentry *b)
 {
+	uint32_t a_epoch = a ? a->rd_epoch : 0;
+	uint32_t b_epoch = b ? b->rd_epoch : 0;
+	if (a_epoch != b_epoch)
+		return (a_epoch > b_epoch) ? 1 : -1;
+
 	uint32_t a_ctime = a ? a->rd_ctime : 0;
 	uint32_t b_ctime = b ? b->rd_ctime : 0;
 	if (a_ctime != b_ctime)
@@ -683,13 +693,18 @@ int hicomm_handle_command(int fd, const struct hifs_cmds *cmd)
 			hifs_err("Failed to fetch block payload: %d", ret);
 			return ret;
 		}
-		if (frame.len != sizeof(struct hifs_block_msg)) {
-			hifs_err("Unexpected block payload length %u (expected %zu)",
-				 frame.len, sizeof(struct hifs_block_msg));
-			return -EINVAL;
+		{
+			size_t expected = sizeof(struct hifs_block_msg);
+			if (frame.len < expected) {
+				hifs_err("Block payload too small: got %u need %zu",
+					 frame.len, expected);
+				return -EINVAL;
+			}
+			if (frame.len > expected)
+				hifs_warning("Block payload larger than expected (%u > %zu); truncating extra metadata",
+					     frame.len, expected);
+			memcpy(&msg_local, frame.data, expected);
 		}
-
-		memcpy(&msg_local, frame.data, sizeof(msg_local));
 		msg_reply = msg_local;
 		volume_id = le64toh(msg_local.volume_id);
 		block_no = le64toh(msg_local.block_no);

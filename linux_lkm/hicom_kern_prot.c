@@ -72,6 +72,11 @@ static int hifs_compare_sb_newer(const struct hifs_volume_superblock *local,
 static int hifs_compare_root_newer(const struct hifs_volume_root_dentry *local,
                                    const struct hifs_volume_root_dentry *remote)
 {
+    u32 l_epoch = le32_to_cpu(local->rd_epoch);
+    u32 r_epoch = le32_to_cpu(remote->rd_epoch);
+    if (r_epoch != l_epoch)
+        return (r_epoch > l_epoch) ? 1 : 0;
+
     u32 l_ctime = le32_to_cpu(local->rd_ctime);
     u32 r_ctime = le32_to_cpu(remote->rd_ctime);
     if (r_ctime != l_ctime)
@@ -101,6 +106,11 @@ static int hifs_compare_dentry_newer(const struct hifs_volume_dentry *local,
     if (l_flags & HIFS_DENTRY_MSGF_REQUEST)
         return 1;
 
+    u32 l_gen = le32_to_cpu(local->d_generational_epoch);
+    u32 r_gen = le32_to_cpu(remote->d_generational_epoch);
+    if (r_gen != l_gen)
+        return (r_gen > l_gen) ? 1 : 0;
+
     u32 l_epoch = le32_to_cpu(local->de_epoch);
     u32 r_epoch = le32_to_cpu(remote->de_epoch);
     if (r_epoch != l_epoch)
@@ -116,6 +126,7 @@ static void hifs_inode_host_to_wire(const struct hifs_inode *src,
 
     memset(dst, 0, sizeof(*dst));
     dst->i_msg_flags = cpu_to_le32(msg_flags);
+    dst->i_generational_epoch = cpu_to_le32(src->i_epoch);
     dst->i_version = src->i_version;
     dst->i_flags = src->i_flags;
     dst->i_mode = cpu_to_le32(src->i_mode);
@@ -155,6 +166,7 @@ static void hifs_inode_wire_to_host(const struct hifs_inode_wire *src,
 
     memset(dst, 0, sizeof(*dst));
     /* msg_flags handled by caller */
+    dst->i_epoch = le32_to_cpu(src->i_generational_epoch);
     dst->i_version = src->i_version;
     dst->i_flags = src->i_flags;
     dst->i_mode = le32_to_cpu(src->i_mode);
@@ -233,8 +245,15 @@ static void hifs_apply_remote_inode(struct super_block *sb,
         kgid_t gid = make_kgid(&init_user_ns, host_inode.i_gid);
         struct timespec64 ts;
 
-        if (priv)
+        if (priv) {
+            u32 old_epoch = priv->i_epoch;
+
+            if (old_epoch && old_epoch != host_inode.i_epoch) {
+                hifs_cache_invalidate_inode(vfs_inode);
+                priv->i_cached_epoch = 0;
+            }
             memcpy(priv, &host_inode, sizeof(*priv));
+        }
 
         if (uid_valid(uid))
             vfs_inode->i_uid = uid;
@@ -342,6 +361,17 @@ static void hifs_apply_remote_dentry(struct super_block *sb,
         if (parent_hifs_owned)
             cache_put_inode(&parent_hifs);
         return;
+    }
+
+    {
+        u32 remote_epoch = le32_to_cpu(remote->d_generational_epoch);
+
+        if (remote_epoch && parent_hifs->i_epoch != remote_epoch) {
+            parent_hifs->i_epoch = remote_epoch;
+            parent_hifs->i_cached_epoch = 0;
+            if (parent_inode)
+                hifs_dir_epoch_changed(parent_inode);
+        }
     }
 
     for (i = 0; i < HIFS_INODE_TSIZE; ++i) {
@@ -581,10 +611,12 @@ int hifs_handshake_rootdentry(struct super_block *sb)
 
     if (hifs_compare_root_newer(&info->root_dentry, &msg_remote->root) > 0) {
         info->root_dentry = msg_remote->root;
+        info->root_epoch = le32_to_cpu(info->root_dentry.rd_epoch);
         hifs_volume_save(sb, info);
         ret = 1;
         goto out;
     }
+    info->root_epoch = le32_to_cpu(info->root_dentry.rd_epoch);
     ret = 0;
 
 out:
@@ -595,7 +627,8 @@ out:
 }
 
 int hifs_publish_dentry(struct super_block *sb, uint64_t parent_ino, uint64_t child_ino,
-			const char *name, u32 name_len, u32 type, bool request_only)
+			const char *name, u32 name_len, u32 type, bool request_only,
+			u32 parent_epoch)
 {
     struct hifs_sb_info *info;
     struct hifs_cmds cmd;
@@ -633,6 +666,7 @@ int hifs_publish_dentry(struct super_block *sb, uint64_t parent_ino, uint64_t ch
     }
 
     msg_local->volume_id = cpu_to_le64(info->volume_id);
+    msg_local->dentry.d_generational_epoch = cpu_to_le32(parent_epoch);
     msg_local->dentry.de_flags = cpu_to_le32(request_only ? HIFS_DENTRY_MSGF_REQUEST : 0);
     msg_local->dentry.de_parent = cpu_to_le64(parent_ino);
     msg_local->dentry.de_inode = cpu_to_le64(child_ino);
@@ -873,6 +907,30 @@ int hifs_publish_block(struct super_block *sb, uint64_t block_no,
                                    (flags & (HIFS_BLOCK_MSGF_CONTIG_START |
                                              HIFS_BLOCK_MSGF_CONTIG_END)));
     msg_local->data_len = cpu_to_le32(request_only ? 0 : data_len);
+
+    /* Deterministic placement fields */
+    msg_local->placement_epoch = cpu_to_le32(info->placement_epoch);
+
+    {
+        enum hifs_hash_algorithm stripe_algo = HIFS_HASH_ALGO_NONE;
+        int sid_ret = hifs_calc_stripe_id(sb, block_no,
+                                          msg_local->stripe_id,
+                                          &stripe_algo);
+        if (sid_ret) {
+            /*
+             * Without stripe_id, the backend can't do deterministic placement.
+             * Fail early so we don't send requests that can't be served.
+             */
+            hifs_err("publish block %llu: failed to compute stripe_id (%d)",
+                     (unsigned long long)block_no, sid_ret);
+            ret = sid_ret;
+            goto out;
+        }
+
+        msg_local->stripe_id_algo = (u8)stripe_algo;
+        memset(msg_local->stripe_id_reserved, 0, sizeof(msg_local->stripe_id_reserved));
+    }
+
     if (!request_only && hash) {
         msg_local->hash_algo = hash_algo;
         memcpy(msg_local->hash, hash, sizeof(msg_local->hash));

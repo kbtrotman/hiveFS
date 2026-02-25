@@ -295,6 +295,8 @@ ssize_t hifs_read(struct kiocb *iocb, struct iov_iter *to)
 	block_size = hifs_sb_block_size(sb);
 	hiinode = inode->i_private;
 
+	hifs_inode_epoch_touch(inode);
+
 	if (!count)
 		return 0;
 	if (off >= hiinode->i_size)

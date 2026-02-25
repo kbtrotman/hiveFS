@@ -41,6 +41,63 @@ struct hifs_dedupe_ctx {
 	siphash_key_t fallback_key_secondary;
 };
 
+/* Context-aware IDs for stripe placement. */
+int hifs_calc_stripe_id(struct super_block *sb, u64 block_no,
+                        u8 out[HIFS_STRIPE_ID_SIZE],
+                        enum hifs_hash_algorithm *algo_out)
+{
+    struct hifs_sb_info *info;
+    struct hifs_dedupe_ctx *ctx;
+    u8 digest[SHA256_DIGEST_SIZE];
+
+    struct __packed stripe_id_input {
+        __le32 layout_ver;
+        __le64 volume_id;
+        __le64 block_no;
+        __le32 placement_epoch;
+    } in;
+
+    int ret;
+
+    if (!sb || !out)
+        return -EINVAL;
+
+    info = (struct hifs_sb_info *)sb->s_fs_info;
+    if (!info)
+        return -EINVAL;
+
+    ctx = info->dedupe;
+    if (!ctx || !ctx->shash) {
+        /*
+         * Stripe IDs MUST be deterministic cluster-wide.
+         */
+        hifs_crit("stripe_id: sha256 unavailable; cannot compute deterministic stripe_id");
+        return -EOPNOTSUPP;
+    }
+
+    in.layout_ver = cpu_to_le32(HIFS_LAYOUT_VER);
+    in.volume_id = cpu_to_le64(info->volume_id);
+    in.block_no = cpu_to_le64(block_no);
+    in.placement_epoch = cpu_to_le32(info->placement_epoch);
+
+    {
+        SHASH_DESC_ON_STACK(desc, ctx->shash);
+        desc->tfm = ctx->shash;
+
+        ret = crypto_shash_digest(desc, (const u8 *)&in, sizeof(in), digest);
+        if (ret)
+            return ret;
+    }
+
+    memcpy(out, digest, HIFS_STRIPE_ID_SIZE);
+    memzero_explicit(digest, sizeof(digest));
+
+    if (algo_out)
+        *algo_out = HIFS_HASH_ALGO_SHA256;
+
+    return 0;
+}
+
 static inline struct hifs_dedupe_ctx *hifs_sb_dedupe_ctx(struct super_block *sb)
 {
 	struct hifs_sb_info *info = sb ? (struct hifs_sb_info *)sb->s_fs_info : NULL;

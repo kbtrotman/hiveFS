@@ -276,11 +276,6 @@ extern struct hifs_link hifs_user_link;
  * END Queue Management Structures
  ******************************/
 
-#define HIFS_IO_WAIT_DEFAULT_MS 1000U
-#define HIFS_IO_WAIT_MAX_MS     (5U * 60U * 1000U) /* 5 minutes cap */
-#define HIFS_CACHE_FLUSH_INTERVAL_DEFAULT_MS 5000U        /* 5 seconds */
-#define HIFS_CACHE_FLUSH_INTERVAL_MAX_MS     (60U * 60U * 1000U) /* 1 hour cap */
-
 
 /***********************
  * Hive FS Structures
@@ -301,14 +296,9 @@ extern struct
 #define HIFS_NAME_LEN		     255
 #define HIFS_INODE_MSIZE		 4
 #define HIFS_INODE_TSIZE		 4
-#define HIFS_BLOCK_HASH_SIZE     16
+#define HIFS_BLOCK_HASH_SIZE     32
+#define HIFS_STRIPE_ID_SIZE      32  /* same size as block hash = 256-bit ID, low collision rate with existing stripes */
 #define HIFS_MAX_BLOCK_HASHES    128
-
-enum hifs_hash_algorithm {
-	HIFS_HASH_ALGO_NONE = 0,
-	HIFS_HASH_ALGO_SHA256 = 1,
-	HIFS_HASH_ALGO_SIPHASH = 2,
-};
 
 #define HIFS_BOOT_OFFSET		 0
 #define HIFS_BOOT_LEN            512
@@ -327,6 +317,17 @@ enum hifs_hash_algorithm {
 #define HIFS_BLOCK_BITMAP_OFFSET  (HIFS_DIRENT_BITMAP_OFFSET + HIFS_DEFAULT_BLOCK_SIZE)
 /* Default place where FS will start using after mkcache (all above are used for mkcache tables) */
 #define HIFS_CACHE_SPACE_START	 (HIFS_BLOCK_BITMAP_OFFSET + HIFS_DEFAULT_BLOCK_SIZE)
+#define HIFS_IO_WAIT_DEFAULT_MS 1000U
+#define HIFS_IO_WAIT_MAX_MS     (5U * 60U * 1000U) /* 5 minutes cap */
+#define HIFS_CACHE_FLUSH_INTERVAL_DEFAULT_MS 5000U        /* 5 seconds */
+#define HIFS_CACHE_FLUSH_INTERVAL_MAX_MS     (60U * 60U * 1000U) /* 1 hour cap */
+
+
+enum hifs_hash_algorithm {
+	HIFS_HASH_ALGO_NONE = 0,
+	HIFS_HASH_ALGO_SHA256 = 1,
+	HIFS_HASH_ALGO_SIPHASH = 2,
+};
 
 #ifdef __KERNEL__
 struct hifs_block_fingerprint {
@@ -358,10 +359,6 @@ struct hifs_block_fingerprint_wire {
 #endif
 };
 
-#define HIFS_INODE_SIZE		(sizeof(struct hifs_inode))
-#define HIFS_INODE_NUMBER_TABLE	128
-#define HIFS_INODE_TABLE_SIZE	(HIFS_INODE_NUMBER_TABLE * HIFS_INODE_SIZE)/HIFS_DEFAULT_BLOCK_SIZE
-
 /**
  * Special inode numbers inhereted from Ext2 or new to HIFS...
  * NOTE: Our virtual FS cache uses a basic EXT2 style layout for the most part.
@@ -382,6 +379,10 @@ struct hifs_block_fingerprint_wire {
 #define HIFS_INODE_SYNC_BYTES		(512 * 1024)
 #define HIFS_INODE_SYNC_INTERVAL	(5 * HZ)
 #define HIFS_WRITEBATCH_MAX 256   /* tune: 128 * 4k = 512k at a time */
+
+#define HIFS_INODE_SIZE		(sizeof(struct hifs_inode))
+#define HIFS_INODE_NUMBER_TABLE	128
+#define HIFS_INODE_TABLE_SIZE	(HIFS_INODE_NUMBER_TABLE * HIFS_INODE_SIZE)/HIFS_DEFAULT_BLOCK_SIZE
 
 struct hifs_extent {
 	uint32_t block_start;   /* first block (inclusive) */
@@ -404,7 +405,8 @@ struct hifs_extent_wire {
 struct hifs_inode
 {
 	//const struct super_block	i_sb;      /* Superblock position */
-    uint8_t     i_version;	/* inode version */
+    uint32_t    i_epoch;	/* change epoch/version */
+	uint8_t		i_version;	/* layout version */
 	uint8_t		i_flags;	/* inode flags: TYPE */
 	uint32_t	i_mode;		/* File mode */
 	uint64_t	i_ino;		/* inode number */
@@ -429,12 +431,15 @@ struct hifs_inode
 #ifdef __KERNEL__
 	size_t		i_runtime_dirty_bytes;
 	unsigned long	i_runtime_last_sync;
+	uint32_t	i_cached_epoch;
 #endif
 };
 
 
 struct hifs_dir_entry 
 {
+	uint32_t parent_inode;	/* parent inode number */
+	uint32_t d_generational_epoch;
 	uint32_t inode_nr;		/* inode number */
 	uint32_t name_len;		/* Name length */
 	char name[256];			/* File name, up to HIFS_NAME_LEN */
@@ -560,6 +565,7 @@ struct hifs_disk_superblock {
 	__u8	s_padding1[2];
 	__le32	s_reserved[96];         /* must fill superblock to 1024 bytes */
 	__le32	s_checksum;             /* superblock checksum */
+	__le32 s_placement_epoch; 
 #else
 	uint32_t	s_generational_epoch;
 	uint32_t	s_inodes_count;
@@ -662,6 +668,7 @@ struct hifs_disk_superblock {
 	uint8_t	s_padding1[2];
 	uint32_t	s_reserved[96];
 	uint32_t	s_checksum;
+	uint32_t s_placement_epoch;
 #endif
 };
 
@@ -718,6 +725,7 @@ struct hifs_volume_root_dentry {
     __le32 rd_atime;       /* last access time */
     __le32 rd_mtime;       /* last modification */
     __le32 rd_ctime;       /* last status change */
+    __le32 rd_epoch;       /* epoch for directory contents */
     __le32 rd_links;       /* hard link count */
     __le32 rd_name_len;    /* length of rd_name */
 #else
@@ -731,6 +739,7 @@ struct hifs_volume_root_dentry {
     uint32_t rd_atime;
     uint32_t rd_mtime;
     uint32_t rd_ctime;
+    uint32_t rd_epoch;
     uint32_t rd_links;
     uint32_t rd_name_len;
 #endif
@@ -760,6 +769,7 @@ struct hifs_root_msg {
 /* Generic directory entry metadata shared with the cluster. */
 struct hifs_volume_dentry {
 #ifdef __KERNEL__
+    __le32 d_generational_epoch;
     __le32 de_flags;
     __le64 de_parent;     /* parent inode */
     __le64 de_inode;      /* child inode */
@@ -767,6 +777,7 @@ struct hifs_volume_dentry {
     __le32 de_type;       /* DT_* style file type */
     __le32 de_name_len;   /* name length */
 #else
+	uint32_t d_generational_epoch;
     uint32_t de_flags;
     uint64_t de_parent;
     uint64_t de_inode;
@@ -792,6 +803,16 @@ struct hifs_block_msg {
     __le64 block_no;
     __le32 flags;
     __le32 data_len;
+
+    /* Deterministic placement */
+    __le32 placement_epoch;
+
+    /* Stripe ID (placement identity) */
+    __u8  stripe_id_algo;
+    __u8  stripe_id_reserved[3];
+    __u8  stripe_id[HIFS_STRIPE_ID_SIZE];
+
+    /* Content hash (dedupe / integrity identity) */
     __u8  hash_algo;
     __u8  hash_reserved[3];
     __u8  hash[HIFS_BLOCK_HASH_SIZE];
@@ -800,6 +821,13 @@ struct hifs_block_msg {
     uint64_t block_no;
     uint32_t flags;
     uint32_t data_len;
+
+    uint32_t placement_epoch;
+
+    uint8_t  stripe_id_algo;
+    uint8_t  stripe_id_reserved[3];
+    uint8_t  stripe_id[HIFS_STRIPE_ID_SIZE];
+
     uint8_t  hash_algo;
     uint8_t  hash_reserved[3];
     uint8_t  hash[HIFS_BLOCK_HASH_SIZE];
@@ -834,6 +862,7 @@ struct hifs_block_hash_wire {
 /* Wire format for hifs_inode exchanged with cluster. */
 struct hifs_inode_wire {
 #ifdef __KERNEL__
+    __le32 i_generational_epoch;
     __le32 i_msg_flags;
     __u8  i_version;
     __u8  i_flags;
@@ -857,6 +886,7 @@ struct hifs_inode_wire {
     __le16 i_hash_reserved;
 	__le16 i_hash_head;
 #else
+	uint32_t i_generational_epoch;
     uint32_t i_msg_flags;
     uint8_t  i_version;
     uint8_t  i_flags;

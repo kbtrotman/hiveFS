@@ -98,6 +98,7 @@ static void hifs_prepare_root_dentry(struct hifs_sb_info *info,
 	info->root_dentry.rd_atime = cpu_to_le32(root_inode->i_atime);
 	info->root_dentry.rd_mtime = cpu_to_le32(root_inode->i_mtime);
 	info->root_dentry.rd_ctime = cpu_to_le32(root_inode->i_ctime);
+	info->root_dentry.rd_epoch = cpu_to_le32(root_inode->i_epoch);
 	info->root_dentry.rd_links = cpu_to_le32(root_inode->i_hrd_lnk);
 
 	len = strnlen(root_inode->i_name, sizeof(root_inode->i_name));
@@ -150,6 +151,8 @@ static void hifs_apply_root_metadata(struct hifs_inode *inode,
 	inode->i_atime = le32_to_cpu(root->rd_atime);
 	inode->i_mtime = le32_to_cpu(root->rd_mtime);
 	inode->i_ctime = le32_to_cpu(root->rd_ctime);
+	inode->i_epoch = le32_to_cpu(root->rd_epoch);
+	inode->i_cached_epoch = 0;
 
 	if (name_len > sizeof(inode->i_name))
 		name_len = sizeof(inode->i_name);
@@ -277,6 +280,8 @@ int hifs_get_super(struct super_block *sb, void *data, int silent)
 	sb_info->s_block_olt = HIFS_INODE_TABLE_OFFSET / sb_info->s_blocksize;
 	sb_info->s_inode_cnt = le32_to_cpu(disk_sb->s_inodes_count);
 	sb_info->s_last_blk = HIFS_CACHE_SPACE_START / sb_info->s_blocksize;
+	sb_info->sb_epoch = le32_to_cpu(disk_sb->s_generational_epoch);
+	sb_info->placement_epoch = le32_to_cpu(disk_sb->s_placement_epoch);
 
 	memcpy(&sb_info->disk, disk_sb, sizeof(*disk_sb));
 	sb_info->disk.s_magic = cpu_to_le16(sb_info->s_magic);
@@ -358,6 +363,7 @@ int hifs_get_super(struct super_block *sb, void *data, int silent)
 
 	memcpy(root_hifsinode, bh->b_data + offset, sizeof(*root_hifsinode));
 	hifs_prepare_root_dentry(sb_info, root_hifsinode);
+	sb_info->root_epoch = le32_to_cpu(sb_info->root_dentry.rd_epoch);
 
 	if (sb_info->is_remote_volume) {
 		int sync_ret = hifs_handshake_superblock(sb);
@@ -375,6 +381,8 @@ int hifs_get_super(struct super_block *sb, void *data, int silent)
 
 	if (sb_info->is_remote_volume)
 		hifs_apply_root_metadata(root_hifsinode, &sb_info->root_dentry);
+	else
+		root_hifsinode->i_cached_epoch = root_hifsinode->i_epoch;
 
 	root_inode = new_inode(sb);
 	if (!root_inode) {

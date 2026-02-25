@@ -24,6 +24,8 @@ int hifs_readdir(struct file *filp, struct dir_context *ctx)
 		return 0;
 	WARN_ON(!S_ISDIR(dinode->i_mode));
 
+	hifs_dir_epoch_touch(inode);
+
 	/* For each extends from file */
 	for (i = 0; i < HIFS_INODE_TSIZE; ++i) {
 		const struct hifs_extent *ext = &dinode->extents[i];

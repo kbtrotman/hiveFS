@@ -1022,6 +1022,40 @@ bool hifs_cache_test_inode(struct super_block *sb, uint64_t ino)
     return __bitmap_test_byte(ctx->inode_bmp->bitmap, ino);
 }
 
+void hifs_cache_invalidate_inode(struct inode *inode)
+{
+    struct super_block *sb;
+    struct hifs_inode *dinode;
+    size_t i;
+
+    if (!inode)
+        return;
+
+    sb = inode->i_sb;
+    dinode = (struct hifs_inode *)inode->i_private;
+
+    if (!sb || !dinode)
+        return;
+
+    hifs_cache_clear_inode(sb, dinode->i_ino);
+    dinode->i_cached_epoch = 0;
+
+    for (i = 0; i < HIFS_INODE_TSIZE; ++i) {
+        u32 start = dinode->extents[i].block_start;
+        u32 count = dinode->extents[i].block_count;
+        u32 offset;
+
+        if (!count)
+            continue;
+
+        for (offset = 0; offset < count; ++offset) {
+            u64 block = (u64)start + offset;
+            hifs_cache_clear_dirty(sb, block);
+            hifs_cache_clear_present(sb, block);
+        }
+    }
+}
+
 void hifs_cache_mark_dirent(struct super_block *sb, uint64_t dent)
 {
     struct hifs_sb_info *info = sbinfo(sb);

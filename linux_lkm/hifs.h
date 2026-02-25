@@ -31,6 +31,7 @@
 #include <linux/version.h>
 #include <linux/vfs.h>
 #include <linux/blkdev.h>
+#include <linux/dcache.h>
 #include <linux/magic.h>
 #include <linux/debugfs.h>
 #include <linux/workqueue.h>
@@ -137,7 +138,8 @@ void hicom_process_link_handshake(void);
 int hifs_handshake_superblock(struct super_block *sb);
 int hifs_handshake_rootdentry(struct super_block *sb);
 int hifs_publish_dentry(struct super_block *sb, uint64_t parent_ino, uint64_t child_ino,
-			const char *name, u32 name_len, u32 type, bool request_only);
+		const char *name, u32 name_len, u32 type, bool request_only,
+		u32 parent_epoch);
 int hifs_publish_inode(struct super_block *sb, const struct hifs_inode *hii,
                        bool request_only);
 int hifs_publish_block(struct super_block *sb, uint64_t block_no,
@@ -193,6 +195,9 @@ struct dentry *hifs_lookup(struct inode *dir, struct dentry *child_dentry, unsig
 
 /* hifs_dir.c */
 int hifs_readdir(struct file *filp, struct dir_context *ctx);
+void hifs_inode_epoch_touch(struct inode *inode);
+void hifs_dir_epoch_touch(struct inode *inode);
+void hifs_dir_epoch_changed(struct inode *inode);
 
 /* hifs_file.c */
 ssize_t hifs_get_loffset(struct hifs_inode *hii, loff_t off);
@@ -235,6 +240,7 @@ bool hifs_cache_test_dirty(struct super_block *sb, uint64_t block);
 void hifs_cache_mark_inode(struct super_block *sb, uint64_t ino);
 void hifs_cache_clear_inode(struct super_block *sb, uint64_t ino);
 bool hifs_cache_test_inode(struct super_block *sb, uint64_t ino);
+void hifs_cache_invalidate_inode(struct inode *inode);
 void hifs_cache_mark_dirent(struct super_block *sb, uint64_t dent);
 void hifs_cache_clear_dirent(struct super_block *sb, uint64_t dent);
 bool hifs_cache_test_dirent(struct super_block *sb, uint64_t dent);
@@ -283,7 +289,10 @@ int hifs_dedupe_init(struct hifs_sb_info *info);
 void hifs_dedupe_shutdown(struct hifs_sb_info *info);
 bool hifs_dedupe_should_push(struct super_block *sb, uint64_t block_no);
 void hifs_dedupe_mark_clean(struct super_block *sb, uint64_t block_no, bool success);
-
+int hifs_calc_stripe_id(struct super_block *sb, u64 block_no,
+                        u8 out[HIFS_STRIPE_ID_SIZE],
+                        enum hifs_hash_algorithm *algo_out);
+                        
 /* hifs_cluster (protections for the filesystem's shared contexts) */
 int hifs_cluster_on_open(struct inode *inode, struct file *file);
 void hifs_cluster_on_close(struct inode *inode, struct file *file);
@@ -328,6 +337,9 @@ struct hifs_sb_info
 	uint32_t	s_block_olt;	/* Object location table block */
 	uint32_t	s_inode_cnt;	/* number of inodes in inode table */
 	uint32_t	s_last_blk;	    /* just move forward with allocation */
+    uint32_t    placement_epoch;  /* epoch-based fall-back logic for CAS/Stripe placement/Stripe ID'ing */
+    uint32_t    sb_epoch;         /* disk superblock generation */
+    uint32_t    root_epoch;       /* cached root directory epoch */
     /* Shared cache context across mounts */
     struct hifs_cache_ctx *cache;
     struct hifs_dedupe_ctx *dedupe;

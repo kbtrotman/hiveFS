@@ -17,6 +17,66 @@
 #include <linux/minmax.h>
 u32 _ix = 0, b = 0, e = 0;
 
+static void hifs_inode_epoch_guard(struct inode *inode, bool drop_dcache)
+{
+	struct hifs_inode *priv = inode ? (struct hifs_inode *)inode->i_private : NULL;
+	struct dentry *alias;
+
+	if (!inode || !priv)
+		return;
+
+	if (!priv->i_cached_epoch) {
+		priv->i_cached_epoch = priv->i_epoch;
+		return;
+	}
+
+	if (priv->i_cached_epoch == priv->i_epoch)
+		return;
+
+	hifs_cache_invalidate_inode(inode);
+	priv->i_cached_epoch = priv->i_epoch;
+
+	if (!drop_dcache)
+		return;
+
+	alias = d_find_any_alias(inode);
+	if (alias) {
+		shrink_dcache_parent(alias);
+		dput(alias);
+	}
+}
+
+void hifs_dir_epoch_touch(struct inode *inode)
+{
+	if (!inode || !S_ISDIR(inode->i_mode))
+		return;
+	hifs_inode_epoch_guard(inode, true);
+}
+
+void hifs_inode_epoch_touch(struct inode *inode)
+{
+	hifs_inode_epoch_guard(inode, false);
+}
+
+void hifs_dir_epoch_changed(struct inode *inode)
+{
+	struct hifs_inode *priv = inode ? (struct hifs_inode *)inode->i_private : NULL;
+
+	if (!inode || !S_ISDIR(inode->i_mode) || !priv)
+		return;
+
+	priv->i_cached_epoch = priv->i_epoch;
+	hifs_cache_invalidate_inode(inode);
+
+	{
+		struct dentry *alias = d_find_any_alias(inode);
+		if (alias) {
+			shrink_dcache_parent(alias);
+			dput(alias);
+		}
+	}
+}
+
 static uint32_t hifs_inode_total_blocks(const struct hifs_inode *inode)
 {
 	uint32_t total = 0;
@@ -336,6 +396,9 @@ int hifs_add_dir_record(struct super_block *sb, struct inode *dir, struct dentry
 					parent->i_bytes = parent->i_size;
 					hifs_cache_mark_inode(sb, parent->i_ino);
 					hifs_store_inode(sb, parent);
+					parent->i_epoch++;
+					parent->i_cached_epoch = parent->i_epoch;
+					hifs_dir_epoch_changed(dir);
 					hifs_publish_inode(sb, parent, false);
 				{
 					struct super_block *sb = dir->i_sb;
@@ -362,7 +425,8 @@ int hifs_add_dir_record(struct super_block *sb, struct inode *dir, struct dentry
 							    dentry->d_name.name,
 							    dir_rec->name_len,
 							    type,
-							    false);
+							    false,
+							    parent->i_epoch);
 				}
 				return 0;
 			}
@@ -391,6 +455,8 @@ struct hifs_sb_info *hisb;
 	hii->i_size = 0;
 	hii->i_hash_count = 0;
 	hii->i_hash_reserved = 0;
+	hii->i_epoch = 1;
+	hii->i_cached_epoch = 1;
 	memset(hii->i_block_fingerprints, 0, sizeof(hii->i_block_fingerprints));
 
 	{
@@ -651,6 +717,9 @@ void hifs_fill_inode(struct super_block *sb, struct inode *des, struct hifs_inod
 	des->i_ino = src->i_ino;
 	des->i_private = src;
 	des->i_op = &hifs_inode_operations;
+	des->i_gen = src->i_epoch;
+	if (!src->i_cached_epoch)
+		src->i_cached_epoch = src->i_epoch;
 
 	/* Some remote entries may arrive without a type; default to regular file. */
 	if (!S_ISDIR(src->i_mode) && !S_ISREG(src->i_mode) && !S_ISLNK(src->i_mode)) {
@@ -683,6 +752,8 @@ struct dentry *hifs_lookup(struct inode *dir, struct dentry *child_dentry, unsig
 	struct inode *ichild;
 	u32 j = 0, i = 0;
 	bool retried = false;
+
+	hifs_dir_epoch_touch(dir);
 
 retry:
 
@@ -742,7 +813,8 @@ retry:
 				 child_dentry->d_name.name,
 				 child_dentry->d_name.len,
 				 DT_UNKNOWN,
-				 true);
+				 true,
+				 dparent->i_epoch);
 		goto retry;
 	}
 	d_add(child_dentry, NULL);

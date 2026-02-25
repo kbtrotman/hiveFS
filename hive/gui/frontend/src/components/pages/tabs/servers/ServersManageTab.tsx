@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import type { CSSProperties } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../../ui/card';
 import { Button } from '../../../ui/button';
 import { Checkbox } from '../../../ui/checkbox';
@@ -21,6 +22,18 @@ export function ServersManageTab() {
   const { stats, error, lastUpdated } = useDiskStats();
   const aggregated = useMemo(() => aggregateStatsByNode(stats), [stats]);
   const [selectedNodes, setSelectedNodes] = useState<Record<string, boolean>>({});
+  const framedButtonClass =
+    'border-white/55 bg-white/10 text-white/95 backdrop-blur-sm transition hover:bg-white/25 hover:text-white focus-visible:ring-white/70';
+  const raisedButtonStyle: CSSProperties = {
+    background: 'linear-gradient(135deg, rgba(255,255,255,0.25) 0%, rgba(15,23,42,0.25) 120%)',
+    border: '1px solid rgba(255,255,255,0.7)',
+    boxShadow: '0 14px 28px rgba(0,0,0,0.38), inset 0 1px 0 rgba(255,255,255,0.35)',
+  };
+  const removeButtonStyle: CSSProperties = {
+    background: 'linear-gradient(135deg, #7f1d1d 0%, #dc2626 60%, #f87171 100%)',
+    border: '1px solid rgba(255,255,255,0.85)',
+    boxShadow: '0 14px 28px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.3)',
+  };
 
   const overview = useMemo(() => {
     const nodeCount = aggregated.length;
@@ -81,17 +94,7 @@ export function ServersManageTab() {
     <div className="space-y-6">
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
-          <h2>Node Manager</h2>
-        </div>
-        <div className="flex w-full flex-wrap justify-start gap-2 md:w-auto md:justify-end">
-          <Button>
-            <Plus className="mr-2 h-4 w-4" />
-            Add Node
-          </Button>
-          <Button variant="destructive">
-            <Minus className="mr-2 h-4 w-4" />
-            Remove Node
-          </Button>
+          <h2>Storage Node Manager</h2>
         </div>
       </div>
 
@@ -102,9 +105,43 @@ export function ServersManageTab() {
       )}
 
       <Card>
-        <CardHeader>
-          <CardTitle>Node Inventory</CardTitle>
-          <CardDescription>Select nodes to perform management actions</CardDescription>
+        <CardHeader className="p-0">
+          <div
+            className="flex w-full flex-wrap items-center justify-between gap-4 rounded-2xl border border-sky-100/60 p-4 text-white shadow-[0_20px_35px_rgba(15,23,42,0.25),_inset_0_2px_0_rgba(255,255,255,0.45)]"
+            style={{
+              background: 'linear-gradient(90deg, #14b8a6 0%, #0ea5e9 45%, #0369a1 100%)',
+            }}
+          >
+            <div className="min-w-[240px] flex-1 space-y-1">
+              <CardTitle className="text-white">Manage a Node</CardTitle>
+              <CardDescription className="text-sky-50/90">
+                Select nodes to perform management actions
+              </CardDescription>
+            </div>
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button className={framedButtonClass} variant="outline" style={raisedButtonStyle}>
+                <Plus className="mr-2 h-4 w-4" />
+                Add Node
+              </Button>
+              <Button
+                variant="ghost"
+                className={`${framedButtonClass} text-white`}
+                style={removeButtonStyle}
+              >
+                <Minus className="mr-2 h-4 w-4" />
+                Remove Node
+              </Button>
+              <Button className={framedButtonClass} variant="outline" style={raisedButtonStyle}>
+                Reset Node
+              </Button>
+              <Button className={framedButtonClass} variant="outline" style={raisedButtonStyle}>
+                Turn off Node
+              </Button>
+              <Button className={framedButtonClass} variant="outline" style={raisedButtonStyle}>
+                Diag Node
+              </Button>
+            </div>
+          </div>
         </CardHeader>
         <CardContent>
           <div className="overflow-x-auto">

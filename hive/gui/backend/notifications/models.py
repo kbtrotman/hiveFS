@@ -108,7 +108,7 @@ class Notification(models.Model):
 
     class Meta:
         managed = False
-        db_table = "notifications"
+        db_table = "v_notifications"
         indexes = [
             models.Index(
                 fields=["schedule", "status"],
@@ -176,7 +176,7 @@ class Alert(models.Model):
 
     class Meta:
         managed = False
-        db_table = "alerts"
+        db_table = "v_alerts"
         indexes = [
             models.Index(
                 fields=["schedule", "status"],
