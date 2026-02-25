@@ -455,6 +455,7 @@ struct hifs_sb_info *hisb;
 	hii->i_size = 0;
 	hii->i_hash_count = 0;
 	hii->i_hash_reserved = 0;
+	hii->i_hash_head = 0;
 	hii->i_epoch = 1;
 	hii->i_cached_epoch = 1;
 	memset(hii->i_block_fingerprints, 0, sizeof(hii->i_block_fingerprints));
@@ -711,15 +712,19 @@ struct hifs_inode *hifs_iget(struct super_block *sb, ino_t ino)
 
 void hifs_fill_inode(struct super_block *sb, struct inode *des, struct hifs_inode *src)
 {
+	struct hifs_inode *hi = HIFS_I(des);   // or use src directly if that's what i_private is
+	hi->i_epoch = src->i_epoch;
+	if (!hi->i_cached_epoch)
+		hi->i_cache_epoch = src->i_cache_epoch;
+	
+	// Normal VFS assigned fields:
 	des->i_mode = src->i_mode;
 	des->i_flags = src->i_flags;
 	des->i_sb = sb;
 	des->i_ino = src->i_ino;
 	des->i_private = src;
 	des->i_op = &hifs_inode_operations;
-	des->i_gen = src->i_epoch;
-	if (!src->i_cached_epoch)
-		src->i_cached_epoch = src->i_epoch;
+
 
 	/* Some remote entries may arrive without a type; default to regular file. */
 	if (!S_ISDIR(src->i_mode) && !S_ISREG(src->i_mode) && !S_ISLNK(src->i_mode)) {

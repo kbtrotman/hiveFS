@@ -292,7 +292,7 @@ void hifs_dedupe_mark_clean(struct super_block *sb, uint64_t block_no, bool succ
 int hifs_calc_stripe_id(struct super_block *sb, u64 block_no,
                         u8 out[HIFS_STRIPE_ID_SIZE],
                         enum hifs_hash_algorithm *algo_out);
-                        
+
 /* hifs_cluster (protections for the filesystem's shared contexts) */
 int hifs_cluster_on_open(struct inode *inode, struct file *file);
 void hifs_cluster_on_close(struct inode *inode, struct file *file);
@@ -362,6 +362,7 @@ struct hifs_sb_info
     bool io_wait_mount_override;
 };
 
+// Couple of helpers here to make things a little easier & more traditional for kernel code:
 static inline uint32_t hifs_sb_block_size(const struct super_block *sb)
 {
 	const struct hifs_sb_info *info = sb ? sb->s_fs_info : NULL;
@@ -374,8 +375,13 @@ static inline const struct hifs_disk_superblock *hifs_get_cached_superblock(stru
     struct hifs_sb_info *info = sb ? (struct hifs_sb_info *)sb->s_fs_info : NULL;
     return info ? &info->disk : NULL;
 }
-// END: Globals Here:
 
+// The traditional Macro. I don't see the point, but well, I'll define it.
+static inline struct hifs_inode *HIFS_I(struct inode *inode)
+{
+    return (struct hifs_inode *)inode->i_private;
+}
+// END: Globals Here:
 
 /***********************
  * Hive FS Log Functions

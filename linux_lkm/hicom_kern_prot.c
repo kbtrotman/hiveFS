@@ -157,6 +157,7 @@ static void hifs_inode_host_to_wire(const struct hifs_inode *src,
     }
     dst->i_hash_count = cpu_to_le16(src->i_hash_count);
     dst->i_hash_reserved = cpu_to_le16(src->i_hash_reserved);
+    dst->i_hash_head = cpu_to_le16(src->i_hash_head);
 }
 
 static void hifs_inode_wire_to_host(const struct hifs_inode_wire *src,
@@ -197,6 +198,7 @@ static void hifs_inode_wire_to_host(const struct hifs_inode_wire *src,
     }
     dst->i_hash_count = le16_to_cpu(src->i_hash_count);
     dst->i_hash_reserved = le16_to_cpu(src->i_hash_reserved);
+    dst->i_hash_head = le16_to_cpu(src->i_hash_head);
 }
 
 static int hifs_compare_inode_newer(const struct hifs_inode_wire *local,

@@ -13,6 +13,7 @@
 #include <linux/uio.h>
 #include <linux/limits.h>
 #include <linux/string.h>
+#include <linux/writeback.h>
 
 struct hifs_write_block_ref {
 	struct buffer_head *bh;
@@ -29,6 +30,9 @@ struct hifs_write_desc {
 	struct hifs_write_block_ref *tail;
 };
 
+static int hifs_write_contiguous(struct inode *inode,
+				 const struct hifs_write_desc *descs,
+				 size_t desc_count);
 
 
 
@@ -383,221 +387,297 @@ static void hifs_flush_bhs(struct buffer_head **bhs, size_t *nr, bool sync)
 
 ssize_t hifs_write(struct kiocb *iocb, struct iov_iter *from)
 {
-    ...
-    struct buffer_head *batch_bhs[HIFS_WRITEBATCH_MAX];
-    size_t batch_nr = 0;
-    bool do_sync = hifs_need_sync(iocb, inode);
-    ...
+	struct inode *inode;
+	struct hifs_inode *dinode;
+	struct super_block *sb;
+	uint32_t block_size;
+	size_t count, done = 0;
+	loff_t off;
+	struct hifs_write_desc *descs = NULL;
+	size_t desc_count = 0;
+	size_t total_descs_flushed = 0;
+	struct hifs_write_desc first_desc_snapshot;
+	bool have_desc_snapshot = false;
+	struct buffer_head **batch_bhs = NULL;
+	size_t batch_nr = 0;
+	bool do_sync;
+	size_t boff = (size_t)HIFS_EMPTY_ENTRY;
+	u64 last_block;
+	u64 last_byte;
+	ssize_t phys;
+	int ret;
+	ssize_t result = 0;
 
-    while (count > 0) {
-        size_t chunk;
-        uint32_t block_off = off % block_size;
-        bool need_existing;
-        bool zero_fill = false;
+	if (!iocb || !from || !iocb->ki_filp)
+		return -EINVAL;
 
-        chunk = min_t(size_t, block_size - block_off, count);
-        need_existing = (block_off != 0) || (chunk != block_size);
+	inode = iocb->ki_filp->f_path.dentry->d_inode;
+	if (!inode)
+		return -EINVAL;
+	dinode = inode->i_private;
+	sb = inode->i_sb;
+	if (!dinode || !sb)
+		return -EINVAL;
 
-        if (need_existing) {
-            if (hifs_fetch_block(sb, boff) < 0)
-                zero_fill = true;
-            bh = sb_bread(sb, boff);
-        } else {
-            /*
-             * Full-block overwrite: avoid read I/O.
-             */
-            bh = sb_getblk(sb, boff);
-            if (bh) {
-                lock_buffer(bh);
-                if (!buffer_uptodate(bh)) {
-                    /* we will fully overwrite; mark uptodate after copy */
-                }
-                unlock_buffer(bh);
-            }
-        }
+	block_size = hifs_sb_block_size(sb);
+	if (!block_size)
+		return -EINVAL;
 
-        if (!bh) {
-            printk(KERN_ERR "Failed to get data block %zu\n", boff);
-            break;
-        }
+	count = iov_iter_count(from);
+	if (!count)
+		return 0;
 
-        if (zero_fill)
-            memset(bh->b_data, 0, block_size);
+	if (iocb->ki_flags & IOCB_APPEND)
+		off = i_size_read(inode);
+	else
+		off = iocb->ki_pos;
 
-        buffer = bh->b_data + block_off;
-        if (!copy_from_iter_full(buffer, chunk, from)) {
-            brelse(bh);
-            /* flush pending async buffers before returning */
-            hifs_flush_bhs(batch_bhs, &batch_nr, do_sync);
-            return -EFAULT;
-        }
+	if (off < 0)
+		return -EINVAL;
+	if ((u64)count > (u64)LLONG_MAX - (u64)off)
+		return -EFBIG;
 
-        /*
-         * Full block write: now that the data is written, we can mark uptodate.
-         */
-        if (!need_existing) {
-            set_buffer_uptodate(bh);
-        }
+	memset(&first_desc_snapshot, 0, sizeof(first_desc_snapshot));
 
-        /* Your dedupe hashing stays inline (fine for now) */
-        hash_algo = HIFS_HASH_ALGO_NONE;
-        dedupe_ret = hifs_dedupe_writes(sb, boff, bh->b_data,
-                                       block_size, block_hash, &hash_algo);
-        if (dedupe_ret) {
-            hifs_warning("dedupe placeholder returned %d for block %zu", dedupe_ret, boff);
-            memset(block_hash, 0, sizeof(block_hash));
-            hash_algo = HIFS_HASH_ALGO_NONE;
-        }
+	hifs_inode_epoch_touch(inode);
 
-        hifs_cache_mark_present(sb, boff);
-        hifs_cache_mark_dirty(sb, boff);
-        hifs_cache_mark_inode(sb, dinode->i_ino);
+	last_byte = (u64)off + (u64)count - 1;
+	last_block = div64_u64(last_byte, block_size);
+	if (last_block > U32_MAX)
+		return -EFBIG;
 
-        /* fingerprint bookkeeping unchanged */
+	descs = kvcalloc(HIFS_MAX_WRITE_DESCS, sizeof(*descs), GFP_KERNEL);
+	if (!descs)
+		return -ENOMEM;
+
+	batch_bhs = kvcalloc(HIFS_WRITEBATCH_MAX, sizeof(*batch_bhs), GFP_KERNEL);
+	if (!batch_bhs) {
+		result = -ENOMEM;
+		goto out_cleanup;
+	}
+
+	ret = hifs_inode_reserve_blocks(sb, dinode, (uint32_t)last_block);
+	if (ret) {
+		result = ret;
+		goto out_cleanup;
+	}
+
+	phys = hifs_get_loffset(dinode, div64_u64((u64)off, block_size));
+	if (phys < 0) {
+		result = phys;
+		goto out_cleanup;
+	}
+	if (phys == HIFS_EMPTY_ENTRY) {
+		result = -ENOSPC;
+		goto out_cleanup;
+	}
+	boff = (size_t)phys;
+
+	do_sync = hifs_need_sync(iocb, inode);
+
+	while (count > 0) {
+		struct buffer_head *bh = NULL;
+		char *buffer;
+		size_t chunk;
+		uint32_t block_off = (uint32_t)(off % block_size);
+		bool need_existing;
+		bool zero_fill = false;
+		int dedupe_ret;
+		uint8_t block_hash[HIFS_BLOCK_HASH_SIZE];
+		enum hifs_hash_algorithm hash_algo;
+		u64 block_index;
+		size_t hash_slot = 0;
+
+		if (boff == (size_t)HIFS_EMPTY_ENTRY)
+			break;
+
+		chunk = min_t(size_t, block_size - block_off, count);
+		need_existing = (block_off != 0) || (chunk != block_size);
+
+		if (need_existing) {
+			if (hifs_fetch_block(sb, boff) < 0)
+				zero_fill = true;
+			bh = sb_bread(sb, boff);
+		} else {
+			bh = sb_getblk(sb, boff);
+			if (bh) {
+				lock_buffer(bh);
+				if (!buffer_uptodate(bh)) {
+					/* full overwrite; mark after copy */
+				}
+				unlock_buffer(bh);
+			}
+		}
+
+		if (!bh) {
+			printk(KERN_ERR "Failed to get data block %zu\n", boff);
+			break;
+		}
+
+		if (zero_fill)
+			memset(bh->b_data, 0, block_size);
+
+		buffer = bh->b_data + block_off;
+		if (!copy_from_iter_full(buffer, chunk, from)) {
+			brelse(bh);
+			hifs_flush_bhs(batch_bhs, &batch_nr, do_sync);
+			result = -EFAULT;
+			goto out_cleanup;
+		}
+
+		if (!need_existing)
+			set_buffer_uptodate(bh);
+
+		memset(block_hash, 0, sizeof(block_hash));
+		hash_algo = HIFS_HASH_ALGO_NONE;
+		dedupe_ret = hifs_dedupe_writes(sb, boff, bh->b_data,
+						block_size, block_hash,
+						&hash_algo);
+		if (dedupe_ret) {
+			hifs_warning("dedupe placeholder returned %d for block %zu",
+				     dedupe_ret, boff);
+			memset(block_hash, 0, sizeof(block_hash));
+			hash_algo = HIFS_HASH_ALGO_NONE;
+		}
+
+		hifs_cache_mark_present(sb, boff);
+		hifs_cache_mark_dirty(sb, boff);
+		hifs_cache_mark_inode(sb, dinode->i_ino);
+
 		block_index = div64_u64((u64)off, block_size);
-
 		if (block_index < HIFS_MAX_BLOCK_HASHES) {
-			/* Before the ring is "full", keep direct indexing */
 			hash_slot = (size_t)block_index;
-
-			/* count grows up to max */
 			if (dinode->i_hash_count < (uint16_t)(hash_slot + 1))
-				dinode->i_hash_count = (uint16_t)(hash_slot + 1);
-
-			/* once we hit max-1, initialize head to "next" */
+				dinode->i_hash_count =
+					(uint16_t)(hash_slot + 1);
 			if (dinode->i_hash_count == HIFS_MAX_BLOCK_HASHES)
 				dinode->i_hash_head = 0;
 		} else {
-			/*
-			* Past the limit: overwrite in a ring.
-			* i_hash_head points at the slot to overwrite next.
-			*/
 			hash_slot = dinode->i_hash_head;
-
 			dinode->i_hash_head++;
 			if (dinode->i_hash_head >= HIFS_MAX_BLOCK_HASHES)
 				dinode->i_hash_head = 0;
-
-			/* Track evictions (optional) */
-			if (dinode->i_hash_reserved != UINT16_MAX)
+			if (dinode->i_hash_reserved != USHRT_MAX)
 				dinode->i_hash_reserved++;
-
-			/* once we're in ring mode, count is always full */
 			dinode->i_hash_count = HIFS_MAX_BLOCK_HASHES;
 		}
 
-        {
-            struct hifs_block_fingerprint *fp = &dinode->i_block_fingerprints[hash_slot];
-            memset(fp, 0, sizeof(*fp));
-            fp->block_no = (uint32_t)boff;
-            memcpy(fp->hash, block_hash, HIFS_BLOCK_HASH_SIZE);
-            fp->hash_algo = (uint8_t)hash_algo;
-        }
-        dinode->i_hash_count = max_t(uint16_t, dinode->i_hash_count,
-                                     (uint16_t)(hash_slot + 1));
+		{
+			struct hifs_block_fingerprint *fp =
+				&dinode->i_block_fingerprints[hash_slot];
 
-        /*
-         * KEY CHANGE: do NOT sync here.
-         * Just mark dirty and batch the bh for later write submission.
-         */
-        mark_buffer_dirty(bh);
+			memset(fp, 0, sizeof(*fp));
+			fp->block_no = (uint32_t)boff;
+			memcpy(fp->hash, block_hash, HIFS_BLOCK_HASH_SIZE);
+			fp->hash_algo = (uint8_t)hash_algo;
+		}
+		dinode->i_hash_count = max_t(uint16_t, dinode->i_hash_count,
+					     (uint16_t)(hash_slot + 1));
 
-        /* Keep your desc gathering */
-        ret = hifs_write_desc_record(descs, &desc_count, boff, chunk, bh,
-                                     block_hash, hash_algo);
-        if (ret) {
-            hifs_flush_descs(inode, descs, &desc_count,
-                             &total_descs_flushed,
-                             &first_desc_snapshot,
-                             &have_desc_snapshot);
-            ret = hifs_write_desc_record(descs, &desc_count, boff, chunk, bh,
-                                         block_hash, hash_algo);
-            if (ret) {
-                hifs_flush_bhs(batch_bhs, &batch_nr, do_sync);
-                brelse(bh);
-                return ret;
-            }
-        }
+		mark_buffer_dirty(bh);
 
-        /* Batch bh’s; flush on run break or batch full */
-        if (batch_nr < HIFS_WRITEBATCH_MAX) {
-            batch_bhs[batch_nr++] = bh;
-        } else {
-            /* batch full: kick async writeout */
-            hifs_flush_bhs(batch_bhs, &batch_nr, do_sync);
-            batch_bhs[batch_nr++] = bh;
-        }
+		ret = hifs_write_desc_record(descs, &desc_count, boff, chunk, bh,
+					     block_hash, hash_algo);
+		if (ret) {
+			hifs_flush_descs(inode, descs, &desc_count,
+					 &total_descs_flushed,
+					 &first_desc_snapshot,
+					 &have_desc_snapshot);
+			ret = hifs_write_desc_record(descs, &desc_count, boff,
+						     chunk, bh, block_hash,
+						     hash_algo);
+			if (ret) {
+				hifs_flush_bhs(batch_bhs, &batch_nr, do_sync);
+				brelse(bh);
+				result = ret;
+				goto out_cleanup;
+			}
+		}
 
-        done += chunk;
-        off += chunk;
-        count -= chunk;
+		if (batch_nr < HIFS_WRITEBATCH_MAX) {
+			batch_bhs[batch_nr++] = bh;
+		} else {
+			hifs_flush_bhs(batch_bhs, &batch_nr, do_sync);
+			batch_bhs[batch_nr++] = bh;
+		}
 
-        /* your existing contiguous-run logic already computes flush_now */
-        {
-            bool flush_now = false;
-            s64 next_boff = HIFS_EMPTY_ENTRY;
-            u64 current_block = boff;
+		done += chunk;
+		off += chunk;
+		count -= chunk;
 
-            if (count > 0) {
-                u64 logical_block = div64_u64(off, block_size);
-                next_boff = hifs_get_loffset(dinode, logical_block);
-                if (next_boff == HIFS_EMPTY_ENTRY)
-                    flush_now = true;
-                else if (desc_count > 2 && next_boff != current_block + 1)
-                    flush_now = true;
-                boff = next_boff;
-            } else {
-                flush_now = true;
-            }
+		{
+			bool flush_now = false;
+			s64 next_boff = HIFS_EMPTY_ENTRY;
+			u64 current_block = boff;
 
-            if (flush_now) {
-                /* kick out async writes for this run */
-                hifs_flush_bhs(batch_bhs, &batch_nr, do_sync);
+			if (count > 0) {
+				u64 logical_block = div64_u64(off, block_size);
 
-                if (desc_count)
-                    hifs_flush_descs(inode, descs, &desc_count,
-                                     &total_descs_flushed,
-                                     &first_desc_snapshot,
-                                     &have_desc_snapshot);
-            }
+				next_boff =
+					hifs_get_loffset(dinode, logical_block);
+				if (next_boff == HIFS_EMPTY_ENTRY)
+					flush_now = true;
+				else if (desc_count > 2 &&
+					 next_boff != current_block + 1)
+					flush_now = true;
+				boff = (size_t)next_boff;
+			} else {
+				flush_now = true;
+			}
 
-            if (count > 0 && next_boff == HIFS_EMPTY_ENTRY)
-                break;
-        }
+			if (flush_now) {
+				hifs_flush_bhs(batch_bhs, &batch_nr, do_sync);
 
-        /* Optional: backpressure like other filesystems */
-        balance_dirty_pages_ratelimited(inode->i_mapping);
-    }
+				if (desc_count)
+					hifs_flush_descs(inode, descs,
+							 &desc_count,
+							 &total_descs_flushed,
+							 &first_desc_snapshot,
+							 &have_desc_snapshot);
+			}
 
-    /* flush anything left */
-    hifs_flush_bhs(batch_bhs, &batch_nr, do_sync);
+			if (count > 0 && next_boff == HIFS_EMPTY_ENTRY)
+				break;
+		}
 
-    if (desc_count)
-        hifs_flush_descs(inode, descs, &desc_count,
-                         &total_descs_flushed,
-                         &first_desc_snapshot,
-                         &have_desc_snapshot);
+		balance_dirty_pages_ratelimited(inode->i_mapping);
+	}
 
-    iocb->ki_pos = off;
-    if (done > 0) {
-        loff_t new_size = max_t(loff_t, (loff_t)dinode->i_size, off);
-        dinode->i_size = (uint32_t)new_size;
-        dinode->i_bytes = dinode->i_size;
-        i_size_write(inode, new_size);
-        inode->i_blocks = dinode->i_blocks;
-    }
+	hifs_flush_bhs(batch_bhs, &batch_nr, do_sync);
 
-    if (done > 0) {
-        bool sync_now = hifs_inode_should_sync_now(dinode, done) || do_sync;
+	if (desc_count)
+		hifs_flush_descs(inode, descs, &desc_count,
+				 &total_descs_flushed,
+				 &first_desc_snapshot,
+				 &have_desc_snapshot);
 
-        if (sync_now) {
-        hifs_store_inode(sb, dinode);
-        hifs_publish_inode(sb, dinode, false);
-        hifs_inode_mark_synced(dinode);
-    }
-    }
+	iocb->ki_pos = off;
+	if (done > 0) {
+		loff_t new_size = max_t(loff_t, (loff_t)dinode->i_size, off);
 
-    return done;
+		dinode->i_size = (uint32_t)new_size;
+		dinode->i_bytes = dinode->i_size;
+		i_size_write(inode, new_size);
+		inode->i_blocks = dinode->i_blocks;
+	}
+
+	if (done > 0) {
+		bool sync_now = hifs_inode_should_sync_now(dinode, done) ||
+				do_sync;
+
+		if (sync_now) {
+			hifs_store_inode(sb, dinode);
+			hifs_publish_inode(sb, dinode, false);
+			hifs_inode_mark_synced(dinode);
+		}
+	}
+
+	result = done;
+
+out_cleanup:
+	kvfree(batch_bhs);
+	kvfree(descs);
+	return result;
 }
 
 

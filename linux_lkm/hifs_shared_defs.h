@@ -384,6 +384,14 @@ struct hifs_block_fingerprint_wire {
 #define HIFS_INODE_NUMBER_TABLE	128
 #define HIFS_INODE_TABLE_SIZE	(HIFS_INODE_NUMBER_TABLE * HIFS_INODE_SIZE)/HIFS_DEFAULT_BLOCK_SIZE
 
+#define HIFS_VOLUME_TABLE_OFFSET   (HIFS_BLOCK_BITMAP_OFFSET + HIFS_DEFAULT_BLOCK_SIZE)
+#define HIFS_VOLUME_TABLE_MAX      1024
+#define HIFS_VOLUME_CACHE_ID       0ULL  /* volume_id that refers to the on-disk cache image */
+#define HIFS_INODE_MSGF_REQUEST   0x00000001
+#define HIFS_BLOCK_MSGF_REQUEST   0x00000001
+#define HIFS_BLOCK_MSGF_CONTIG_START 0x00000002
+#define HIFS_BLOCK_MSGF_CONTIG_END   0x00000004
+
 struct hifs_extent {
 	uint32_t block_start;   /* first block (inclusive) */
 	uint32_t block_count;   /* number of contiguous blocks in this extent */
@@ -405,7 +413,7 @@ struct hifs_extent_wire {
 struct hifs_inode
 {
 	//const struct super_block	i_sb;      /* Superblock position */
-    uint32_t    i_epoch;	/* change epoch/version */
+    uint32_t    i_epoch;	/* host-order epoch/version */
 	uint8_t		i_version;	/* layout version */
 	uint8_t		i_flags;	/* inode flags: TYPE */
 	uint32_t	i_mode;		/* File mode */
@@ -428,13 +436,15 @@ struct hifs_inode
 	struct hifs_block_fingerprint i_block_fingerprints[HIFS_MAX_BLOCK_HASHES];
 	uint16_t	i_hash_count;
 	uint16_t	i_hash_reserved;
+	uint16_t	i_hash_head;
+	uint32_t	i_cache_epoch; /* epoch of the last time this inode was cached on disk */
+	uint32_t	i_placement_epoch; /* epoch of the last time this inode was synced to disk */
 #ifdef __KERNEL__
 	size_t		i_runtime_dirty_bytes;
 	unsigned long	i_runtime_last_sync;
 	uint32_t	i_cached_epoch;
 #endif
 };
-
 
 struct hifs_dir_entry 
 {
@@ -925,9 +935,6 @@ struct hifs_inode_msg {
  * volume_id to its logical superblock used for reconciliation between the
  * cluster and with the local kernel VFS layer.
  * */
-#define HIFS_VOLUME_TABLE_OFFSET   (HIFS_BLOCK_BITMAP_OFFSET + HIFS_DEFAULT_BLOCK_SIZE)
-#define HIFS_VOLUME_TABLE_MAX      1024
-#define HIFS_VOLUME_CACHE_ID       0ULL  /* volume_id that refers to the on-disk cache image */
 
 struct hifs_volume_entry {
 #ifdef __KERNEL__
@@ -942,7 +949,3 @@ struct hifs_volume_entry {
 /***********************
  * END Hive FS Structures
  ***********************/
-#define HIFS_INODE_MSGF_REQUEST   0x00000001
-#define HIFS_BLOCK_MSGF_REQUEST   0x00000001
-#define HIFS_BLOCK_MSGF_CONTIG_START 0x00000002
-#define HIFS_BLOCK_MSGF_CONTIG_END   0x00000004
