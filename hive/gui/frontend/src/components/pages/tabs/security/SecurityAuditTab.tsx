@@ -1,411 +1,413 @@
-import { useState } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '../../../ui/card';
-import { Input } from '../../../ui/input';
-import { Label } from '../../../ui/label';
+import { useEffect, useMemo, useState } from 'react';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../../ui/card';
 import { Button } from '../../../ui/button';
+import { Switch } from '../../../ui/switch';
+import { Label } from '../../../ui/label';
+import { Input } from '../../../ui/input';
+import { Badge } from '../../../ui/badge';
 import { Separator } from '../../../ui/separator';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../../ui/select';
-import { Badge } from '../../../ui/badge';
 import {
   Shield,
+  Lock,
+  Key,
+  AlertTriangle,
   Search,
   Download,
   ChevronDown,
   ChevronRight,
-  LogIn,
-  LogOut,
   Settings,
   Eye,
-  Lock,
-  Unlock,
-  UserPlus,
-  UserMinus,
-  Key,
-  AlertTriangle,
-  Info,
-  CheckCircle,
-  XCircle,
-  FileText,
-  Calendar,
-  Filter,
   User,
+  FileText,
+  LogIn,
+  LogOut,
+  XCircle,
+  Info,
 } from 'lucide-react';
 
-interface SecurityEvent {
-  id: string;
-  timestamp: string;
-  eventType: 'authentication' | 'configuration' | 'access' | 'user-management' | 'data' | 'system';
-  action: string;
-  severity: 'critical' | 'high' | 'medium' | 'low' | 'info';
-  user: string;
-  ipAddress: string;
-  resource?: string;
-  details: string;
-  oldValue?: string;
-  newValue?: string;
-  success: boolean;
-  userAgent?: string;
-  sessionId?: string;
+const API_BASE = import.meta?.env?.VITE_NODES_API_BASE_URL ?? 'http://localhost:8000/api/v1';
+
+const securitySettings = [
+  { id: '2fa', label: 'Two-Factor Authentication', description: 'Require 2FA for all users', enabled: true },
+  { id: 'ip-whitelist', label: 'IP Whitelist', description: 'Restrict access to approved IPs', enabled: true },
+  { id: 'encryption', label: 'Encryption at Rest', description: 'Encrypt all stored data', enabled: true },
+  { id: 'session-timeout', label: 'Session Timeout', description: 'Auto-logout after 30 minutes of inactivity', enabled: true },
+  { id: 'audit-logging', label: 'Audit Logging', description: 'Log all security events', enabled: true },
+  { id: 'api-hardening', label: 'API Hardening', description: 'Require signed requests for APIs', enabled: false },
+];
+
+interface AuditEntry {
+  audit_entry_id?: number | string;
+  id?: number | string;
+  created_at?: string | null;
+  updated_at?: string | null;
+  page_name?: string | null;
+  change_summary?: string | null;
+  description?: string | null;
+  metadata?: Record<string, unknown> | null;
+  user_name?: string | null;
+  username?: string | null;
+  ip_address?: string | null;
 }
 
+interface NormalizedAuditEvent {
+  id: string;
+  timestamp: string;
+  timestampMs: number;
+  action: string;
+  details: string;
+  eventType: string;
+  severity: string;
+  user: string;
+  ipAddress: string;
+  success: boolean;
+  resource?: string;
+  sessionId?: string;
+  userAgent?: string;
+  oldValue?: string;
+  newValue?: string;
+  raw: AuditEntry;
+}
+
+const normalizeAuditEntries = (payload: unknown): AuditEntry[] => {
+  if (Array.isArray(payload)) return payload;
+  if (payload && Array.isArray((payload as any).results)) return (payload as any).results;
+  return [];
+};
+
+const getTimestampValue = (entry: AuditEntry): string | null => entry.updated_at ?? entry.created_at ?? null;
+
+const isFailedLoginEntry = (entry: AuditEntry): boolean => {
+  const page = (entry.page_name ?? '').toLowerCase();
+  const summary = (entry.change_summary ?? '').toLowerCase();
+  return page === 'login' && summary.includes('fail');
+};
+
+const getAuditTitle = (entry: AuditEntry): string =>
+  entry.change_summary ?? entry.description ?? entry.page_name ?? 'Audit Event';
+
+const deriveEventType = (entry: AuditEntry): string => {
+  const metadata = (entry.metadata && typeof entry.metadata === 'object' ? entry.metadata : {}) as Record<string, any>;
+  const raw = (metadata.event_type ?? metadata.type ?? entry.page_name ?? 'general').toString();
+  return raw.toLowerCase();
+};
+
+const deriveSeverity = (entry: AuditEntry): string => {
+  const metadata = (entry.metadata && typeof entry.metadata === 'object' ? entry.metadata : {}) as Record<string, any>;
+  const explicit = metadata.severity ?? metadata.level;
+  if (explicit && typeof explicit === 'string') return explicit.toLowerCase();
+  return isFailedLoginEntry(entry) ? 'high' : 'info';
+};
+
+const deriveSuccess = (entry: AuditEntry): boolean => {
+  const metadata = (entry.metadata && typeof entry.metadata === 'object' ? entry.metadata : {}) as Record<string, any>;
+  if (typeof metadata.success === 'boolean') return metadata.success;
+  const summary = (entry.change_summary ?? '').toLowerCase();
+  return !summary.includes('fail') && !summary.includes('error');
+};
+
+const getDateRangeMs = (value: string): number | null => {
+  switch (value) {
+    case '1d':
+      return 24 * 60 * 60 * 1000;
+    case '7d':
+      return 7 * 24 * 60 * 60 * 1000;
+    case '30d':
+      return 30 * 24 * 60 * 60 * 1000;
+    case '90d':
+      return 90 * 24 * 60 * 60 * 1000;
+    default:
+      return null;
+  }
+};
+
+const formatTimestamp = (timestamp: string) => {
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return '—';
+  const now = Date.now();
+  const diff = now - date.getTime();
+  const minutes = Math.floor(diff / 60000);
+  if (minutes < 1) return 'Just now';
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  return date.toLocaleString();
+};
+
+const severityColors: Record<string, string> = {
+  critical: 'bg-red-500',
+  high: 'bg-orange-500',
+  medium: 'bg-yellow-500',
+  low: 'bg-blue-500',
+  info: 'bg-gray-500',
+};
+
+const getSeverityBadge = (severity: string) => {
+  const color = severityColors[severity] ?? 'bg-gray-500';
+  const label = severity.charAt(0).toUpperCase() + severity.slice(1);
+  return (
+    <Badge variant="outline" className="text-xs">
+      <span className={`w-2 h-2 rounded-full ${color} mr-1.5`} />
+      {label}
+    </Badge>
+  );
+};
+
+const getEventIcon = (eventType: string, action: string) => {
+  if (action.toLowerCase().includes('failed')) return <XCircle className="w-5 h-5 text-red-500" />;
+  if (action.includes('Login')) return <LogIn className="w-5 h-5 text-green-500" />;
+  if (action.includes('Logout')) return <LogOut className="w-5 h-5 text-gray-500" />;
+
+  switch (eventType) {
+    case 'authentication':
+      return <Lock className="w-5 h-5 text-blue-500" />;
+    case 'configuration':
+      return <Settings className="w-5 h-5 text-purple-500" />;
+    case 'access':
+      return <Eye className="w-5 h-5 text-cyan-500" />;
+    case 'user-management':
+      return <User className="w-5 h-5 text-orange-500" />;
+    case 'data':
+      return <FileText className="w-5 h-5 text-green-500" />;
+    case 'system':
+      return <Shield className="w-5 h-5 text-indigo-500" />;
+    default:
+      return <Info className="w-5 h-5 text-gray-500" />;
+  }
+};
+
 export function SecurityAuditTab() {
+  const [auditEvents, setAuditEvents] = useState<AuditEntry[]>([]);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [auditError, setAuditError] = useState<string | null>(null);
+
   const [filterEventType, setFilterEventType] = useState<string>('all');
   const [filterSeverity, setFilterSeverity] = useState<string>('all');
   const [filterUser, setFilterUser] = useState<string>('all');
   const [filterSuccess, setFilterSuccess] = useState<string>('all');
+  const [dateRange, setDateRange] = useState<string>('7d');
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedItems, setExpandedItems] = useState<string[]>([]);
-  const [dateRange, setDateRange] = useState<string>('7d');
 
-  // Mock security events data
-  const [securityEvents] = useState<SecurityEvent[]>([
-    {
-      id: '1',
-      timestamp: '2026-01-25T14:32:15Z',
-      eventType: 'authentication',
-      action: 'Failed Login Attempt',
-      severity: 'high',
-      user: 'unknown',
-      ipAddress: '192.168.1.45',
-      details: 'Failed login attempt for user "admin" - invalid password',
-      success: false,
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-      sessionId: 'N/A',
-    },
-    {
-      id: '2',
-      timestamp: '2026-01-25T14:30:00Z',
-      eventType: 'authentication',
-      action: 'Successful Login',
-      severity: 'info',
-      user: 'john.smith@hivefs.com',
-      ipAddress: '192.168.1.100',
-      details: 'User logged in successfully',
-      success: true,
-      userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)',
-      sessionId: 'sess_abc123def456',
-    },
-    {
-      id: '3',
-      timestamp: '2026-01-25T13:45:00Z',
-      eventType: 'configuration',
-      action: 'Cluster Settings Modified',
-      severity: 'medium',
-      user: 'sarah.johnson@hivefs.com',
-      ipAddress: '192.168.1.102',
-      resource: 'cluster.replication_factor',
-      details: 'Modified cluster replication factor setting',
-      oldValue: '3',
-      newValue: '5',
-      success: true,
-      sessionId: 'sess_xyz789ghi012',
-    },
-    {
-      id: '4',
-      timestamp: '2026-01-25T13:20:10Z',
-      eventType: 'user-management',
-      action: 'User Created',
-      severity: 'medium',
-      user: 'sarah.johnson@hivefs.com',
-      ipAddress: '192.168.1.102',
-      resource: 'emily.davis@hivefs.com',
-      details: 'New user account created with role: Operator',
-      success: true,
-      sessionId: 'sess_xyz789ghi012',
-    },
-    {
-      id: '5',
-      timestamp: '2026-01-25T12:15:30Z',
-      eventType: 'access',
-      action: 'File Access',
-      severity: 'low',
-      user: 'michael.chen@hivefs.com',
-      ipAddress: '192.168.1.105',
-      resource: '/secure/financial-reports/Q4-2025.xlsx',
-      details: 'User accessed sensitive file',
-      success: true,
-      sessionId: 'sess_mno345pqr678',
-    },
-    {
-      id: '6',
-      timestamp: '2026-01-25T11:30:00Z',
-      eventType: 'configuration',
-      action: 'Security Policy Updated',
-      severity: 'high',
-      user: 'john.smith@hivefs.com',
-      ipAddress: '192.168.1.100',
-      resource: 'security.password_policy',
-      details: 'Updated password complexity requirements',
-      oldValue: 'min_length: 8, require_special: false',
-      newValue: 'min_length: 12, require_special: true',
-      success: true,
-      sessionId: 'sess_abc123def456',
-    },
-    {
-      id: '7',
-      timestamp: '2026-01-25T10:45:00Z',
-      eventType: 'authentication',
-      action: 'Password Changed',
-      severity: 'medium',
-      user: 'michael.chen@hivefs.com',
-      ipAddress: '192.168.1.105',
-      details: 'User changed their password',
-      success: true,
-      sessionId: 'sess_mno345pqr678',
-    },
-    {
-      id: '8',
-      timestamp: '2026-01-25T10:00:00Z',
-      eventType: 'authentication',
-      action: 'Logout',
-      severity: 'info',
-      user: 'sarah.johnson@hivefs.com',
-      ipAddress: '192.168.1.102',
-      details: 'User logged out',
-      success: true,
-      sessionId: 'sess_xyz789ghi012',
-    },
-    {
-      id: '9',
-      timestamp: '2026-01-25T09:30:00Z',
-      eventType: 'system',
-      action: 'API Key Generated',
-      severity: 'high',
-      user: 'john.smith@hivefs.com',
-      ipAddress: '192.168.1.100',
-      resource: 'api_key_prod_001',
-      details: 'New API key generated for production access',
-      success: true,
-      sessionId: 'sess_abc123def456',
-    },
-    {
-      id: '10',
-      timestamp: '2026-01-25T09:00:00Z',
-      eventType: 'user-management',
-      action: 'Role Changed',
-      severity: 'high',
-      user: 'john.smith@hivefs.com',
-      ipAddress: '192.168.1.100',
-      resource: 'michael.chen@hivefs.com',
-      details: 'User role modified',
-      oldValue: 'Operator',
-      newValue: 'Administrator',
-      success: true,
-      sessionId: 'sess_abc123def456',
-    },
-    {
-      id: '11',
-      timestamp: '2026-01-25T08:30:00Z',
-      eventType: 'access',
-      action: 'Page View: Cluster Management',
-      severity: 'info',
-      user: 'sarah.johnson@hivefs.com',
-      ipAddress: '192.168.1.102',
-      resource: '/cluster/management',
-      details: 'User viewed Cluster Management page',
-      success: true,
-      sessionId: 'sess_xyz789ghi012',
-    },
-    {
-      id: '12',
-      timestamp: '2026-01-25T08:00:00Z',
-      eventType: 'authentication',
-      action: 'Failed Login Attempt',
-      severity: 'critical',
-      user: 'unknown',
-      ipAddress: '203.0.113.42',
-      details: 'Multiple failed login attempts detected - possible brute force attack',
-      success: false,
-      userAgent: 'python-requests/2.28.0',
-      sessionId: 'N/A',
-    },
-  ]);
-
-  const getSeverityColor = (severity: string) => {
-    switch (severity) {
-      case 'critical':
-        return 'bg-red-500';
-      case 'high':
-        return 'bg-orange-500';
-      case 'medium':
-        return 'bg-yellow-500';
-      case 'low':
-        return 'bg-blue-500';
-      case 'info':
-        return 'bg-gray-500';
-      default:
-        return 'bg-gray-500';
-    }
-  };
-
-  const getSeverityBadge = (severity: string) => {
-    const colors = {
-      critical: 'bg-red-500',
-      high: 'bg-orange-500',
-      medium: 'bg-yellow-500',
-      low: 'bg-blue-500',
-      info: 'bg-gray-500',
+  useEffect(() => {
+    const abortController = new AbortController();
+    const loadAudit = async () => {
+      setAuditLoading(true);
+      setAuditError(null);
+      try {
+        const response = await fetch(`${API_BASE}/audit?limit=200`, { signal: abortController.signal });
+        if (!response.ok) throw new Error(`Failed to load audit events (${response.status})`);
+        const payload = await response.json();
+        setAuditEvents(normalizeAuditEntries(payload));
+      } catch (error) {
+        if (!abortController.signal.aborted) {
+          setAuditError(error instanceof Error ? error.message : 'Unable to load audit events');
+          setAuditEvents([]);
+        }
+      } finally {
+        if (!abortController.signal.aborted) setAuditLoading(false);
+      }
     };
 
-    return (
-      <Badge variant="outline" className="text-xs">
-        <div className={`w-2 h-2 rounded-full ${colors[severity as keyof typeof colors]} mr-1.5`} />
-        {severity.charAt(0).toUpperCase() + severity.slice(1)}
-      </Badge>
-    );
-  };
+    loadAudit();
+    return () => abortController.abort();
+  }, []);
 
-  const getEventIcon = (eventType: string, action: string) => {
-    if (action.includes('Login') && action.includes('Failed')) {
-      return <XCircle className="w-5 h-5 text-red-500" />;
-    }
-    if (action.includes('Login')) {
-      return <LogIn className="w-5 h-5 text-green-500" />;
-    }
-    if (action.includes('Logout')) {
-      return <LogOut className="w-5 h-5 text-gray-500" />;
-    }
+  const normalizedEvents = useMemo<NormalizedAuditEvent[]>(() => {
+    return auditEvents.map((entry, index) => {
+      const metadata = (entry.metadata && typeof entry.metadata === 'object' ? entry.metadata : {}) as Record<string, any>;
+      const timestampRaw = getTimestampValue(entry) ?? new Date().toISOString();
+      const timestampMs = Date.parse(timestampRaw);
+      const eventType = deriveEventType(entry);
+      const severity = deriveSeverity(entry);
+      const success = deriveSuccess(entry);
+      const action = getAuditTitle(entry);
+      const details = entry.description ?? metadata.details ?? action;
+      const user = entry.user_name ?? entry.username ?? metadata.user ?? 'Unknown user';
+      const ipAddress = entry.ip_address ?? metadata.ip ?? metadata.ip_address ?? 'Unknown IP';
 
-    switch (eventType) {
-      case 'authentication':
-        return <Lock className="w-5 h-5 text-blue-500" />;
-      case 'configuration':
-        return <Settings className="w-5 h-5 text-purple-500" />;
-      case 'access':
-        return <Eye className="w-5 h-5 text-cyan-500" />;
-      case 'user-management':
-        return <User className="w-5 h-5 text-orange-500" />;
-      case 'data':
-        return <FileText className="w-5 h-5 text-green-500" />;
-      case 'system':
-        return <Shield className="w-5 h-5 text-indigo-500" />;
-      default:
-        return <Info className="w-5 h-5 text-gray-500" />;
-    }
-  };
+      return {
+        id: String(entry.audit_entry_id ?? entry.id ?? index),
+        timestamp: timestampRaw,
+        timestampMs: Number.isFinite(timestampMs) ? timestampMs : Date.now(),
+        action,
+        details,
+        eventType,
+        severity,
+        user,
+        ipAddress,
+        success,
+        resource: metadata.resource ?? metadata.target ?? undefined,
+        sessionId: metadata.session_id ?? metadata.sessionId ?? undefined,
+        userAgent: metadata.user_agent ?? metadata.userAgent ?? undefined,
+        oldValue: metadata.old_value ?? metadata.oldValue ?? undefined,
+        newValue: metadata.new_value ?? metadata.newValue ?? undefined,
+        raw: entry,
+      } satisfies NormalizedAuditEvent;
+    });
+  }, [auditEvents]);
+
+  const failedLoginCount = useMemo(
+    () => auditEvents.filter((entry) => isFailedLoginEntry(entry)).length,
+    [auditEvents],
+  );
+
+  const uniqueUsers = useMemo(
+    () => Array.from(new Set(normalizedEvents.map((event) => event.user).filter(Boolean))).sort(),
+    [normalizedEvents],
+  );
+
+  const filteredEvents = useMemo(() => {
+    const rangeMs = getDateRangeMs(dateRange);
+    const now = Date.now();
+    const query = searchQuery.trim().toLowerCase();
+
+    return normalizedEvents.filter((event) => {
+      if (filterEventType !== 'all' && event.eventType !== filterEventType) return false;
+      if (filterSeverity !== 'all' && event.severity !== filterSeverity) return false;
+      if (filterUser !== 'all' && event.user !== filterUser) return false;
+      if (filterSuccess !== 'all') {
+        const successTarget = filterSuccess === 'success';
+        if (event.success !== successTarget) return false;
+      }
+      if (rangeMs !== null && now - event.timestampMs > rangeMs) return false;
+      if (query) {
+        const haystack = `${event.action} ${event.details} ${event.resource ?? ''}`.toLowerCase();
+        if (!haystack.includes(query)) return false;
+      }
+      return true;
+    });
+  }, [normalizedEvents, filterEventType, filterSeverity, filterUser, filterSuccess, dateRange, searchQuery]);
 
   const toggleExpanded = (id: string) => {
-    setExpandedItems((prev) =>
-      prev.includes(id) ? prev.filter((itemId) => itemId !== id) : [...prev, id]
-    );
+    setExpandedItems((prev) => (prev.includes(id) ? prev.filter((itemId) => itemId !== id) : [...prev, id]));
   };
 
-  const formatTimestamp = (timestamp: string) => {
-    const date = new Date(timestamp);
-    const now = new Date();
-    const diff = now.getTime() - date.getTime();
-    const minutes = Math.floor(diff / 60000);
-    const hours = Math.floor(diff / 3600000);
-    const days = Math.floor(diff / 86400000);
-
-    if (minutes < 1) return 'Just now';
-    if (minutes < 60) return `${minutes}m ago`;
-    if (hours < 24) return `${hours}h ago`;
-    if (days < 7) return `${days}d ago`;
-
-    return date.toLocaleString();
+  const handleExport = (format: 'csv' | 'excel') => {
+    const headers = [
+      'Timestamp',
+      'Action',
+      'User',
+      'IP Address',
+      'Type',
+      'Severity',
+      'Status',
+      'Details',
+    ];
+    const rows = filteredEvents.map((event) => [
+      event.timestamp,
+      event.action,
+      event.user,
+      event.ipAddress,
+      event.eventType,
+      event.severity,
+      event.success ? 'Success' : 'Failed',
+      event.details,
+    ]);
+    const csv = [headers, ...rows]
+      .map((row) => row.map((value) => `"${String(value ?? '').replace(/"/g, '""')}"`).join(','))
+      .join('\n');
+    const blob = new Blob([csv], {
+      type: format === 'excel' ? 'application/vnd.ms-excel' : 'text/csv;charset=utf-8;',
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `audit_events_${new Date().toISOString()}.${format === 'excel' ? 'xls' : 'csv'}`);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
   };
-
-  const handleExportCSV = () => {
-    console.log('Exporting to CSV...');
-    // Would generate CSV of filtered events
-  };
-
-  const handleExportExcel = () => {
-    console.log('Exporting to Excel...');
-    // Would generate Excel file of filtered events
-  };
-
-  // Get unique users for filter
-  const uniqueUsers = Array.from(new Set(securityEvents.map((e) => e.user))).sort();
-
-  // Filter events
-  const filteredEvents = securityEvents.filter((event) => {
-    if (filterEventType !== 'all' && event.eventType !== filterEventType) return false;
-    if (filterSeverity !== 'all' && event.severity !== filterSeverity) return false;
-    if (filterUser !== 'all' && event.user !== filterUser) return false;
-    if (filterSuccess !== 'all') {
-      const successFilter = filterSuccess === 'success';
-      if (event.success !== successFilter) return false;
-    }
-    if (searchQuery && !event.action.toLowerCase().includes(searchQuery.toLowerCase()) &&
-        !event.details.toLowerCase().includes(searchQuery.toLowerCase())) {
-      return false;
-    }
-    return true;
-  });
-
-  // Calculate statistics
-  const criticalCount = filteredEvents.filter((e) => e.severity === 'critical').length;
-  const highCount = filteredEvents.filter((e) => e.severity === 'high').length;
-  const failedCount = filteredEvents.filter((e) => !e.success).length;
 
   return (
-    <div className="flex h-full w-full flex-col gap-6 overflow-auto bg-gradient-to-br from-background via-primary/5 to-background p-8">
-      {/* Page Header */}
-      <div>
-        <h1 className="text-foreground/80">Security Audit Log</h1>
-        <p className="text-muted-foreground text-sm mt-1">
-          Comprehensive audit trail of security events and system access
-        </p>
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
+        <div>
+          <h2>Security Audit</h2>
+          <p className="text-muted-foreground">Configure security settings and monitor access</p>
+        </div>
+        <Button>Security Audit</Button>
       </div>
 
-      {/* Statistics Cards */}
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
-        <Card className="border-primary/10 bg-gradient-to-b from-background/80 to-background shadow-lg shadow-primary/10">
-          <CardContent className="pt-4">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <Card>
+          <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs text-muted-foreground">Total Events</p>
-                <p className="text-2xl font-semibold mt-1">{filteredEvents.length}</p>
+                <p className="text-sm text-muted-foreground">Security Score</p>
+                <p className="mt-2 text-green-500">98/100</p>
               </div>
-              <Shield className="w-8 h-8 text-muted-foreground opacity-50" />
+              <Shield className="w-5 h-5 text-green-500" />
             </div>
           </CardContent>
         </Card>
-
-        <Card className="border-primary/10 bg-gradient-to-b from-background/80 to-background shadow-lg shadow-primary/10">
-          <CardContent className="pt-4">
+        <Card>
+          <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs text-muted-foreground">Critical Events</p>
-                <p className="text-2xl font-semibold mt-1 text-red-500">{criticalCount}</p>
+                <p className="text-sm text-muted-foreground">Active Sessions</p>
+                <p className="mt-2">12</p>
               </div>
-              <AlertTriangle className="w-8 h-8 text-red-500 opacity-50" />
+              <Lock className="w-5 h-5 text-blue-500" />
             </div>
           </CardContent>
         </Card>
-
-        <Card className="border-primary/10 bg-gradient-to-b from-background/80 to-background shadow-lg shadow-primary/10">
-          <CardContent className="pt-4">
+        <Card>
+          <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs text-muted-foreground">High Severity</p>
-                <p className="text-2xl font-semibold mt-1 text-orange-500">{highCount}</p>
+                <p className="text-sm text-muted-foreground">Failed Logins</p>
+                <p className="mt-2 text-yellow-500">{auditLoading ? '…' : failedLoginCount}</p>
+                <p className="text-xs text-muted-foreground">Last 200 audit entries</p>
               </div>
-              <AlertTriangle className="w-8 h-8 text-orange-500 opacity-50" />
+              <AlertTriangle className="w-5 h-5 text-yellow-500" />
             </div>
           </CardContent>
         </Card>
-
-        <Card className="border-primary/10 bg-gradient-to-b from-background/80 to-background shadow-lg shadow-primary/10">
-          <CardContent className="pt-4">
+        <Card>
+          <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs text-muted-foreground">Failed Actions</p>
-                <p className="text-2xl font-semibold mt-1 text-red-500">{failedCount}</p>
+                <p className="text-sm text-muted-foreground">API Keys</p>
+                <p className="mt-2">8</p>
               </div>
-              <XCircle className="w-8 h-8 text-red-500 opacity-50" />
+              <Key className="w-5 h-5 text-purple-500" />
             </div>
           </CardContent>
         </Card>
       </div>
 
-      {/* Filters Card */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Security Settings</CardTitle>
+          <CardDescription>Configure authentication and access control</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-wrap gap-4">
+            {securitySettings.map((setting) => (
+              <div
+                key={setting.id}
+                className="flex min-w-[220px] flex-1 basis-full items-start justify-between rounded-lg border border-border/60 bg-muted/20 px-4 py-3 md:basis-[calc(50%-0.5rem)] xl:basis-[calc(33.333%-0.75rem)]"
+              >
+                <div className="pr-3">
+                  <Label className="text-sm font-medium">{setting.label}</Label>
+                  <p className="text-xs text-muted-foreground">{setting.description}</p>
+                </div>
+                <Switch defaultChecked={setting.enabled} aria-label={setting.label} />
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
       <Card className="border-primary/10 bg-gradient-to-b from-background/80 to-background shadow-lg shadow-primary/10">
         <CardHeader>
           <CardTitle className="text-foreground/90 flex items-center gap-2">
-            <Filter className="w-5 h-5" />
+            <Search className="w-5 h-5" />
             Filters & Search
           </CardTitle>
         </CardHeader>
@@ -421,36 +423,11 @@ export function SecurityAuditTab() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Types</SelectItem>
-                  <SelectItem value="authentication">
-                    <div className="flex items-center gap-2">
-                      <Lock className="w-4 h-4" />
-                      Authentication
-                    </div>
-                  </SelectItem>
-                  <SelectItem value="configuration">
-                    <div className="flex items-center gap-2">
-                      <Settings className="w-4 h-4" />
-                      Configuration
-                    </div>
-                  </SelectItem>
-                  <SelectItem value="access">
-                    <div className="flex items-center gap-2">
-                      <Eye className="w-4 h-4" />
-                      Access
-                    </div>
-                  </SelectItem>
-                  <SelectItem value="user-management">
-                    <div className="flex items-center gap-2">
-                      <User className="w-4 h-4" />
-                      User Management
-                    </div>
-                  </SelectItem>
-                  <SelectItem value="system">
-                    <div className="flex items-center gap-2">
-                      <Shield className="w-4 h-4" />
-                      System
-                    </div>
-                  </SelectItem>
+                  <SelectItem value="authentication">Authentication</SelectItem>
+                  <SelectItem value="configuration">Configuration</SelectItem>
+                  <SelectItem value="access">Access</SelectItem>
+                  <SelectItem value="user-management">User Management</SelectItem>
+                  <SelectItem value="system">System</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -503,18 +480,8 @@ export function SecurityAuditTab() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All</SelectItem>
-                  <SelectItem value="success">
-                    <div className="flex items-center gap-2">
-                      <CheckCircle className="w-4 h-4 text-green-500" />
-                      Success
-                    </div>
-                  </SelectItem>
-                  <SelectItem value="failed">
-                    <div className="flex items-center gap-2">
-                      <XCircle className="w-4 h-4 text-red-500" />
-                      Failed
-                    </div>
-                  </SelectItem>
+                  <SelectItem value="success">Success</SelectItem>
+                  <SelectItem value="failed">Failed</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -556,14 +523,14 @@ export function SecurityAuditTab() {
 
           <div className="flex items-center justify-between mt-4">
             <p className="text-xs text-muted-foreground">
-              Showing {filteredEvents.length} of {securityEvents.length} events
+              Showing {filteredEvents.length} of {normalizedEvents.length} events
             </p>
             <div className="flex gap-2">
-              <Button size="sm" variant="outline" className="text-xs h-7" onClick={handleExportCSV}>
+              <Button size="sm" variant="outline" className="text-xs h-7" onClick={() => handleExport('csv')}>
                 <Download className="w-3 h-3 mr-1" />
                 Export CSV
               </Button>
-              <Button size="sm" variant="outline" className="text-xs h-7" onClick={handleExportExcel}>
+              <Button size="sm" variant="outline" className="text-xs h-7" onClick={() => handleExport('excel')}>
                 <Download className="w-3 h-3 mr-1" />
                 Export Excel
               </Button>
@@ -572,15 +539,23 @@ export function SecurityAuditTab() {
         </CardContent>
       </Card>
 
-      {/* Security Events */}
       <Card className="border-primary/10 bg-gradient-to-b from-background/80 to-background shadow-lg shadow-primary/10">
         <CardHeader>
           <CardTitle className="text-foreground/90 flex items-center gap-2">
             <Shield className="w-5 h-5" />
-            Security Events ({filteredEvents.length})
+            Recent Audit Events ({filteredEvents.length})
           </CardTitle>
         </CardHeader>
         <CardContent>
+          {auditLoading && <p className="text-sm text-muted-foreground">Loading audit events…</p>}
+          {!auditLoading && filteredEvents.length === 0 && !auditError && (
+            <div className="text-center py-12 text-muted-foreground">
+              <Shield className="w-12 h-12 mx-auto mb-3 opacity-50" />
+              <p className="text-sm">No audit events found</p>
+              <p className="text-xs mt-1">Try adjusting your filters</p>
+            </div>
+          )}
+
           <div className="space-y-2">
             {filteredEvents.map((event) => {
               const isExpanded = expandedItems.includes(event.id);
@@ -588,26 +563,12 @@ export function SecurityAuditTab() {
               return (
                 <div
                   key={event.id}
-                  className={`border rounded-lg transition-all ${
-                    event.success
-                      ? 'border-border bg-background'
-                      : 'border-red-500/30 bg-red-500/5'
-                  }`}
+                  className={`border rounded-lg transition-all ${event.success ? 'border-border bg-background' : 'border-red-500/30 bg-red-500/5'}`}
                 >
-                  {/* Summary Row */}
                   <div className="p-3 flex items-center justify-between">
                     <div className="flex items-center gap-3 flex-1">
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-6 w-6 p-0"
-                        onClick={() => toggleExpanded(event.id)}
-                      >
-                        {isExpanded ? (
-                          <ChevronDown className="w-4 h-4" />
-                        ) : (
-                          <ChevronRight className="w-4 h-4" />
-                        )}
+                      <Button size="sm" variant="ghost" className="h-6 w-6 p-0" onClick={() => toggleExpanded(event.id)}>
+                        {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
                       </Button>
 
                       {getEventIcon(event.eventType, event.action)}
@@ -626,37 +587,27 @@ export function SecurityAuditTab() {
                         </p>
                       </div>
 
-                      <div className="text-xs text-muted-foreground">
-                        {formatTimestamp(event.timestamp)}
-                      </div>
+                      <div className="text-xs text-muted-foreground">{formatTimestamp(event.timestamp)}</div>
 
                       {getSeverityBadge(event.severity)}
                     </div>
                   </div>
 
-                  {/* Expanded Details */}
                   {isExpanded && (
                     <>
                       <Separator />
                       <div className="p-4 space-y-4 bg-muted/20">
-                        {/* Details */}
                         <div>
                           <p className="text-xs text-muted-foreground mb-1">Event Details</p>
-                          <p className="text-sm bg-muted/50 rounded p-2 border border-border">
-                            {event.details}
-                          </p>
+                          <p className="text-sm bg-muted/50 rounded p-2 border border-border">{event.details}</p>
                         </div>
 
                         <div className="grid grid-cols-2 gap-4">
-                          {/* Event Information */}
                           <div className="space-y-3">
                             <div>
                               <p className="text-xs text-muted-foreground mb-1">Timestamp</p>
-                              <p className="text-sm font-mono">
-                                {new Date(event.timestamp).toLocaleString()}
-                              </p>
+                              <p className="text-sm font-mono">{new Date(event.timestamp).toLocaleString()}</p>
                             </div>
-
                             <div>
                               <p className="text-xs text-muted-foreground mb-1">Event Type</p>
                               <Badge variant="outline" className="text-xs">
@@ -666,50 +617,38 @@ export function SecurityAuditTab() {
                                   .join(' ')}
                               </Badge>
                             </div>
-
                             {event.resource && (
                               <div>
                                 <p className="text-xs text-muted-foreground mb-1">Resource</p>
-                                <p className="text-sm font-mono bg-muted/50 rounded px-2 py-1">
-                                  {event.resource}
-                                </p>
+                                <p className="text-sm font-mono bg-muted/50 rounded px-2 py-1">{event.resource}</p>
                               </div>
                             )}
-
                             {event.sessionId && (
                               <div>
                                 <p className="text-xs text-muted-foreground mb-1">Session ID</p>
-                                <p className="text-xs font-mono text-muted-foreground">
-                                  {event.sessionId}
-                                </p>
+                                <p className="text-xs font-mono text-muted-foreground">{event.sessionId}</p>
                               </div>
                             )}
                           </div>
 
-                          {/* User & Network Information */}
                           <div className="space-y-3">
                             <div>
                               <p className="text-xs text-muted-foreground mb-1">User</p>
                               <p className="text-sm">{event.user}</p>
                             </div>
-
                             <div>
                               <p className="text-xs text-muted-foreground mb-1">IP Address</p>
                               <p className="text-sm font-mono">{event.ipAddress}</p>
                             </div>
-
                             {event.userAgent && (
                               <div>
                                 <p className="text-xs text-muted-foreground mb-1">User Agent</p>
-                                <p className="text-xs font-mono text-muted-foreground break-all">
-                                  {event.userAgent}
-                                </p>
+                                <p className="text-xs font-mono text-muted-foreground break-all">{event.userAgent}</p>
                               </div>
                             )}
                           </div>
                         </div>
 
-                        {/* Value Changes */}
                         {(event.oldValue || event.newValue) && (
                           <div>
                             <p className="text-xs text-muted-foreground mb-2">Value Changes</p>
@@ -734,13 +673,8 @@ export function SecurityAuditTab() {
                           </div>
                         )}
 
-                        {/* Audit Note */}
-                        <p
-                          className="text-muted-foreground opacity-60 pt-2 border-t border-border"
-                          style={{ fontSize: '0.7rem', lineHeight: '1.3' }}
-                        >
-                          Security events are retained for audit and compliance purposes and cannot
-                          be deleted
+                        <p className="text-muted-foreground opacity-60 pt-2 border-t border-border" style={{ fontSize: '0.7rem', lineHeight: '1.3' }}>
+                          Security events are retained for audit and compliance purposes and cannot be deleted
                         </p>
                       </div>
                     </>
@@ -748,15 +682,9 @@ export function SecurityAuditTab() {
                 </div>
               );
             })}
-
-            {filteredEvents.length === 0 && (
-              <div className="text-center py-12 text-muted-foreground">
-                <Shield className="w-12 h-12 mx-auto mb-3 opacity-50" />
-                <p className="text-sm">No security events found</p>
-                <p className="text-xs mt-1">Try adjusting your filters</p>
-              </div>
-            )}
           </div>
+
+          {auditError && <p className="mt-3 text-xs text-destructive">{auditError}</p>}
         </CardContent>
       </Card>
     </div>

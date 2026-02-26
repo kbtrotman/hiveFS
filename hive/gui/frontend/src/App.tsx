@@ -11,10 +11,26 @@ import { Button } from './components/ui/button';
 
 type SetupView = 'network' | 'filesystem' | 'permissions';
 
+type AlertFocusPayload = {
+  alert_id?: number | string | null;
+  title?: string | null;
+  message?: string | null;
+  severity?: string | null;
+  triggered_at?: string | null;
+};
+
+type NavigateEventDetail = {
+  sidebar?: string;
+  tab?: string;
+  focusAlertId?: number | string | null;
+  focusAlertPayload?: AlertFocusPayload;
+};
+
 const BOOTSTRAP_STATUS_URL =
   import.meta?.env?.VITE_BOOTSTRAP_STATUS_URL ??
   'http://localhost:8000/api/v1/bootstrap/status';
 const BOOTSTRAP_READY_STATUSES = new Set(['IDLE', 'OP_PENDING']);
+const ALERT_FOCUS_STORAGE_KEY = 'hive:pending-alert-focus';
 
 export default function App() {
   const [theme, setTheme] = useState<'light' | 'dark'>('dark');
@@ -33,6 +49,32 @@ export default function App() {
   const [filesystemInitialTab, setFilesystemInitialTab] = useState<'cluster' | 'filesystem'>('cluster');
   const [permissionsInitialTab, setPermissionsInitialTab] = useState<'users' | 'groups' | 'roles'>('users');
   const [activeSetupView, setActiveSetupView] = useState<SetupView | null>(null);
+
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<NavigateEventDetail>).detail;
+      if (!detail) {
+        return;
+      }
+      if (detail.sidebar) {
+        setActiveSidebarItem(detail.sidebar);
+      }
+      if (detail.tab) {
+        setActiveTab(detail.tab);
+      }
+      const payload = detail.focusAlertPayload ?? (detail.focusAlertId != null ? { alert_id: detail.focusAlertId } : null);
+      if (payload && typeof window !== 'undefined') {
+        try {
+          window.sessionStorage?.setItem(ALERT_FOCUS_STORAGE_KEY, JSON.stringify(payload));
+        } catch {
+          /* ignore storage failures */
+        }
+      }
+    };
+
+    window.addEventListener('hive:navigate', handler);
+    return () => window.removeEventListener('hive:navigate', handler);
+  }, [setActiveSidebarItem, setActiveTab]);
 
   const toggleTheme = () => {
     setTheme(theme === 'light' ? 'dark' : 'light');

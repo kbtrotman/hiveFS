@@ -14,6 +14,48 @@ from .models import Alert, Notification
 from .serializers import AlertSerializer, NotificationSerializer
 
 
+RECENT_DEFAULT_LIMIT = 5
+RECENT_MAX_LIMIT = 50
+SEVERITY_DEFAULT_LIMIT = 20
+SEVERITY_MAX_LIMIT = 100
+
+ACTIVE_ALERT_STATUSES = {
+    Alert.Status.TRIGGERED,
+    Alert.Status.ACKNOWLEDGED,
+}
+ACTIVE_ALERT_WORKFLOW_STATUSES = {
+    Alert.WorkflowStatus.NEW,
+    Alert.WorkflowStatus.ACKNOWLEDGED,
+}
+
+SEVERITY_ALIASES = {
+    "error": Alert.Severity.CRITICAL,
+    "errors": Alert.Severity.CRITICAL,
+    "critical": Alert.Severity.CRITICAL,
+    "warn": Alert.Severity.WARNING,
+    "warning": Alert.Severity.WARNING,
+    "warnings": Alert.Severity.WARNING,
+}
+
+
+def _parse_positive_int(value, *, default, maximum):
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    if parsed < 1:
+        return default
+    return min(parsed, maximum)
+
+
+def _parse_bool(value):
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
 class BaseWorkflowViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, GenericViewSet):
     """Shared helpers for notification/alert workflows."""
 
@@ -243,3 +285,59 @@ class AlertViewSet(BaseWorkflowViewSet):
     status_choices = set(Alert.Status.values)
     workflow_status_choices = set(Alert.WorkflowStatus.values)
     system_only_statuses = {Alert.Status.TRIGGERED}
+
+    @action(detail=False, methods=["get"], url_path="recent")
+    def recent_notifications(self, request):
+        limit = _parse_positive_int(
+            request.query_params.get("limit"),
+            default=RECENT_DEFAULT_LIMIT,
+            maximum=RECENT_MAX_LIMIT,
+        )
+        active_only = _parse_bool(request.query_params.get("active_only"))
+
+        notif_qs = Notification.objects.all().order_by("-updated_at")
+        alert_qs = Alert.objects.all().order_by("-triggered_at")
+
+        if active_only:
+            alert_qs = alert_qs.filter(
+                Q(status__in=ACTIVE_ALERT_STATUSES)
+                | Q(w_status__in=ACTIVE_ALERT_WORKFLOW_STATUSES)
+            )
+
+        notif_qs = notif_qs[:limit]
+        alert_qs = alert_qs[:limit]
+
+        notif_data = NotificationSerializer(notif_qs, many=True).data
+        alert_data = AlertSerializer(alert_qs, many=True).data
+        combined = sorted(
+            [{"type": "notification", **item} for item in notif_data]
+            + [{"type": "alert", **item} for item in alert_data],
+            key=lambda entry: entry.get("updated_at") or entry.get("triggered_at"),
+            reverse=True,
+        )[:limit]
+
+        return Response({"results": combined})
+
+    @action(detail=False, methods=["get"], url_path="severity")
+    def severity_filtered_alerts(self, request):
+        limit = _parse_positive_int(
+            request.query_params.get("limit"),
+            default=SEVERITY_DEFAULT_LIMIT,
+            maximum=SEVERITY_MAX_LIMIT,
+        )
+        severity_param = request.query_params.get("severity")
+        severities = []
+
+        if severity_param:
+            parts = [item.strip().lower() for item in severity_param.split(",") if item.strip()]
+            for part in parts:
+                mapped = SEVERITY_ALIASES.get(part, part)
+                if mapped in Alert.Severity.values:
+                    severities.append(mapped)
+
+        if not severities:
+            severities = [Alert.Severity.CRITICAL]
+
+        alerts = Alert.objects.filter(severity__in=severities).order_by("-triggered_at")[:limit]
+        serializer = AlertSerializer(alerts, many=True)
+        return Response({"results": serializer.data, "filters": {"severity": severities}})

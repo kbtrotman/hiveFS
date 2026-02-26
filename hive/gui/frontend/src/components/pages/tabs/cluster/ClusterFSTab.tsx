@@ -123,140 +123,6 @@ function TreeNode({ node, level, onSelect, ensureChildren, selectedId, loadingSt
         )}
       </div>
 
-      <Card className="border-primary/10 bg-gradient-to-b from-background/80 to-background shadow-lg shadow-primary/10">
-        <CardHeader>
-          <CardTitle>Quota Management</CardTitle>
-          <CardDescription>
-            Assign user or group quotas for the currently selected path.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {!selectedNode ? (
-            <p className="text-sm text-muted-foreground">
-              Select a path in the Filesystem Browser to review or assign quotas.
-            </p>
-          ) : (
-            <>
-              <div className="rounded-md border border-border p-3 text-sm">
-                <p className="text-muted-foreground">Selected Path</p>
-                <p className="font-mono text-foreground">{selectedPath}</p>
-              </div>
-              <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-                <div className="space-y-4">
-                  <div>
-                    <Label className="text-sm">Quota Scope</Label>
-                    <Select value={quotaScope} onValueChange={(value) => setQuotaScope(value as 'user' | 'group')}>
-                      <SelectTrigger className="mt-1">
-                        <SelectValue placeholder="Choose scope" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="user">User</SelectItem>
-                        <SelectItem value="group">Group</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <Label className="text-sm">
-                      {quotaScope === 'user' ? 'Username' : 'Group Name'}
-                    </Label>
-                    <Input
-                      className="mt-1"
-                      placeholder={quotaScope === 'user' ? 'e.g. jdoe' : 'e.g. finance-team'}
-                      value={quotaTarget}
-                      onChange={(e) => setQuotaTarget(e.target.value)}
-                    />
-                  </div>
-                  <div>
-                    <Label className="text-sm">Quota Limit (GB)</Label>
-                    <Input
-                      className="mt-1"
-                      type="number"
-                      min="1"
-                      placeholder="Enter limit"
-                      value={quotaLimitGb}
-                      onChange={(e) => setQuotaLimitGb(e.target.value)}
-                    />
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                    <p>Superblock-level quotas supported soon.</p>
-                  </div>
-                  <div className="pt-2">
-                    <Button
-                      onClick={handleQuotaSave}
-                      disabled={!quotaTarget.trim() || quotaLimitNumber <= 0}
-                    >
-                      <Check className="w-4 h-4 mr-2" />
-                      Save Quota
-                    </Button>
-                  </div>
-                </div>
-                <div className="bg-muted/30 rounded-lg p-4 space-y-3 border border-border">
-                  <div>
-                    <p className="text-sm font-medium">Quota Preview</p>
-                    <p className="text-xs text-muted-foreground">
-                      Shows sample usage for this path and entity.
-                    </p>
-                  </div>
-                  <div className="flex justify-between text-xs text-muted-foreground">
-                    <span>Usage</span>
-                    <span>
-                      {mockQuotaUsageGb} GB /{' '}
-                      {quotaLimitNumber > 0 ? `${quotaLimitNumber} GB` : 'No limit'}
-                    </span>
-                  </div>
-                  <div className="h-2 rounded-full bg-muted">
-                    <div
-                      className={`h-2 rounded-full ${
-                        quotaUsagePercent > 90
-                          ? 'bg-destructive'
-                          : quotaUsagePercent > 75
-                            ? 'bg-amber-500'
-                            : 'bg-emerald-500'
-                      }`}
-                      style={{ width: `${quotaLimitNumber ? quotaUsagePercent : 0}%` }}
-                    />
-                  </div>
-                  <div className="grid grid-cols-2 gap-2 text-xs">
-                    <div className="rounded border border-border p-2">
-                      <p className="text-muted-foreground">Scope</p>
-                      <p className="font-medium capitalize">{quotaScope}</p>
-                    </div>
-                    <div className="rounded border border-border p-2">
-                      <p className="text-muted-foreground">Target</p>
-                      <p className="font-medium">{quotaTarget.trim() || '—'}</p>
-                    </div>
-                    <div className="rounded border border-border p-2">
-                      <p className="text-muted-foreground">Warn at</p>
-                      <p className="font-medium">{quotaLimitNumber ? `${Math.round(quotaLimitNumber * 0.85)} GB` : '—'}</p>
-                    </div>
-                    <div className="rounded border border-border p-2">
-                      <p className="text-muted-foreground">Status</p>
-                      <p
-                        className={`font-medium ${
-                          quotaUsagePercent > 90
-                            ? 'text-red-600'
-                            : quotaUsagePercent > 75
-                              ? 'text-amber-500'
-                              : 'text-emerald-600'
-                        }`}
-                      >
-                        {quotaLimitNumber === 0
-                          ? 'Unlimited'
-                          : quotaUsagePercent > 90
-                            ? 'Critical'
-                            : quotaUsagePercent > 75
-                              ? 'Warning'
-                              : 'Healthy'}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </>
-          )}
-        </CardContent>
-      </Card>
-
       {hasChildren && isExpanded && (
         <div>
           {loadingState[node.id] && children.length === 0 ? (
@@ -455,18 +321,30 @@ export function ClusterFSTab() {
           </CardHeader>
           <CardContent>
             <div className="space-y-1 max-h-[500px] overflow-y-auto">
-              {treeData.map((node) => (
-                <TreeNode
-                  key={node.id}
-                  node={node}
-                  level={0}
-                  onSelect={setSelectedNode}
-                  ensureChildren={ensureChildrenLoaded}
-                  selectedId={selectedNode?.id || null}
-                  loadingState={loadingNodes}
-                />
-              ))}
+              {treeData.length === 0 && !loadingNodes['root'] ? (
+                <p className="text-sm text-muted-foreground px-3 py-2">
+                  No filesystem paths available yet.
+                </p>
+              ) : (
+                treeData.map((node) => (
+                  <TreeNode
+                    key={node.id}
+                    node={node}
+                    level={0}
+                    onSelect={setSelectedNode}
+                    ensureChildren={ensureChildrenLoaded}
+                    selectedId={selectedNode?.id || null}
+                    loadingState={loadingNodes}
+                  />
+                ))
+              )}
             </div>
+            {loadingNodes['root'] && treeData.length === 0 && (
+              <div className="flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Loading filesystem…
+              </div>
+            )}
             <div className="mt-4 p-3 bg-muted rounded-md text-sm">
               <div className="flex items-center gap-2 mb-2">
                 <Globe className="w-4 h-4 text-blue-500" />
@@ -596,7 +474,138 @@ export function ClusterFSTab() {
           </CardContent>
         </Card>
       </div>
-      
+
+      <Card className="border-primary/10 bg-gradient-to-b from-background/80 to-background shadow-lg shadow-primary/10">
+        <CardHeader>
+          <CardTitle>Quota Management</CardTitle>
+          <CardDescription>Assign user or group quotas for the currently selected path.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {!selectedNode ? (
+            <p className="text-sm text-muted-foreground">
+              Select a path in the Filesystem Browser to review or assign quotas.
+            </p>
+          ) : (
+            <>
+              <div className="rounded-md border border-border p-3 text-sm">
+                <p className="text-muted-foreground">Selected Path</p>
+                <p className="font-mono text-foreground">{selectedPath}</p>
+              </div>
+              <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+                <div className="space-y-4">
+                  <div>
+                    <Label className="text-sm">Quota Scope</Label>
+                    <Select value={quotaScope} onValueChange={(value) => setQuotaScope(value as 'user' | 'group')}>
+                      <SelectTrigger className="mt-1">
+                        <SelectValue placeholder="Choose scope" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="user">User</SelectItem>
+                        <SelectItem value="group">Group</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label className="text-sm">
+                      {quotaScope === 'user' ? 'Username' : 'Group Name'}
+                    </Label>
+                    <Input
+                      className="mt-1"
+                      placeholder={quotaScope === 'user' ? 'e.g. jdoe' : 'e.g. finance-team'}
+                      value={quotaTarget}
+                      onChange={(e) => setQuotaTarget(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-sm">Quota Limit (GB)</Label>
+                    <Input
+                      className="mt-1"
+                      type="number"
+                      min="1"
+                      placeholder="Enter limit"
+                      value={quotaLimitGb}
+                      onChange={(e) => setQuotaLimitGb(e.target.value)}
+                    />
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                    <p>Superblock-level quotas supported soon.</p>
+                  </div>
+                  <div className="pt-2">
+                    <Button
+                      onClick={handleQuotaSave}
+                      disabled={!quotaTarget.trim() || quotaLimitNumber <= 0}
+                    >
+                      <Check className="w-4 h-4 mr-2" />
+                      Save Quota
+                    </Button>
+                  </div>
+                </div>
+                <div className="bg-muted/30 rounded-lg p-4 space-y-3 border border-border">
+                  <div>
+                    <p className="text-sm font-medium">Quota Preview</p>
+                    <p className="text-xs text-muted-foreground">
+                      Shows sample usage for this path and entity.
+                    </p>
+                  </div>
+                  <div className="flex justify-between text-xs text-muted-foreground">
+                    <span>Usage</span>
+                    <span>
+                      {mockQuotaUsageGb} GB /{' '}
+                      {quotaLimitNumber > 0 ? `${quotaLimitNumber} GB` : 'No limit'}
+                    </span>
+                  </div>
+                  <div className="h-2 rounded-full bg-muted">
+                    <div
+                      className={`h-2 rounded-full ${
+                        quotaUsagePercent > 90
+                          ? 'bg-destructive'
+                          : quotaUsagePercent > 75
+                            ? 'bg-amber-500'
+                            : 'bg-emerald-500'
+                      }`}
+                      style={{ width: `${quotaLimitNumber ? quotaUsagePercent : 0}%` }}
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div className="rounded border border-border p-2">
+                      <p className="text-muted-foreground">Scope</p>
+                      <p className="font-medium capitalize">{quotaScope}</p>
+                    </div>
+                    <div className="rounded border border-border p-2">
+                      <p className="text-muted-foreground">Target</p>
+                      <p className="font-medium">{quotaTarget.trim() || '—'}</p>
+                    </div>
+                    <div className="rounded border border-border p-2">
+                      <p className="text-muted-foreground">Warn at</p>
+                      <p className="font-medium">{quotaLimitNumber ? `${Math.round(quotaLimitNumber * 0.85)} GB` : '—'}</p>
+                    </div>
+                    <div className="rounded border border-border p-2">
+                      <p className="text-muted-foreground">Status</p>
+                      <p
+                        className={`font-medium ${
+                          quotaUsagePercent > 90
+                            ? 'text-red-600'
+                            : quotaUsagePercent > 75
+                              ? 'text-amber-500'
+                              : 'text-emerald-600'
+                        }`}
+                      >
+                        {quotaLimitNumber === 0
+                          ? 'Unlimited'
+                          : quotaUsagePercent > 90
+                            ? 'Critical'
+                            : quotaUsagePercent > 75
+                              ? 'Warning'
+                              : 'Healthy'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

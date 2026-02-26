@@ -13,7 +13,6 @@ import { ServersPerformanceTab } from '../servers/ServersPerformanceTab';
 import { DiskManageTab } from '../disk/DiskManageTab';
 import { DiskMonitorTab } from '../disk/DiskMonitorTab';
 import { DiskPerformanceTab } from '../disk/DiskPerformanceTab';
-import { SecurityAccessTab } from '../security/SecurityAccessTab';
 import { SecurityAuditTab } from '../security/SecurityAuditTab';
 import { SecurityApiAccessTab } from '../security/SecurityApiAccessTab';
 import { SecurityLogsTab } from '../security/SecurityLogsTab';
@@ -72,7 +71,6 @@ const sidebarTabComponents: Record<string, Record<string, ComponentType>> = {
     performance: DiskPerformanceTab,
   },
   security: {
-    access: SecurityAccessTab,
     audit: SecurityAuditTab,
     api_access: SecurityApiAccessTab,
     logs: SecurityLogsTab,

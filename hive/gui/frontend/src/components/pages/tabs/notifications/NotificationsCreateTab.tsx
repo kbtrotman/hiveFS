@@ -219,16 +219,16 @@ export function NotificationsCreateTab() {
             )}
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="space-y-3">
           {/* Type Selection */}
           <div>
             <Label className="text-sm mb-2 block">Type</Label>
             <RadioGroup
               value={notificationType}
               onValueChange={(value) => setNotificationType(value as 'notification' | 'alert')}
-              className="flex gap-4"
+              className="flex flex-wrap gap-4 sm:flex-nowrap sm:gap-6 pb-1"
             >
-              <div className="flex items-center space-x-2 flex-1">
+              <div className="flex flex-1 min-w-[220px] max-w-[280px] items-center space-x-2">
                 <RadioGroupItem value="notification" id="type-notification" />
                 <Label
                   htmlFor="type-notification"
@@ -238,7 +238,7 @@ export function NotificationsCreateTab() {
                   Notification (Info/Status)
                 </Label>
               </div>
-              <div className="flex items-center space-x-2 flex-1">
+              <div className="flex flex-1 min-w-[220px] max-w-[280px] items-center space-x-2">
                 <RadioGroupItem value="alert" id="type-alert" />
                 <Label
                   htmlFor="type-alert"
@@ -256,155 +256,152 @@ export function NotificationsCreateTab() {
             </p>
           </div>
 
-          <Separator />
+          <div className="my-4 h-px rounded-full bg-white/80 dark:bg-white/20" />
 
-          {/* Basic Info */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <Label htmlFor="name" className="text-sm">
-                Name
-              </Label>
-              <Input
-                id="name"
-                placeholder={
-                  notificationType === 'alert'
-                    ? 'e.g., High CPU Usage Alert'
-                    : 'e.g., Weekly Maintenance Notice'
-                }
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="mt-1.5 text-sm"
-              />
-            </div>
-            <div>
-              <Label htmlFor="description" className="text-sm">
-                Description
-              </Label>
-              <Input
-                id="description"
-                placeholder="Brief description"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                className="mt-1.5 text-sm"
-              />
-            </div>
-          </div>
+          <div className="rounded-lg border border-border/60 bg-background/80 p-4">
+            <div className="flex flex-wrap gap-4 items-end">
+              <div className="min-w-[14rem] flex-1 max-w-sm">
+                <Label htmlFor="name" className="text-sm">
+                  Name
+                </Label>
+                <Input
+                  id="name"
+                  placeholder={
+                    notificationType === 'alert'
+                      ? 'e.g., High CPU Usage Alert'
+                      : 'e.g., Weekly Maintenance Notice'
+                  }
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  className="mt-1.5 text-sm"
+                />
+              </div>
+              <div className="min-w-[18rem] flex-1 max-w-xl">
+                <Label htmlFor="description" className="text-sm">
+                  Description
+                </Label>
+                <Input
+                  id="description"
+                  placeholder="Brief description"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  className="mt-1.5 text-sm"
+                />
+              </div>
 
-          {/* Alert-specific fields */}
-          {notificationType === 'alert' && (
-            <>
-              <div className="grid grid-cols-3 gap-4">
-                <div>
-                  <Label htmlFor="severity" className="text-sm">
-                    Severity
+              {notificationType === 'alert' && (
+                <>
+                  <div className="w-40 flex-shrink-0">
+                    <Label htmlFor="severity" className="text-sm">
+                      Severity
+                    </Label>
+                    <Select value={severity} onValueChange={setSeverity}>
+                      <SelectTrigger id="severity" className="mt-1.5 text-sm w-36">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="critical">
+                          <div className="flex items-center gap-2">
+                            <div className="w-2 h-2 rounded-full bg-red-500" />
+                            Critical
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="high">
+                          <div className="flex items-center gap-2">
+                            <div className="w-2 h-2 rounded-full bg-orange-500" />
+                            High
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="medium">
+                          <div className="flex items-center gap-2">
+                            <div className="w-2 h-2 rounded-full bg-yellow-500" />
+                            Medium
+                          </div>
+                        </SelectItem>
+                        <SelectItem value="low">
+                          <div className="flex items-center gap-2">
+                            <div className="w-2 h-2 rounded-full bg-blue-500" />
+                            Low
+                          </div>
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex-shrink-0">
+                    <Label htmlFor="auto-ack" className="text-sm">
+                      Auto-acknowledge after
+                    </Label>
+                    <div className="flex gap-2 mt-1.5">
+                      <Input
+                        id="auto-ack"
+                        type="number"
+                        value={autoAckMinutes}
+                        onChange={(e) => setAutoAckMinutes(e.target.value)}
+                        className="text-sm w-24"
+                      />
+                      <span className="flex items-center text-sm text-muted-foreground">
+                        minutes
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex items-center mt-6 flex-shrink-0 min-w-[12rem]">
+                    <div className="flex items-center space-x-2">
+                      <Checkbox
+                        id="requires-resolution"
+                        checked={requiresResolution}
+                        onCheckedChange={(checked) => setRequiresResolution(checked as boolean)}
+                      />
+                      <Label
+                        htmlFor="requires-resolution"
+                        className="cursor-pointer text-xs uppercase tracking-wide text-muted-foreground"
+                      >
+                        No Auto-Ack
+                      </Label>
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {notificationType === 'notification' && (
+                <div className="w-48">
+                  <Label htmlFor="category" className="text-sm">
+                    Category
                   </Label>
-                  <Select value={severity} onValueChange={setSeverity}>
-                    <SelectTrigger id="severity" className="mt-1.5 text-sm">
+                  <Select value={category} onValueChange={setCategory}>
+                    <SelectTrigger id="category" className="mt-1.5 text-sm w-48">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="critical">
+                      <SelectItem value="maintenance">
                         <div className="flex items-center gap-2">
-                          <div className="w-2 h-2 rounded-full bg-red-500" />
-                          Critical
+                          <Wrench className="w-4 h-4" />
+                          Maintenance
                         </div>
                       </SelectItem>
-                      <SelectItem value="high">
+                      <SelectItem value="status">
                         <div className="flex items-center gap-2">
-                          <div className="w-2 h-2 rounded-full bg-orange-500" />
-                          High
+                          <Info className="w-4 h-4" />
+                          Status Update
                         </div>
                       </SelectItem>
-                      <SelectItem value="medium">
+                      <SelectItem value="report">
                         <div className="flex items-center gap-2">
-                          <div className="w-2 h-2 rounded-full bg-yellow-500" />
-                          Medium
+                          <FileText className="w-4 h-4" />
+                          Report
                         </div>
                       </SelectItem>
-                      <SelectItem value="low">
+                      <SelectItem value="general">
                         <div className="flex items-center gap-2">
-                          <div className="w-2 h-2 rounded-full bg-blue-500" />
-                          Low
+                          <Bell className="w-4 h-4" />
+                          General
                         </div>
                       </SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
-                <div>
-                  <Label htmlFor="auto-ack" className="text-sm">
-                    Auto-acknowledge after
-                  </Label>
-                  <div className="flex gap-2 mt-1.5">
-                    <Input
-                      id="auto-ack"
-                      type="number"
-                      value={autoAckMinutes}
-                      onChange={(e) => setAutoAckMinutes(e.target.value)}
-                      className="text-sm"
-                    />
-                    <span className="flex items-center text-sm text-muted-foreground">
-                      minutes
-                    </span>
-                  </div>
-                </div>
-                <div className="flex items-end">
-                  <div className="flex items-center space-x-2">
-                    <Checkbox
-                      id="requires-resolution"
-                      checked={requiresResolution}
-                      onCheckedChange={(checked) => setRequiresResolution(checked as boolean)}
-                    />
-                    <Label
-                      htmlFor="requires-resolution"
-                      className="text-sm cursor-pointer"
-                    >
-                      Requires manual resolution
-                    </Label>
-                  </div>
-                </div>
-              </div>
-            </>
-          )}
-
-          {/* Notification-specific fields */}
-          {notificationType === 'notification' && (
-            <div>
-              <Label htmlFor="category" className="text-sm">
-                Category
-              </Label>
-              <Select value={category} onValueChange={setCategory}>
-                <SelectTrigger id="category" className="mt-1.5 text-sm">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="maintenance">
-                    <div className="flex items-center gap-2">
-                      <Wrench className="w-4 h-4" />
-                      Maintenance
-                    </div>
-                  </SelectItem>
-                  <SelectItem value="status">
-                    <div className="flex items-center gap-2">
-                      <Info className="w-4 h-4" />
-                      Status Update
-                    </div>
-                  </SelectItem>
-                  <SelectItem value="report">
-                    <div className="flex items-center gap-2">
-                      <FileText className="w-4 h-4" />
-                      Report
-                    </div>
-                  </SelectItem>
-                  <SelectItem value="general">
-                    <div className="flex items-center gap-2">
-                      <Bell className="w-4 h-4" />
-                      General
-                    </div>
-                  </SelectItem>
-                </SelectContent>
-              </Select>
+              )}
             </div>
-          )}
+          </div>
         </CardContent>
       </Card>
 
@@ -422,7 +419,7 @@ export function NotificationsCreateTab() {
               Trigger When
             </Label>
             <Select value={triggerType} onValueChange={setTriggerType}>
-              <SelectTrigger id="trigger-type" className="mt-1.5 text-sm">
+              <SelectTrigger id="trigger-type" className="mt-1.5 text-sm w-40">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -438,13 +435,13 @@ export function NotificationsCreateTab() {
           {triggerType === 'metric' && (
             <div className="bg-muted/30 rounded-lg p-4 border border-border space-y-3">
               <p className="text-sm font-medium">Metric Threshold Configuration</p>
-              <div className="grid grid-cols-3 gap-4">
-                <div>
+              <div className="flex flex-wrap gap-4 pb-2">
+                <div className="min-w-[10rem] flex-1 max-w-xs">
                   <Label htmlFor="metric" className="text-xs text-muted-foreground">
                     Metric
                   </Label>
                   <Select defaultValue="cpu">
-                    <SelectTrigger id="metric" className="mt-1 text-sm h-8">
+                    <SelectTrigger id="metric" className="mt-1 text-sm h-8 w-full">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -456,12 +453,12 @@ export function NotificationsCreateTab() {
                     </SelectContent>
                   </Select>
                 </div>
-                <div>
+                <div className="min-w-[9rem] flex-1 max-w-[10rem]">
                   <Label htmlFor="condition" className="text-xs text-muted-foreground">
                     Condition
                   </Label>
                   <Select defaultValue="greater">
-                    <SelectTrigger id="condition" className="mt-1 text-sm h-8">
+                    <SelectTrigger id="condition" className="mt-1 text-sm h-8 w-full">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -471,7 +468,7 @@ export function NotificationsCreateTab() {
                     </SelectContent>
                   </Select>
                 </div>
-                <div>
+                <div className="flex-initial w-40">
                   <Label htmlFor="threshold" className="text-xs text-muted-foreground">
                     Threshold
                   </Label>
@@ -480,28 +477,28 @@ export function NotificationsCreateTab() {
                       id="threshold"
                       type="number"
                       placeholder="80"
-                      className="text-sm h-8"
+                      className="text-sm h-8 w-24"
                     />
                     <span className="flex items-center text-xs text-muted-foreground px-2">
                       %
                     </span>
                   </div>
                 </div>
-              </div>
-              <div>
-                <Label htmlFor="duration" className="text-xs text-muted-foreground">
-                  Duration (trigger if condition persists)
-                </Label>
-                <div className="flex gap-2 mt-1">
-                  <Input
-                    id="duration"
-                    type="number"
-                    placeholder="5"
-                    className="text-sm h-8"
-                  />
-                  <span className="flex items-center text-xs text-muted-foreground">
-                    minutes
-                  </span>
+                <div className="flex-initial w-40">
+                  <Label htmlFor="duration" className="text-xs text-muted-foreground">
+                    Duration (trigger if condition persists)
+                  </Label>
+                  <div className="flex gap-2 mt-1">
+                    <Input
+                      id="duration"
+                      type="number"
+                      placeholder="5"
+                      className="text-sm h-8 w-24"
+                    />
+                    <span className="flex items-center text-xs text-muted-foreground">
+                      minutes
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -510,13 +507,13 @@ export function NotificationsCreateTab() {
           {triggerType === 'time' && (
             <div className="bg-muted/30 rounded-lg p-4 border border-border space-y-3">
               <p className="text-sm font-medium">Schedule Configuration</p>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
+              <div className="flex flex-wrap gap-4 pb-2">
+                <div className="min-w-[12rem] flex-1 max-w-sm">
                   <Label htmlFor="frequency" className="text-xs text-muted-foreground">
                     Frequency
                   </Label>
                   <Select defaultValue="daily">
-                    <SelectTrigger id="frequency" className="mt-1 text-sm h-8">
+                    <SelectTrigger id="frequency" className="mt-1 text-sm h-8 w-full">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -527,7 +524,7 @@ export function NotificationsCreateTab() {
                     </SelectContent>
                   </Select>
                 </div>
-                <div>
+                <div className="min-w-[10rem] flex-1 max-w-xs">
                   <Label htmlFor="time" className="text-xs text-muted-foreground">
                     Time
                   </Label>
@@ -535,7 +532,7 @@ export function NotificationsCreateTab() {
                     id="time"
                     type="time"
                     defaultValue="09:00"
-                    className="mt-1 text-sm h-8"
+                    className="mt-1 text-sm h-8 w-full"
                   />
                 </div>
               </div>
@@ -581,153 +578,160 @@ export function NotificationsCreateTab() {
         </CardContent>
       </Card>
 
-      {/* Notification Endpoints Card */}
-      <Card className="border-primary/10 bg-gradient-to-b from-background/80 to-background shadow-lg shadow-primary/10">
-        <CardHeader>
-          <CardTitle className="text-foreground/90 flex items-center gap-2">
-            <Send className="w-5 h-5" />
-            Notification Endpoints
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div>
-            <p className="text-sm text-muted-foreground mb-3">
-              Select where to send this {notificationType}
-              {notificationType === 'alert' && hasOnlyEmailEndpoints && selectedEndpoints.length > 0 && (
-                <span className="ml-2 text-orange-500 font-medium">
-                  ⚠ Consider adding non-email endpoints
-                </span>
-              )}
-            </p>
-
-            {filteredEndpoints.length === 0 && (
-              <div className="text-center py-8 text-muted-foreground border border-dashed border-border rounded-lg">
-                <Bell className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                <p className="text-sm">No appropriate endpoints configured</p>
-                <p className="text-xs mt-1">
-                  Configure endpoints in the Notification Endpoints page
-                </p>
-              </div>
-            )}
-
-            <div className="space-y-2">
-              {filteredEndpoints.map((endpoint) => {
-                const isSelected = selectedEndpoints.includes(endpoint.id);
-                const hasWarning = endpoint.warning && isSelected;
-
-                return (
-                  <div
-                    key={endpoint.id}
-                    className={`flex items-center justify-between p-3 border rounded-lg transition-all ${
-                      isSelected
-                        ? 'bg-primary/5 border-primary/50'
-                        : 'border-border hover:bg-muted/30'
-                    }`}
-                  >
-                    <div className="flex items-center gap-3 flex-1">
-                      <Checkbox
-                        id={`endpoint-${endpoint.id}`}
-                        checked={isSelected}
-                        onCheckedChange={() => toggleEndpoint(endpoint.id)}
-                      />
-                      <div className="flex items-center justify-center w-8 h-8 rounded bg-muted">
-                        {getEndpointIcon(endpoint.type)}
-                      </div>
-                      <label
-                        htmlFor={`endpoint-${endpoint.id}`}
-                        className="flex-1 cursor-pointer"
-                      >
-                        <p className="text-sm font-medium text-foreground/90">
-                          {endpoint.name}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {endpoint.type
-                            .split('-')
-                            .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-                            .join(' ')}
-                        </p>
-                      </label>
-                    </div>
-                    {hasWarning && (
-                      <Badge variant="outline" className="text-xs text-orange-500 border-orange-500">
-                        Warning
-                      </Badge>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-
-            {notificationType === 'notification' && (
-              <p className="text-xs text-muted-foreground mt-3 opacity-60">
-                SNMP, PagerDuty, SMS, and Phone Push endpoints are reserved for critical alerts
+      <div className="grid gap-6 lg:grid-cols-2">
+        {/* Notification Endpoints Card */}
+        <Card className="border-primary/10 bg-gradient-to-b from-background/80 to-background shadow-lg shadow-primary/10">
+          <CardHeader>
+            <CardTitle className="text-foreground/90 flex items-center gap-2">
+              <Send className="w-5 h-5" />
+              Notification Endpoints
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div>
+              <p className="text-sm text-muted-foreground mb-3">
+                Select where to send this {notificationType}
+                {notificationType === 'alert' &&
+                  hasOnlyEmailEndpoints &&
+                  selectedEndpoints.length > 0 && (
+                    <span className="ml-2 text-orange-500 font-medium">
+                      ⚠ Consider adding non-email endpoints
+                    </span>
+                  )}
               </p>
-            )}
-          </div>
-        </CardContent>
-      </Card>
 
-      {/* Message Template Card */}
-      <Card className="border-primary/10 bg-gradient-to-b from-background/80 to-background shadow-lg shadow-primary/10">
-        <CardHeader>
-          <CardTitle className="text-foreground/90 flex items-center gap-2">
-            <FileText className="w-5 h-5" />
-            Message Template
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div>
-            <Label htmlFor="subject" className="text-sm">
-              Subject / Title
-            </Label>
-            <Input
-              id="subject"
-              placeholder={
-                notificationType === 'alert'
-                  ? '{{severity}} Alert: {{name}}'
-                  : '{{name}} - {{cluster_name}}'
-              }
-              value={subject}
-              onChange={(e) => setSubject(e.target.value)}
-              className="mt-1.5 text-sm"
-            />
-          </div>
-          <div>
-            <Label htmlFor="message" className="text-sm">
-              Message Body
-            </Label>
-            <Textarea
-              id="message"
-              placeholder={
-                notificationType === 'alert'
-                  ? 'Alert triggered at {{timestamp}}\n\nMetric: {{metric_name}}\nCurrent value: {{metric_value}}\nThreshold: {{threshold}}\n\nPlease investigate immediately.'
-                  : 'This is a notification from {{cluster_name}}\n\nTimestamp: {{timestamp}}\n\nDetails:\n{{details}}'
-              }
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              className="mt-1.5 text-sm min-h-32 font-mono"
-            />
-          </div>
+              {filteredEndpoints.length === 0 && (
+                <div className="text-center py-8 text-muted-foreground border border-dashed border-border rounded-lg">
+                  <Bell className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                  <p className="text-sm">No appropriate endpoints configured</p>
+                  <p className="text-xs mt-1">
+                    Configure endpoints in the Notification Endpoints page
+                  </p>
+                </div>
+              )}
 
-          <div className="bg-muted/30 rounded-lg p-3 border border-border">
-            <p className="text-xs font-medium mb-2">Available Variables:</p>
-            <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground font-mono">
-              <div>{'{{cluster_name}}'}</div>
-              <div>{'{{timestamp}}'}</div>
-              <div>{'{{name}}'}</div>
-              <div>{'{{description}}'}</div>
-              {notificationType === 'alert' && (
-                <>
-                  <div>{'{{severity}}'}</div>
-                  <div>{'{{metric_name}}'}</div>
-                  <div>{'{{metric_value}}'}</div>
-                  <div>{'{{threshold}}'}</div>
-                </>
+              <div className="space-y-2">
+                {filteredEndpoints.map((endpoint) => {
+                  const isSelected = selectedEndpoints.includes(endpoint.id);
+                  const hasWarning = endpoint.warning && isSelected;
+
+                  return (
+                    <div
+                      key={endpoint.id}
+                      className={`flex items-center justify-between p-3 border rounded-lg transition-all ${
+                        isSelected
+                          ? 'bg-primary/5 border-primary/50'
+                          : 'border-border hover:bg-muted/30'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3 flex-1">
+                        <Checkbox
+                          id={`endpoint-${endpoint.id}`}
+                          checked={isSelected}
+                          onCheckedChange={() => toggleEndpoint(endpoint.id)}
+                        />
+                        <div className="flex items-center justify-center w-8 h-8 rounded bg-muted">
+                          {getEndpointIcon(endpoint.type)}
+                        </div>
+                        <label
+                          htmlFor={`endpoint-${endpoint.id}`}
+                          className="flex-1 cursor-pointer"
+                        >
+                          <p className="text-sm font-medium text-foreground/90">
+                            {endpoint.name}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {endpoint.type
+                              .split('-')
+                              .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+                              .join(' ')}
+                          </p>
+                        </label>
+                      </div>
+                      {hasWarning && (
+                        <Badge
+                          variant="outline"
+                          className="text-xs text-orange-500 border-orange-500"
+                        >
+                          Warning
+                        </Badge>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {notificationType === 'notification' && (
+                <p className="text-xs text-muted-foreground mt-3 opacity-60">
+                  SNMP, PagerDuty, SMS, and Phone Push endpoints are reserved for critical alerts
+                </p>
               )}
             </div>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+
+        {/* Message Template Card */}
+        <Card className="border-primary/10 bg-gradient-to-b from-background/80 to-background shadow-lg shadow-primary/10">
+          <CardHeader>
+            <CardTitle className="text-foreground/90 flex items-center gap-2">
+              <FileText className="w-5 h-5" />
+              Message Template
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div>
+              <Label htmlFor="subject" className="text-sm">
+                Subject / Title
+              </Label>
+              <Input
+                id="subject"
+                placeholder={
+                  notificationType === 'alert'
+                    ? '{{severity}} Alert: {{name}}'
+                    : '{{name}} - {{cluster_name}}'
+                }
+                value={subject}
+                onChange={(e) => setSubject(e.target.value)}
+                className="mt-1.5 text-sm"
+              />
+            </div>
+            <div>
+              <Label htmlFor="message" className="text-sm">
+                Message Body
+              </Label>
+              <Textarea
+                id="message"
+                placeholder={
+                  notificationType === 'alert'
+                    ? 'Alert triggered at {{timestamp}}\n\nMetric: {{metric_name}}\nCurrent value: {{metric_value}}\nThreshold: {{threshold}}\n\nPlease investigate immediately.'
+                    : 'This is a notification from {{cluster_name}}\n\nTimestamp: {{timestamp}}\n\nDetails:\n{{details}}'
+                }
+                value={message}
+                onChange={(e) => setMessage(e.target.value)}
+                className="mt-1.5 text-sm min-h-32 font-mono"
+              />
+            </div>
+
+            <div className="bg-muted/30 rounded-lg p-3 border border-border">
+              <p className="text-xs font-medium mb-2">Available Variables:</p>
+              <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground font-mono">
+                <div>{'{{cluster_name}}'}</div>
+                <div>{'{{timestamp}}'}</div>
+                <div>{'{{name}}'}</div>
+                <div>{'{{description}}'}</div>
+                {notificationType === 'alert' && (
+                  <>
+                    <div>{'{{severity}}'}</div>
+                    <div>{'{{metric_name}}'}</div>
+                    <div>{'{{metric_value}}'}</div>
+                    <div>{'{{threshold}}'}</div>
+                  </>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
 
       {/* Action Buttons */}
       <div className="flex justify-end gap-3 pb-4">
