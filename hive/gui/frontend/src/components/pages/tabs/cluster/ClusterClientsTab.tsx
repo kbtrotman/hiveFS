@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../../ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../../ui/table';
 import { Badge } from '../../../ui/badge';
@@ -13,6 +13,7 @@ import {
   sumStatField,
   useDiskStats,
 } from '../../../useDiskStats';
+import { AddClientDialog } from '../../../AddClientDialog';
 
 const formatNumber = (value: number) =>
   Number.isFinite(value) ? new Intl.NumberFormat().format(value) : '—';
@@ -20,6 +21,7 @@ const formatNumber = (value: number) =>
 export function ClusterClientsTab() {
   const { stats, isLoading, error } = useDiskStats();
   const aggregated = useMemo(() => aggregateStatsByNode(stats), [stats]);
+  const [isAddClientDialogOpen, setIsAddClientDialogOpen] = useState(false);
 
   const overview = useMemo(() => {
     const totalClients = sumStatField(aggregated, 'clients');
@@ -51,7 +53,9 @@ export function ClusterClientsTab() {
           <h2>Connected Clients</h2>
           <p className="text-muted-foreground">Manage and monitor client connections</p>
         </div>
-        <Button>Add Client</Button>
+        <Button type="button" onClick={() => setIsAddClientDialogOpen(true)}>
+          Add Client
+        </Button>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -145,6 +149,7 @@ export function ClusterClientsTab() {
           </Table>
         </CardContent>
       </Card>
+      <AddClientDialog open={isAddClientDialogOpen} onClose={() => setIsAddClientDialogOpen(false)} />
     </div>
   );
 }

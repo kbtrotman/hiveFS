@@ -263,4 +263,5 @@ int hg_sql_snapshot_restore_artifact(const char *snapshot_dir,
                                    size_t out_path_sz);
 
 int hg_sql_update_token_entry(const struct hive_guard_token_metadata *meta);
+int hg_sql_delete_token_entry(const char *token_value);
 int hg_sql_load_tokens(struct RaftTokenCommand **out_tokens, size_t *out_count);

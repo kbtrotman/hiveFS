@@ -334,31 +334,31 @@ export function SecurityApiAccessTab() {
         </Card>
       )}
 
-      {/* Create API Key Card */}
+      {/* API Keys List */}
       <Card className="border-primary/10 bg-gradient-to-b from-background/80 to-background shadow-lg shadow-primary/10">
         <CardHeader>
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-3">
             <CardTitle className="text-foreground/90 flex items-center gap-2">
-              <Plus className="w-5 h-5" />
-              Create API Key
+              <Key className="w-5 h-5" />
+              Existing API Keys ({apiKeys.length})
             </CardTitle>
-            {!isCreatingKey && (
-              <Button
-                size="sm"
-                onClick={() => setIsCreatingKey(true)}
-                className="text-xs h-8"
-              >
-                <Plus className="w-3 h-3 mr-1" />
-                New API Key
-              </Button>
-            )}
+            <Button
+              size="sm"
+              onClick={() => setIsCreatingKey((value) => !value)}
+              className="text-xs h-8"
+              variant={isCreatingKey ? 'outline' : 'default'}
+            >
+              <Plus className="w-3 h-3 mr-1" />
+              {isCreatingKey ? 'Cancel' : 'New API Key'}
+            </Button>
           </div>
         </CardHeader>
-        {isCreatingKey && (
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label htmlFor="key-name" className="text-sm">
+        <CardContent className="space-y-4">
+          {isCreatingKey && (
+            <div className="space-y-4 rounded-lg border border-dashed border-primary/40 bg-primary/5 p-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="key-name" className="text-sm">
                   Key Name
                 </Label>
                 <Input
@@ -419,135 +419,121 @@ export function SecurityApiAccessTab() {
                   </SelectContent>
                 </Select>
               </div>
-            </div>
+              </div>
 
-            <Separator />
+              <Separator />
 
-            {/* Permissions */}
-            <div>
-              <Label className="text-sm mb-3 block">Permissions</Label>
-              <div className="bg-muted/30 rounded-lg p-4 border border-border">
-                <div className="space-y-4">
-                  {/* Read Permissions */}
-                  <div>
-                    <p className="text-xs font-medium text-muted-foreground mb-2">
-                      Read Permissions
-                    </p>
-                    <div className="grid grid-cols-2 gap-2">
-                      {availablePermissions
-                        .filter((p) => p.category === 'read')
-                        .map((permission) => (
-                          <div
-                            key={permission.id}
-                            className="flex items-center space-x-2 bg-background rounded p-2 border border-border"
-                          >
-                            <Checkbox
-                              id={permission.id}
-                              checked={selectedPermissions.includes(permission.id)}
-                              onCheckedChange={() => togglePermission(permission.id)}
-                            />
-                            <Label
-                              htmlFor={permission.id}
-                              className="text-xs cursor-pointer flex-1"
-                            >
-                              {permission.label}
-                            </Label>
-                          </div>
-                        ))}
-                    </div>
-                  </div>
-
-                  {/* Write Permissions */}
-                  <div>
-                    <p className="text-xs font-medium text-muted-foreground mb-2">
-                      Write Permissions
-                    </p>
-                    <div className="grid grid-cols-2 gap-2">
-                      {availablePermissions
-                        .filter((p) => p.category === 'write')
-                        .map((permission) => (
-                          <div
-                            key={permission.id}
-                            className="flex items-center space-x-2 bg-background rounded p-2 border border-border"
-                          >
-                            <Checkbox
-                              id={permission.id}
-                              checked={selectedPermissions.includes(permission.id)}
-                              onCheckedChange={() => togglePermission(permission.id)}
-                            />
-                            <Label
-                              htmlFor={permission.id}
-                              className="text-xs cursor-pointer flex-1"
-                            >
-                              {permission.label}
-                            </Label>
-                          </div>
-                        ))}
-                    </div>
-                  </div>
-
-                  {/* Admin Permissions */}
-                  <div>
-                    <p className="text-xs font-medium text-muted-foreground mb-2">
-                      Administrative Permissions
-                    </p>
-                    <div className="bg-red-500/10 border border-red-500/30 rounded p-3">
-                      {availablePermissions
-                        .filter((p) => p.category === 'admin')
-                        .map((permission) => (
-                          <div key={permission.id} className="flex items-center space-x-2">
-                            <Checkbox
-                              id={permission.id}
-                              checked={selectedPermissions.includes(permission.id)}
-                              onCheckedChange={() => togglePermission(permission.id)}
-                            />
-                            <Label
-                              htmlFor={permission.id}
-                              className="text-xs cursor-pointer flex-1"
-                            >
-                              {permission.label}
-                            </Label>
-                            <AlertTriangle className="w-4 h-4 text-red-500" />
-                          </div>
-                        ))}
-                      <p className="text-xs text-red-600 dark:text-red-400 mt-2">
-                        Warning: Full admin access grants unrestricted API access
+              <div>
+                <Label className="text-sm mb-3 block">Permissions</Label>
+                <div className="bg-muted/30 rounded-lg p-4 border border-border">
+                  <div className="space-y-4">
+                    <div>
+                      <p className="text-xs font-medium text-muted-foreground mb-2">
+                        Read Permissions
                       </p>
+                      <div className="grid grid-cols-2 gap-2">
+                        {availablePermissions
+                          .filter((p) => p.category === 'read')
+                          .map((permission) => (
+                            <div
+                              key={permission.id}
+                              className="flex items-center space-x-2 bg-background rounded p-2 border border-border"
+                            >
+                              <Checkbox
+                                id={permission.id}
+                                checked={selectedPermissions.includes(permission.id)}
+                                onCheckedChange={() => togglePermission(permission.id)}
+                              />
+                              <Label
+                                htmlFor={permission.id}
+                                className="text-xs cursor-pointer flex-1"
+                              >
+                                {permission.label}
+                              </Label>
+                            </div>
+                          ))}
+                      </div>
+                    </div>
+
+                    <div>
+                      <p className="text-xs font-medium text-muted-foreground mb-2">
+                        Write Permissions
+                      </p>
+                      <div className="grid grid-cols-2 gap-2">
+                        {availablePermissions
+                          .filter((p) => p.category === 'write')
+                          .map((permission) => (
+                            <div
+                              key={permission.id}
+                              className="flex items-center space-x-2 bg-background rounded p-2 border border-border"
+                            >
+                              <Checkbox
+                                id={permission.id}
+                                checked={selectedPermissions.includes(permission.id)}
+                                onCheckedChange={() => togglePermission(permission.id)}
+                              />
+                              <Label
+                                htmlFor={permission.id}
+                                className="text-xs cursor-pointer flex-1"
+                              >
+                                {permission.label}
+                              </Label>
+                            </div>
+                          ))}
+                      </div>
+                    </div>
+
+                    <div>
+                      <p className="text-xs font-medium text-muted-foreground mb-2">
+                        Administrative Permissions
+                      </p>
+                      <div className="bg-red-500/10 border border-red-500/30 rounded p-3">
+                        {availablePermissions
+                          .filter((p) => p.category === 'admin')
+                          .map((permission) => (
+                            <div key={permission.id} className="flex items-center space-x-2">
+                              <Checkbox
+                                id={permission.id}
+                                checked={selectedPermissions.includes(permission.id)}
+                                onCheckedChange={() => togglePermission(permission.id)}
+                              />
+                              <Label
+                                htmlFor={permission.id}
+                                className="text-xs cursor-pointer flex-1"
+                              >
+                                {permission.label}
+                              </Label>
+                              <AlertTriangle className="w-4 h-4 text-red-500" />
+                            </div>
+                          ))}
+                        <p className="text-xs text-red-600 dark:text-red-400 mt-2">
+                          Warning: Full admin access grants unrestricted API access
+                        </p>
+                      </div>
                     </div>
                   </div>
                 </div>
               </div>
-            </div>
 
-            <div className="flex gap-2 justify-end">
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setIsCreatingKey(false);
-                  setNewKeyName('');
-                  setNewKeyDescription('');
-                }}
-              >
-                Cancel
-              </Button>
-              <Button onClick={handleCreateKey} disabled={!newKeyName.trim()}>
-                <Key className="w-4 h-4 mr-2" />
-                Create API Key
-              </Button>
+              <div className="flex gap-2 justify-end">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setIsCreatingKey(false);
+                    setNewKeyName('');
+                    setNewKeyDescription('');
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button onClick={handleCreateKey} disabled={!newKeyName.trim()}>
+                  <Key className="w-4 h-4 mr-2" />
+                  Create API Key
+                </Button>
+              </div>
             </div>
-          </CardContent>
-        )}
-      </Card>
+          )}
 
-      {/* API Keys List */}
-      <Card className="border-primary/10 bg-gradient-to-b from-background/80 to-background shadow-lg shadow-primary/10">
-        <CardHeader>
-          <CardTitle className="text-foreground/90 flex items-center gap-2">
-            <Key className="w-5 h-5" />
-            Existing API Keys ({apiKeys.length})
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
           <div className="space-y-3">
             {apiKeys.map((apiKey) => {
               const isRevealed = revealedKeys.includes(apiKey.id);

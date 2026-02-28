@@ -2432,6 +2432,42 @@ int hg_sql_update_token_entry(const struct hive_guard_token_metadata *meta)
 	return 0;
 }
 
+int hg_sql_delete_token_entry(const char *token_value)
+{
+	if (!token_value || token_value[0] == '\0')
+		return -EINVAL;
+
+	MYSQL *db = hg_sql_get_db();
+	if (!db)
+		return -EIO;
+
+	char token_sql[HG_TOKEN_VALUE_MAX * 2 + 1];
+	hg_sql_escape_field(db,
+			    token_sql,
+			    sizeof(token_sql),
+			    token_value,
+			    HG_TOKEN_VALUE_MAX);
+
+	char sql[256];
+	int written = snprintf(sql,
+			       sizeof(sql),
+			       "DELETE FROM host_tokens WHERE token='%s' LIMIT 1",
+			       token_sql);
+	if (written < 0 || (size_t)written >= sizeof(sql))
+		return -ENOSPC;
+
+	if (mysql_query(db, sql) != 0) {
+		hifs_warning("hg_sql_delete_token_entry: delete failed: %s",
+			     mysql_error(db));
+		return -EIO;
+	}
+
+	if (mysql_affected_rows(db) == 0)
+		return -ENOENT;
+
+	return 0;
+}
+
 int hg_sql_load_tokens(struct RaftTokenCommand **out_tokens, size_t *out_count)
 {
 	if (!out_tokens || !out_count)

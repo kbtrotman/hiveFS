@@ -247,7 +247,7 @@ static int hg_guard_token_expire(const struct RaftTokenExpireCommand *cmd)
     size_t i = 0;
     bool removed = false;
     while (i < g_token_count) {
-        const struct RaftTokenCommand *entry = &g_tokens[i].token;
+        struct RaftTokenCommand *entry = &g_tokens[i].token;
         bool match = false;
         if (cmd->token_id != 0 && entry->token_id == cmd->token_id)
             match = true;
@@ -256,6 +256,15 @@ static int hg_guard_token_expire(const struct RaftTokenExpireCommand *cmd)
             match = true;
 
         if (match) {
+            const char *token_value = entry->token[0] ? entry->token : cmd->token;
+            if (token_value && token_value[0] != '\0') {
+                int sql_rc = hg_sql_delete_token_entry(token_value);
+                if (sql_rc != 0 && sql_rc != -ENOENT) {
+                    hifs_warning("hg_guard_token_expire: SQL delete failed for token '%s' rc=%d",
+                                 token_value,
+                                 sql_rc);
+                }
+            }
             size_t last = g_token_count - 1;
             if (i != last)
                 g_tokens[i] = g_tokens[last];
@@ -296,6 +305,61 @@ static int hg_guard_refresh_tokens_from_sql(void)
 
     free(tokens);
     return rc;
+}
+
+static bool hg_guard_setting_key_is_valid(const char *key)
+{
+    if (!key)
+        return false;
+
+    size_t len = strnlen(key, HG_CLUSTER_SETTING_KEY_MAX);
+    if (len == 0 || len >= HG_CLUSTER_SETTING_KEY_MAX)
+        return false;
+
+    for (size_t i = 0; i < len; ++i) {
+        unsigned char c = (unsigned char)key[i];
+        bool alpha = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+        bool digit = (c >= '0' && c <= '9');
+        bool extra = (c == '_' || c == '.' || c == '-' || c == ':');
+        if (!alpha && !digit && !extra)
+            return false;
+    }
+    return true;
+}
+
+static bool hg_guard_setting_value_is_valid(const char *value)
+{
+    if (!value)
+        return false;
+
+    size_t len = strnlen(value, HG_CLUSTER_SETTING_VALUE_MAX);
+    if (len >= HG_CLUSTER_SETTING_VALUE_MAX)
+        return false;
+
+    for (size_t i = 0; i < len; ++i) {
+        unsigned char c = (unsigned char)value[i];
+        if ((c < 0x20 && c != '\t') || c == 0x7f)
+            return false;
+    }
+    return true;
+}
+
+int hg_guard_setting_store(const struct RaftClusterSetting *setting)
+{
+    if (!setting || setting->key[0] == '\0')
+        return -EINVAL;
+
+    if (!hg_guard_setting_key_is_valid(setting->key))
+        return -EINVAL;
+    if (!hg_guard_setting_value_is_valid(setting->value))
+        return -EINVAL;
+
+    // Then we need to implement the function below in hive_guard_sql.c 
+    // to persist the setting in the database permanently.  
+    int rc = hg_sql_store_cluster_setting(setting);
+    if (rc != 0)
+        return rc;
+    return 0;
 }
 
 extern MYSQL *hg_sql_get_db(void);
@@ -806,6 +870,7 @@ commitCb(struct uv_raft *raft,
         return 0;
     }
     case HG_OP_PUT_SETTING:
+        return hg_guard_setting_store(&cmd.u.setting);
 
     case HG_OP_PUT_CLUSTER_CERT:
 
