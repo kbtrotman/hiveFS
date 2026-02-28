@@ -9,7 +9,7 @@ compile_commands.json
 CTestTestfile.cmake
 cache.hifs
 node_modules
-.vscode
+.vscode/
 .codex
 bin/
 lib/
