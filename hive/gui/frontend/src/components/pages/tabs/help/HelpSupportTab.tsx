@@ -2,6 +2,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../../../ui/card';
 import { Button } from '../../../ui/button';
 import { Badge } from '../../../ui/badge';
 import { Separator } from '../../../ui/separator';
+import { useApiResource } from '../../../useApiResource';
 import {
   MessageCircle,
   Mail,
@@ -20,7 +21,24 @@ import {
   CheckCircle,
 } from 'lucide-react';
 
+interface AlertRecord {
+  alert_id: number;
+  title: string;
+  message: string;
+  severity: string;
+  triggered_at?: string | null;
+}
+
 export function HelpSupportTab() {
+  const {
+    data: alerts,
+    isLoading: isLoadingAlerts,
+    error: alertsError,
+  } = useApiResource<AlertRecord[]>('alerts?limit=5', {
+    initialData: [],
+    transform: (payload) => (Array.isArray(payload) ? payload : []),
+  });
+
   const handleOpenGithub = (section: string = '') => {
     const baseUrl = 'https://github.com/kbtrotman/hivefs';
     const url = section ? `${baseUrl}/${section}` : baseUrl;
@@ -40,6 +58,12 @@ export function HelpSupportTab() {
           Connect with the HiveFS community and get help with your cluster
         </p>
       </div>
+
+      {alertsError && (
+        <div className="rounded-md border border-destructive/40 bg-destructive/10 px-4 py-2 text-sm text-destructive">
+          {alertsError}
+        </div>
+      )}
 
       {/* Welcome Banner */}
       <div className="bg-gradient-to-r from-blue-500/10 to-purple-500/10 border border-blue-500/30 rounded-lg p-6">
@@ -78,6 +102,49 @@ export function HelpSupportTab() {
 
       {/* Primary Support Channels */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <Card className="border-primary/10 bg-gradient-to-b from-background/80 to-background shadow-lg shadow-primary/10">
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-foreground/90 flex items-center gap-2">
+                <AlertCircle className="w-5 h-5" />
+                Active Cluster Issues
+              </CardTitle>
+              <Badge variant="outline" className="text-xs">
+                {isLoadingAlerts ? 'Loading…' : `${alerts.length} open`}
+              </Badge>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {alerts.map((alert) => (
+              <div key={alert.alert_id} className="border border-border/60 rounded-lg p-3">
+                <div className="flex items-center justify-between mb-1">
+                  <p className="font-medium text-sm">{alert.title}</p>
+                  <Badge
+                    variant={
+                      alert.severity === 'critical'
+                        ? 'destructive'
+                        : alert.severity === 'warning'
+                          ? 'secondary'
+                          : 'outline'
+                    }
+                  >
+                    {alert.severity}
+                  </Badge>
+                </div>
+                <p className="text-xs text-muted-foreground">{alert.message}</p>
+                {alert.triggered_at && (
+                  <p className="text-[10px] text-muted-foreground mt-1">
+                    Triggered {new Date(alert.triggered_at).toLocaleString()}
+                  </p>
+                )}
+              </div>
+            ))}
+            {!isLoadingAlerts && alerts.length === 0 && (
+              <p className="text-xs text-muted-foreground">No alerts reported.</p>
+            )}
+          </CardContent>
+        </Card>
+
         {/* GitHub Support */}
         <Card className="border-primary/20 bg-gradient-to-b from-background/90 to-background shadow-lg shadow-primary/10">
           <CardHeader>

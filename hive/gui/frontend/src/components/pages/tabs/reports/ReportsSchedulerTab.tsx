@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Download, Mail, Calendar, Plus, Trash2, Clock } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../../../ui/card';
 import { Input } from '../../../ui/input';
@@ -9,18 +9,22 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Switch } from '../../../ui/switch';
 import { Badge } from '../../../ui/badge';
 import { Checkbox } from '../../../ui/checkbox';
+import { useApiResource } from '../../../useApiResource';
 
 interface SystemUser {
-  id: string;
-  name: string;
+  id: number;
   email: string;
+  username: string;
+  first_name: string;
+  last_name: string;
 }
 
 interface Schedule {
-  id: string;
-  name: string;
+  schedule_id: number;
+  schedule_name: string;
   frequency: string;
-  time: string;
+  start_at?: string | null;
+  is_active?: boolean;
 }
 
 export function ReportsSchedulerTab() {
@@ -32,19 +36,39 @@ export function ReportsSchedulerTab() {
   const [additionalEmails, setAdditionalEmails] = useState<string[]>([]);
   const [newEmail, setNewEmail] = useState('');
 
-  // Mock data - in production, fetch from localhost:8000/api/v1/accounts
-  const [systemUsers] = useState<SystemUser[]>([
-    { id: '1', name: 'John Smith', email: 'john.smith@hivefs.com' },
-    { id: '2', name: 'Sarah Johnson', email: 'sarah.johnson@hivefs.com' },
-    { id: '3', name: 'Michael Chen', email: 'michael.chen@hivefs.com' },
-    { id: '4', name: 'Emily Davis', email: 'emily.davis@hivefs.com' },
-  ]);
+  const {
+    data: systemUsers,
+    isLoading: isLoadingUsers,
+    error: usersError,
+  } = useApiResource<SystemUser[]>('accounts', {
+    initialData: [],
+    transform: (payload) => (Array.isArray(payload) ? payload : []),
+  });
+  const {
+    data: schedules,
+    isLoading: isLoadingSchedules,
+    error: schedulesError,
+  } = useApiResource<Schedule[]>('notification-schedules', {
+    initialData: [],
+    transform: (payload) => (Array.isArray(payload) ? payload : []),
+  });
 
-  const [existingSchedules] = useState<Schedule[]>([
-    { id: '1', name: 'Daily Morning Report', frequency: 'Daily', time: '8:00 AM' },
-    { id: '2', name: 'Weekly Summary', frequency: 'Weekly', time: '9:00 AM Mon' },
-    { id: '3', name: 'Monthly Overview', frequency: 'Monthly', time: '1st @ 10:00 AM' },
-  ]);
+  const scheduleOptions = useMemo(
+    () =>
+      schedules.map((schedule) => ({
+        id: schedule.schedule_id.toString(),
+        label: schedule.schedule_name,
+        frequency: schedule.frequency,
+        start_at: schedule.start_at,
+      })),
+    [schedules],
+  );
+
+  useEffect(() => {
+    if (!selectedSchedule && scheduleOptions.length) {
+      setSelectedSchedule(scheduleOptions[0].id);
+    }
+  }, [scheduleOptions, selectedSchedule]);
 
   const toggleUserSelection = (userId: string) => {
     setSelectedUsers((prev) =>
@@ -65,6 +89,8 @@ export function ReportsSchedulerTab() {
     setAdditionalEmails(additionalEmails.filter((e) => e !== email));
   };
 
+  const combinedError = usersError ?? schedulesError;
+
   return (
     <div className="flex h-full w-full flex-col gap-6 overflow-auto bg-gradient-to-br from-background via-primary/5 to-background p-8">
       {/* Page Header */}
@@ -74,6 +100,12 @@ export function ReportsSchedulerTab() {
           Configure report output format and delivery schedule
         </p>
       </div>
+
+      {combinedError && (
+        <div className="rounded-md border border-destructive/40 bg-destructive/10 px-4 py-2 text-sm text-destructive">
+          {combinedError}
+        </div>
+      )}
 
       {/* Top Row - Output Configuration */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
@@ -172,25 +204,38 @@ export function ReportsSchedulerTab() {
               <div>
                 <Label className="text-sm mb-2 block">System Users</Label>
                 <div className="border border-border rounded-lg max-h-40 overflow-y-auto">
-                  {systemUsers.map((user) => (
-                    <div
-                      key={user.id}
-                      className="flex items-center gap-3 p-2.5 hover:bg-muted/50 border-b border-border last:border-b-0"
-                    >
-                      <Checkbox
-                        id={`user-${user.id}`}
-                        checked={selectedUsers.includes(user.id)}
-                        onCheckedChange={() => toggleUserSelection(user.id)}
-                      />
-                      <label
-                        htmlFor={`user-${user.id}`}
-                        className="flex-1 cursor-pointer text-sm"
+                  {isLoadingUsers && (
+                    <p className="p-3 text-sm text-muted-foreground">Loading accounts…</p>
+                  )}
+                  {!isLoadingUsers && systemUsers.length === 0 && (
+                    <p className="p-3 text-sm text-muted-foreground">No users available.</p>
+                  )}
+                  {systemUsers.map((user) => {
+                    const id = user.id.toString();
+                    const displayName =
+                      user.first_name || user.last_name
+                        ? `${user.first_name} ${user.last_name}`.trim()
+                        : user.username || user.email;
+                    return (
+                      <div
+                        key={id}
+                        className="flex items-center gap-3 p-2.5 hover:bg-muted/50 border-b border-border last:border-b-0"
                       >
-                        <p className="text-foreground/90">{user.name}</p>
-                        <p className="text-xs text-muted-foreground">{user.email}</p>
-                      </label>
-                    </div>
-                  ))}
+                        <Checkbox
+                          id={`user-${id}`}
+                          checked={selectedUsers.includes(id)}
+                          onCheckedChange={() => toggleUserSelection(id)}
+                        />
+                        <label
+                          htmlFor={`user-${id}`}
+                          className="flex-1 cursor-pointer text-sm"
+                        >
+                          <p className="text-foreground/90">{displayName}</p>
+                          <p className="text-xs text-muted-foreground">{user.email}</p>
+                        </label>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -292,9 +337,10 @@ export function ReportsSchedulerTab() {
                       <SelectValue placeholder="Choose a schedule..." />
                     </SelectTrigger>
                     <SelectContent>
-                      {existingSchedules.map((schedule) => (
+                      {scheduleOptions.map((schedule) => (
                         <SelectItem key={schedule.id} value={schedule.id}>
-                          {schedule.name} - {schedule.frequency} @ {schedule.time}
+                          {schedule.label} • {schedule.frequency}
+                          {schedule.start_at ? ` @ ${new Date(schedule.start_at).toLocaleTimeString()}` : ''}
                         </SelectItem>
                       ))}
                     </SelectContent>

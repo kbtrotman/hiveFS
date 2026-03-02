@@ -1,11 +1,18 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
+interface SeriesConfig {
+  dataKey: string;
+  color: string;
+  label?: string;
+}
+
 interface PerformanceChartProps {
   title: string;
   description: string;
-  dataKey: string;
-  color: string;
+  dataKey?: string;
+  color?: string;
+  series?: SeriesConfig[];
   data?: ChartDatum[];
   isLoading?: boolean;
 }
@@ -36,10 +43,18 @@ export function PerformanceChart({
   description,
   dataKey,
   color,
+  series,
   data,
   isLoading,
 }: PerformanceChartProps) {
   const chartData = data && data.length > 0 ? data : generatePlaceholderData();
+  const resolvedSeries: SeriesConfig[] =
+    series && series.length > 0
+      ? series
+      : dataKey && color
+        ? [{ dataKey, color }]
+        : [];
+
   return (
     <Card>
       <CardHeader>
@@ -69,13 +84,17 @@ export function PerformanceChart({
                 borderRadius: '6px',
               }}
             />
-            <Line 
-              type="monotone" 
-              dataKey={dataKey} 
-              stroke={color} 
-              strokeWidth={2}
-              dot={false}
-            />
+            {resolvedSeries.map((seriesConfig) => (
+              <Line
+                key={seriesConfig.dataKey}
+                type="monotone"
+                dataKey={seriesConfig.dataKey}
+                stroke={seriesConfig.color}
+                strokeWidth={2}
+                dot={false}
+                name={seriesConfig.label}
+              />
+            ))}
           </LineChart>
         </ResponsiveContainer>
       </CardContent>

@@ -17,14 +17,14 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from tree.views import TreeNodeViewSet
+from tree.views import TreeNodeViewSet, UiHostMapViewSet, UiVirtualNodeViewSet
 from settings.views import SettingsRootView
 from audit.views import AuditEntryViewSet
 from monitor.views import MonitorRootView
 from tenant.views import TenantRootView
 from nodes.views import StorageNodeViewSet, StorageNodeStatViewSet, HardwareStatusViewSet
 from disk.views import DiskNodeViewSet, DiskNodeStatViewSet, StorageNodeFsStatsListView, StorageNodeDiskStatsListView, DiskStatusListView
-from notifications.views import AlertViewSet, NotificationViewSet
+from notifications.views import AlertViewSet, EmailTargetViewSet, NotificationViewSet, ScheduleViewSet
 from api.views import BootstrapInitView, BootstrapStatusView, AddNodeView, AddForeignerView, NewTokenView
 from accounts.views import (
     GroupMembershipViewSet,
@@ -40,32 +40,34 @@ from django_eventstream import views as eventstream_views
 from django.contrib.auth.decorators import login_not_required
 
 router = DefaultRouter(trailing_slash=False)
-router.register(r'tree', TreeNodeViewSet, basename='tree')
-router.register(r'settings', SettingsRootView, basename='settings')
-router.register(r'audit', AuditEntryViewSet, basename='audit')
-router.register(r'monitor', MonitorRootView, basename='monitor')
-router.register(r'tenant', TenantRootView, basename='tenant')
-router.register(r'nodes', StorageNodeViewSet, basename='nodes')
-router.register(r'snstats', StorageNodeViewSet, basename='snstats')
-router.register(r'health/capacity', DiskNodeViewSet, basename='disk')
-router.register(r'health/stats', DiskNodeStatViewSet, basename='stats')
-router.register(r"health/hw_status", HardwareStatusViewSet, basename="hw_status")
-router.register(r"accounts", UserViewSet, basename="account")
-router.register(r"groups", GroupViewSet, basename="group")
-router.register(r"roles", RoleViewSet, basename="role")
+router.register(r"tree", TreeNodeViewSet, basename="tree")
+router.register(r"tree/virtual-nodes", UiVirtualNodeViewSet, basename="tree-virtual")
+router.register(r"tree/host-map", UiHostMapViewSet, basename="tree-host-map")
+
+router.register(r"settings", SettingsRootView, basename="settings")
+router.register(r"audit", AuditEntryViewSet, basename="audit")
+router.register(r"monitor", MonitorRootView, basename="monitor")
+router.register(r"tenant", TenantRootView, basename="tenant")
+
+router.register(r"nodes", StorageNodeViewSet, basename="nodes")
+router.register(r"health/snstats", StorageNodeStatViewSet, basename="snstats")
+router.register(r"health/capacity", DiskNodeViewSet, basename="disk-capacity")
+router.register(r"health/stats", DiskNodeStatViewSet, basename="disk-stats")
+router.register(r"health/hw_status", HardwareStatusViewSet, basename="hw-status")
+
+router.register(r"accounts", UserViewSet, basename="accounts")
+router.register(r"groups", GroupViewSet, basename="groups")
+router.register(r"roles", RoleViewSet, basename="roles")
 router.register(r"ldap", LDAPViewSet, basename="ldap")
 router.register(r"saml", SAMLViewSet, basename="saml")
 router.register(r"mfa", MFAViewSet, basename="mfa")
-router.register(r"notifications", NotificationViewSet, basename="notification")
-router.register(r"alerts", AlertViewSet, basename="alert")
+router.register(r"group-memberships", GroupMembershipViewSet, basename="group-memberships")
+router.register(r"role-assignments", RoleAssignmentViewSet, basename="role-assignments")
 
-
-router.register(
-    r"group-memberships", GroupMembershipViewSet, basename="group-membership"
-)
-router.register(
-    r"role-assignments", RoleAssignmentViewSet, basename="role-assignment"
-)
+router.register(r"notifications", NotificationViewSet, basename="notifications")
+router.register(r"alerts", AlertViewSet, basename="alerts")
+router.register(r"notification-schedules", ScheduleViewSet, basename="notification-schedule")
+router.register(r"notification-endpoints", EmailTargetViewSet, basename="notification-endpoint")
 
 
 urlpatterns = [

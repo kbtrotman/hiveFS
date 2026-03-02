@@ -1,12 +1,31 @@
 import { useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../../../ui/card';
 import { PerformanceChart } from '../../../PerformanceChart';
-import { Activity, HardDrive, Zap, TrendingUp } from 'lucide-react';
-import { aggregateStatsByNode, formatTimestamp, safeNumber, sumStatField, useDiskStats } from '../../../useDiskStats';
+import { Activity, HardDrive, TrendingUp, Zap } from 'lucide-react';
+import {
+  aggregateStatsByNode,
+  calculateMemoryUsage,
+  formatTimestamp,
+  getNodeLabel,
+  safeNumber,
+  sumStatField,
+  useDiskStats,
+} from '../../../useDiskStats';
+import type { DiskStat } from '../../../useDiskStats';
+
+const COLOR_PALETTE = ['#2563eb', '#7c3aed', '#059669', '#f97316', '#ec4899', '#0ea5e9'];
+const MAX_POINTS = 50;
 
 const formatNumber = (value: number, options?: Intl.NumberFormatOptions) => {
   if (!Number.isFinite(value)) return '—';
   return new Intl.NumberFormat(undefined, { maximumFractionDigits: 1, ...options }).format(value);
+};
+
+const formatMetricValue = (value: number | null, suffix = '', options?: Intl.NumberFormatOptions) => {
+  if (value === null || Number.isNaN(value)) {
+    return '—';
+  }
+  return `${formatNumber(value, options)}${suffix}`;
 };
 
 export function ServersPerformanceTab() {
@@ -33,46 +52,60 @@ export function ServersPerformanceTab() {
       throughput,
       avgLatency,
     };
-  }, [stats]);
+  }, [aggregated]);
 
-  const chartData = useMemo(
-    () =>
-      stats.map((stat, index) => ({
-        time: stat.s_ts ? formatTimestamp(stat.s_ts) : `Node ${index + 1}`,
-        iops: safeNumber(stat.total_iops),
-        reads: safeNumber(stat.read_iops),
-        writes: safeNumber(stat.write_iops),
-        throughput: safeNumber(stat.t_throughput),
-      })),
+  const topMetrics = useMemo(() => {
+    const cpu = findTopMetric(aggregated, (stat) => (stat.cpu ?? null) as number | null);
+    const memory = findTopMetric(aggregated, (stat) => calculateMemoryUsage(stat));
+    const clientNet = findTopMetric(aggregated, (stat) =>
+      safeNumber((stat.c_net_in as number | null) ?? 0) + safeNumber((stat.c_net_out as number | null) ?? 0),
+    );
+    const clusterNet = findTopMetric(aggregated, (stat) =>
+      safeNumber((stat.s_net_in as number | null) ?? 0) + safeNumber((stat.s_net_out as number | null) ?? 0),
+    );
+    return { cpu, memory, clientNet, clusterNet };
+  }, [aggregated]);
+
+  const cpuSeries = useMemo(() => buildNodeSeriesData(stats, (stat) => (stat.cpu ?? null) as number | null), [stats]);
+  const memorySeries = useMemo(
+    () => buildNodeSeriesData(stats, (stat) => calculateMemoryUsage(stat)),
+    [stats],
+  );
+  const clientInterfaceSeries = useMemo(
+    () => buildNetworkSeries(stats, 'c_net_in', 'c_net_out'),
+    [stats],
+  );
+  const clusterInterfaceSeries = useMemo(
+    () => buildNetworkSeries(stats, 's_net_in', 's_net_out'),
     [stats],
   );
 
   const cards = [
     {
-      label: 'Total IOPS',
-      value: `${formatNumber(summary.totalIops)}`,
-      subtext: `${summary.nodeCount} nodes reporting`,
+      label: 'Peak CPU Usage',
+      value: formatMetricValue(topMetrics.cpu.value, '%'),
+      subtext: topMetrics.cpu.label,
       icon: Activity,
       color: 'text-blue-500',
     },
     {
-      label: 'Read Ops/s',
-      value: `${formatNumber(summary.readOps)}`,
-      subtext: 'Cluster total',
+      label: 'Peak Memory Usage',
+      value: formatMetricValue(topMetrics.memory.value, '%'),
+      subtext: topMetrics.memory.label,
       icon: HardDrive,
       color: 'text-green-500',
     },
     {
-      label: 'Write Ops/s',
-      value: `${formatNumber(summary.writeOps)}`,
-      subtext: 'Cluster total',
+      label: 'Top Client Interface',
+      value: `${formatMetricValue(topMetrics.clientNet.value, ' MB/s')}`,
+      subtext: topMetrics.clientNet.label,
       icon: TrendingUp,
       color: 'text-purple-500',
     },
     {
-      label: 'Throughput',
-      value: `${formatNumber(summary.throughput)} MB/s`,
-      subtext: `Avg latency ${formatNumber(summary.avgLatency, { maximumFractionDigits: 2 })} ms`,
+      label: 'Top Cluster Interface',
+      value: `${formatMetricValue(topMetrics.clusterNet.value, ' MB/s')}`,
+      subtext: topMetrics.clusterNet.label,
       icon: Zap,
       color: 'text-yellow-500',
     },
@@ -110,35 +143,31 @@ export function ServersPerformanceTab() {
       {/* Performance Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <PerformanceChart
-          title="IOPS"
-          description="Input/Output Operations Per Second"
-          dataKey="iops"
-          color="#3b82f6"
-          data={chartData}
+          title="Node CPU Usage"
+          description="CPU utilization per node (%)"
+          data={cpuSeries.data}
+          series={cpuSeries.series}
           isLoading={isLoading}
         />
         <PerformanceChart
-          title="Read Operations"
-          description="Read operations per second"
-          dataKey="reads"
-          color="#10b981"
-          data={chartData}
+          title="Memory Usage"
+          description="Memory consumption per node (%)"
+          data={memorySeries.data}
+          series={memorySeries.series}
           isLoading={isLoading}
         />
         <PerformanceChart
-          title="Write Operations"
-          description="Write operations per second"
-          dataKey="writes"
-          color="#f59e0b"
-          data={chartData}
+          title="Network Client Interface"
+          description="Client ingress vs egress (MB/s)"
+          data={clientInterfaceSeries.data}
+          series={clientInterfaceSeries.series}
           isLoading={isLoading}
         />
         <PerformanceChart
-          title="Throughput"
-          description="Data transfer rate (MB/s)"
-          dataKey="throughput"
-          color="#8b5cf6"
-          data={chartData}
+          title="Network Cluster Interface"
+          description="Cluster ingress vs egress (MB/s)"
+          data={clusterInterfaceSeries.data}
+          series={clusterInterfaceSeries.series}
           isLoading={isLoading}
         />
       </div>
@@ -194,7 +223,10 @@ export function ServersPerformanceTab() {
                     : '—'
                 }
               />
-              <MetricRow label="Load Avg" value={formatNumber(sumStatField(aggregated, 'lavg') / (aggregated.length || 1), { maximumFractionDigits: 2 })} />
+              <MetricRow
+                label="Load Avg"
+                value={formatNumber(sumStatField(aggregated, 'lavg') / (aggregated.length || 1), { maximumFractionDigits: 2 })}
+              />
               <MetricRow
                 label="Controller Alerts"
                 value={`${aggregated.filter((s) => (s.cont1_isok ?? 1) === 0 || (s.cont2_isok ?? 1) === 0).length}`}
@@ -214,9 +246,128 @@ interface MetricRowProps {
 
 function MetricRow({ label, value }: MetricRowProps) {
   return (
-    <div className="flex justify-between items-center">
+    <div className="flex items-center justify-between py-1">
       <span className="text-sm text-muted-foreground">{label}</span>
-      <span>{value}</span>
+      <span className="text-sm font-medium">{value}</span>
     </div>
   );
+}
+
+function findTopMetric(
+  stats: DiskStat[],
+  selector: (stat: DiskStat) => number | null | undefined,
+): { value: number | null; label: string } {
+  let best = -Infinity;
+  let label = 'No data';
+
+  stats.forEach((stat) => {
+    const value = selector(stat);
+    if (value === null || value === undefined || Number.isNaN(value)) {
+      return;
+    }
+    if (value > best) {
+      best = value;
+      label = getNodeLabel(stat);
+    }
+  });
+
+  if (best === -Infinity) {
+    return { value: null, label };
+  }
+  return { value: best, label };
+}
+
+function buildNodeSeriesData(
+  stats: DiskStat[],
+  selector: (stat: DiskStat) => number | null | undefined,
+) {
+  const dataMap = new Map<
+    string,
+    {
+      sortKey: number;
+      time: string;
+      [nodeLabel: string]: number;
+    }
+  >();
+  const seriesOrder: string[] = [];
+
+  stats.forEach((stat, index) => {
+    const value = selector(stat);
+    if (value === null || value === undefined || Number.isNaN(value)) {
+      return;
+    }
+    const { mapKey, sortKey, label } = createTimePoint(stat.s_ts, index);
+    const entry = dataMap.get(mapKey) ?? { sortKey, time: label };
+    const nodeLabel = getNodeLabel(stat);
+    entry[nodeLabel] = value;
+    dataMap.set(mapKey, entry);
+    if (!seriesOrder.includes(nodeLabel)) {
+      seriesOrder.push(nodeLabel);
+    }
+  });
+
+  const data = Array.from(dataMap.values())
+    .sort((a, b) => a.sortKey - b.sortKey)
+    .slice(-MAX_POINTS)
+    .map(({ sortKey, ...rest }) => rest);
+
+  const series = seriesOrder.map((nodeLabel, idx) => ({
+    dataKey: nodeLabel,
+    color: COLOR_PALETTE[idx % COLOR_PALETTE.length],
+  }));
+
+  return { data, series };
+}
+
+function buildNetworkSeries(
+  stats: DiskStat[],
+  inboundField: keyof DiskStat,
+  outboundField: keyof DiskStat,
+) {
+  const dataMap = new Map<
+    string,
+    { sortKey: number; time: string; inbound: number; outbound: number }
+  >();
+
+  stats.forEach((stat, index) => {
+    const { mapKey, sortKey, label } = createTimePoint(stat.s_ts, index);
+    const entry = dataMap.get(mapKey) ?? { sortKey, time: label, inbound: 0, outbound: 0 };
+    entry.inbound += safeNumber(stat[inboundField] as number | null);
+    entry.outbound += safeNumber(stat[outboundField] as number | null);
+    dataMap.set(mapKey, entry);
+  });
+
+  let data = Array.from(dataMap.values())
+    .sort((a, b) => a.sortKey - b.sortKey)
+    .slice(-MAX_POINTS)
+    .map(({ sortKey, ...rest }) => rest);
+
+  if (data.length === 0) {
+    data = [{ time: 'No samples', inbound: 0, outbound: 0 }];
+  }
+
+  const series = [
+    { dataKey: 'inbound', color: '#0ea5e9', label: 'Inbound' },
+    { dataKey: 'outbound', color: '#f97316', label: 'Outbound' },
+  ];
+
+  return { data, series };
+}
+
+function createTimePoint(timestamp?: string | null, fallbackIndex = 0) {
+  if (timestamp) {
+    const date = new Date(timestamp);
+    if (!Number.isNaN(date.getTime())) {
+      return {
+        mapKey: date.getTime().toString(),
+        sortKey: date.getTime(),
+        label: date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+      };
+    }
+  }
+  return {
+    mapKey: `sample-${fallbackIndex}`,
+    sortKey: fallbackIndex,
+    label: `Sample ${fallbackIndex + 1}`,
+  };
 }

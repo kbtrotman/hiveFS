@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../../../ui/card';
 import { Input } from '../../../ui/input';
 import { Label } from '../../../ui/label';
@@ -29,6 +29,7 @@ import {
   Package,
   Activity,
 } from 'lucide-react';
+import { useApiResource } from '../../../useApiResource';
 interface LogEntry {
   id: string;
   timestamp: string;
@@ -48,6 +49,26 @@ interface User {
   role: string;
 }
 
+interface AuditEntryRecord {
+  audit_entry_id: number;
+  page_name: string;
+  setting_name: string;
+  change_summary?: string | null;
+  change_context?: Record<string, any> | null;
+  request_ip?: string | null;
+  username?: string | null;
+  created_at?: string | null;
+}
+
+interface AccountRecord {
+  id: number;
+  email: string;
+  username: string;
+  first_name: string;
+  last_name: string;
+  auth_source?: string | null;
+}
+
 export function SecurityLogsTab() {
   const [filterLevel, setFilterLevel] = useState<string>('all');
   const [filterSource, setFilterSource] = useState<string>('all');
@@ -61,139 +82,60 @@ export function SecurityLogsTab() {
   const [exportRecipients, setExportRecipients] = useState<string[]>([]);
   const [exportIncludeSupport, setExportIncludeSupport] = useState(false);
 
-  // Mock users for email recipients
-  const users: User[] = [
-    { id: '1', name: 'John Smith', email: 'john.smith@hivefs.com', role: 'Administrator' },
-    { id: '2', name: 'Sarah Johnson', email: 'sarah.johnson@hivefs.com', role: 'Administrator' },
-    { id: '3', name: 'Michael Chen', email: 'michael.chen@hivefs.com', role: 'Operator' },
-    { id: '4', name: 'Emily Davis', email: 'emily.davis@hivefs.com', role: 'Viewer' },
-  ];
+  const {
+    data: auditEntries,
+    isLoading: isLoadingLogs,
+    error: logsError,
+  } = useApiResource<AuditEntryRecord[]>('audit?limit=200', {
+    initialData: [],
+    transform: (payload) => (Array.isArray(payload) ? payload : []),
+  });
+  const {
+    data: accountRecords,
+    isLoading: isLoadingAccounts,
+  } = useApiResource<AccountRecord[]>('accounts', {
+    initialData: [],
+    transform: (payload) => (Array.isArray(payload) ? payload : []),
+  });
 
-  // Mock log entries
-  const [logEntries] = useState<LogEntry[]>([
-    {
-      id: '1',
-      timestamp: '2026-01-25T14:35:22.123Z',
-      level: 'CRITICAL',
-      source: 'storage-daemon',
-      node: 'node-01',
-      message: 'Critical: Storage pool capacity exceeded 95% threshold',
-      details: 'Storage pool "primary-pool" is at 96.2% capacity. Immediate action required.',
-      metadata: { poolId: 'primary-pool', capacity: 96.2, threshold: 95 },
-    },
-    {
-      id: '2',
-      timestamp: '2026-01-25T14:34:15.456Z',
-      level: 'ERROR',
-      source: 'replication-daemon',
-      node: 'node-03',
-      message: 'Replication failed for chunk 0x4f2a8b',
-      details: 'Failed to replicate chunk to node-05 after 3 retry attempts',
-      stackTrace: 'ReplicationError: Connection timeout\n  at Replicator.sync (replicator.go:145)\n  at ChunkManager.replicate (chunk.go:89)',
-      metadata: { chunkId: '0x4f2a8b', targetNode: 'node-05', retries: 3 },
-    },
-    {
-      id: '3',
-      timestamp: '2026-01-25T14:33:00.789Z',
-      level: 'WARN',
-      source: 'cluster-manager',
-      node: 'node-01',
-      message: 'Node heartbeat delayed from node-04',
-      details: 'Heartbeat from node-04 delayed by 2.3 seconds. Possible network issue.',
-      metadata: { sourceNode: 'node-04', delay: 2.3 },
-    },
-    {
-      id: '4',
-      timestamp: '2026-01-25T14:32:45.234Z',
-      level: 'INFO',
-      source: 'api-server',
-      node: 'node-02',
-      message: 'API request completed successfully',
-      details: 'GET /api/v1/cluster/status completed in 45ms',
-      metadata: { method: 'GET', endpoint: '/api/v1/cluster/status', duration: 45, statusCode: 200 },
-    },
-    {
-      id: '5',
-      timestamp: '2026-01-25T14:32:30.567Z',
-      level: 'ERROR',
-      source: 'metadata-service',
-      node: 'node-02',
-      message: 'Database connection pool exhausted',
-      details: 'All connections in pool are in use. Consider increasing max_connections.',
-      metadata: { poolSize: 50, activeConnections: 50 },
-    },
-    {
-      id: '6',
-      timestamp: '2026-01-25T14:31:20.890Z',
-      level: 'WARN',
-      source: 'storage-daemon',
-      node: 'node-05',
-      message: 'High disk I/O wait detected',
-      details: 'Disk I/O wait time exceeded 100ms on /dev/sda1',
-      metadata: { device: '/dev/sda1', ioWait: 125 },
-    },
-    {
-      id: '7',
-      timestamp: '2026-01-25T14:30:15.123Z',
-      level: 'INFO',
-      source: 'auth-service',
-      node: 'node-01',
-      message: 'User authentication successful',
-      details: 'User john.smith@hivefs.com authenticated via API key',
-      metadata: { user: 'john.smith@hivefs.com', method: 'api_key' },
-    },
-    {
-      id: '8',
-      timestamp: '2026-01-25T14:29:45.456Z',
-      level: 'DEBUG',
-      source: 'cache-service',
-      node: 'node-03',
-      message: 'Cache miss for key cluster.nodes.status',
-      details: 'Cache lookup failed, fetching from source',
-      metadata: { cacheKey: 'cluster.nodes.status', ttl: 60 },
-    },
-    {
-      id: '9',
-      timestamp: '2026-01-25T14:28:30.789Z',
-      level: 'ERROR',
-      source: 'cluster-manager',
-      node: 'node-01',
-      message: 'Failed to elect new leader',
-      details: 'Consensus not reached after 5 voting rounds',
-      stackTrace: 'ConsensusError: Quorum not met\n  at Leader.elect (leader.go:234)\n  at Cluster.electLeader (cluster.go:567)',
-      metadata: { votingRounds: 5, nodesVoted: 3, nodesRequired: 4 },
-    },
-    {
-      id: '10',
-      timestamp: '2026-01-25T14:27:00.234Z',
-      level: 'CRITICAL',
-      source: 'replication-daemon',
-      node: 'node-04',
-      message: 'Data inconsistency detected',
-      details: 'Checksum mismatch on chunk 0x8d3f1a between replicas',
-      metadata: { chunkId: '0x8d3f1a', expectedChecksum: 'a8f2e4', actualChecksum: 'b9c3f5' },
-    },
-    {
-      id: '11',
-      timestamp: '2026-01-25T14:26:15.567Z',
-      level: 'INFO',
-      source: 'scheduler',
-      node: 'node-02',
-      message: 'Scheduled maintenance task completed',
-      details: 'Log rotation completed successfully',
-      metadata: { task: 'log-rotation', duration: 1230 },
-    },
-    {
-      id: '12',
-      timestamp: '2026-01-25T14:25:00.890Z',
-      level: 'WARN',
-      source: 'api-server',
-      node: 'node-01',
-      message: 'Rate limit approaching for API key',
-      details: 'API key hfs_prod_a1b2c3 has used 950/1000 requests this hour',
-      metadata: { apiKey: 'hfs_prod_a1b2c3', usage: 950, limit: 1000 },
-    },
-  ]);
+  const users: User[] = useMemo(
+    () =>
+      accountRecords.map((account) => ({
+        id: account.id.toString(),
+        name:
+          account.first_name || account.last_name
+            ? `${account.first_name} ${account.last_name}`.trim()
+            : account.username,
+        email: account.email,
+        role: account.auth_source || 'user',
+      })),
+    [accountRecords],
+  );
+
+  const logEntries: LogEntry[] = useMemo(() => {
+    if (!auditEntries.length) return [];
+    return auditEntries.map((entry) => {
+      const severityRaw =
+        (entry.change_context && entry.change_context.severity) ||
+        (entry.change_context && entry.change_context.level) ||
+        'INFO';
+      const normalized = String(severityRaw).toUpperCase();
+      const mapped: LogEntry['level'] =
+        normalized === 'CRITICAL' || normalized === 'ERROR' || normalized === 'WARN' || normalized === 'DEBUG'
+          ? (normalized as LogEntry['level'])
+          : 'INFO';
+      return {
+        id: String(entry.audit_entry_id),
+        timestamp: entry.created_at || new Date().toISOString(),
+        level: mapped,
+        source: entry.page_name || 'system',
+        node: entry.change_context?.node_id ? `node-${entry.change_context.node_id}` : 'cluster',
+        message: entry.change_summary || entry.setting_name,
+        details: entry.change_context?.details || entry.setting_name,
+        metadata: entry.change_context || undefined,
+      };
+    });
+  }, [auditEntries]);
 
   const getLevelColor = (level: string) => {
     switch (level) {
@@ -341,6 +283,12 @@ export function SecurityLogsTab() {
           View and manage logs from HiveFS cluster daemons and services
         </p>
       </div>
+
+      {logsError && (
+        <div className="rounded-md border border-destructive/40 bg-destructive/10 px-4 py-2 text-sm text-destructive">
+          {logsError}
+        </div>
+      )}
 
       {/* Statistics Cards */}
       <div className="grid grid-cols-4 gap-4">

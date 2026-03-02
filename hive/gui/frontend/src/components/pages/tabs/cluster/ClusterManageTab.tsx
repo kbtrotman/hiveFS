@@ -1,85 +1,177 @@
-import { useState } from 'react';
-import { AlertTriangle, Power, RefreshCw, ShieldAlert, ShieldCheck, CheckCircle, XCircle, Plus } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import {
+  AlertTriangle,
+  Power,
+  RefreshCw,
+  ShieldAlert,
+  ShieldCheck,
+  CheckCircle,
+  XCircle,
+  Plus,
+} from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../../../ui/card';
 import { Button } from '../../../ui/button';
 import { Separator } from '../../../ui/separator';
 import { Badge } from '../../../ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../../ui/select';
+import { useApiResource } from '../../../useApiResource';
+import { aggregateStatsByNode, resolveStatHealth, useDiskStats } from '../../../useDiskStats';
 
-interface Alert {
-  id: string;
-  type: 'cluster' | 'node';
-  severity: 'critical' | 'warning' | 'info';
-  message: string;
-  node?: string;
-  timestamp: Date;
+interface StorageNode {
+  node_id?: number | null;
+  node_name?: string | null;
+  node_address?: string | null;
+  node_guard_port?: number | null;
+  node_data_port?: number | null;
+  fenced?: boolean | number | null;
 }
 
-export function ClusterManageTab() {
-  const [selectedNode, setSelectedNode] = useState<string>('node-1');
-  const [knownClusters] = useState([
-    { id: 'primary', name: 'Primary Cluster', location: 'San Jose', nodes: 18, status: 'healthy' },
-    { id: 'dr-east', name: 'DR East', location: 'Ashburn', nodes: 12, status: 'warning' },
-  ]);
-  const [alerts, setAlerts] = useState<Alert[]>([
-    {
-      id: '1',
-      type: 'node',
-      severity: 'critical',
-      message: 'High memory usage detected',
-      node: 'node-3',
-      timestamp: new Date(Date.now() - 1000 * 60 * 15),
-    },
-    {
-      id: '2',
-      type: 'cluster',
-      severity: 'warning',
-      message: 'Cluster quorum at minimum threshold',
-      timestamp: new Date(Date.now() - 1000 * 60 * 45),
-    },
-    {
-      id: '3',
-      type: 'node',
-      severity: 'warning',
-      message: 'Network latency spike detected',
-      node: 'node-2',
-      timestamp: new Date(Date.now() - 1000 * 60 * 60 * 2),
-    },
-  ]);
+interface AlertRecord {
+  alert_id?: number | string;
+  source?: string | null;
+  title?: string | null;
+  message?: string | null;
+  severity?: 'critical' | 'warning' | 'info';
+  status?: string | null;
+  triggered_at?: string | null;
+  metadata?: Record<string, unknown> | null;
+}
 
-  const formatTimeAgo = (date: Date) => {
-    const minutes = Math.floor((Date.now() - date.getTime()) / 1000 / 60);
-    if (minutes < 60) return `${minutes}m ago`;
-    const hours = Math.floor(minutes / 60);
-    return `${hours}h ago`;
-  };
+interface SettingsPayload {
+  cluster_notification_forwarder?: string | null;
+  net_domain_name?: string | null;
+  cluster_allow_gui_management?: boolean;
+}
+
+const severityBadge = {
+  critical: 'bg-destructive text-destructive-foreground',
+  warning: 'bg-amber-500 text-white',
+  info: 'bg-blue-500 text-white',
+};
+
+const formatTimeAgo = (timestamp?: string | null) => {
+  if (!timestamp) return 'unknown';
+  const date = new Date(timestamp);
+  const minutes = Math.floor((Date.now() - date.getTime()) / 60000);
+  if (minutes < 1) return '<1m ago';
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+};
+
+export function ClusterManageTab() {
+  const { stats } = useDiskStats();
+  const aggregated = useMemo(() => aggregateStatsByNode(stats), [stats]);
+
+  const {
+    data: nodes,
+    isLoading: isLoadingNodes,
+    error: nodesError,
+  } = useApiResource<StorageNode[]>('nodes', {
+    initialData: [],
+    transform: (payload) => (Array.isArray(payload) ? payload : []),
+  });
+  const {
+    data: rawAlerts,
+    isLoading: isLoadingAlerts,
+    error: alertsError,
+  } = useApiResource<AlertRecord[]>('alerts?limit=25', {
+    initialData: [],
+    transform: (payload) => (Array.isArray(payload) ? payload : []),
+  });
+  const {
+    data: settings,
+    isLoading: isLoadingSettings,
+  } = useApiResource<SettingsPayload | null>('settings', {
+    initialData: null,
+  });
+
+  const [selectedNode, setSelectedNode] = useState<string>('');
+  const [dismissedAlertIds, setDismissedAlertIds] = useState<Set<string>>(new Set());
+
+  const nodeOptions = useMemo(
+    () =>
+      nodes.map((node) => ({
+        id: String(node.node_id ?? node.node_name ?? Math.random()),
+        label: `${node.node_name ?? `node-${node.node_id ?? 'n/a'}`} (${node.node_address ?? 'unknown'})`,
+      })),
+    [nodes],
+  );
+
+  useEffect(() => {
+    if (!selectedNode && nodeOptions.length) {
+      setSelectedNode(nodeOptions[0].id);
+    }
+  }, [nodeOptions, selectedNode]);
+
+  const visibleAlerts = useMemo(
+    () =>
+      rawAlerts.filter((alert) => !dismissedAlertIds.has(String(alert.alert_id ?? alert.title))),
+    [rawAlerts, dismissedAlertIds],
+  );
+
+  const clusterHealth = useMemo(() => {
+    if (visibleAlerts.some((alert) => alert.severity === 'critical')) {
+      return { status: 'critical', icon: <ShieldAlert className="w-4 h-4" /> };
+    }
+    if (visibleAlerts.some((alert) => alert.severity === 'warning' || alert.status === 'acknowledged')) {
+      return { status: 'warning', icon: <AlertTriangle className="w-4 h-4" /> };
+    }
+    if (nodes.some((node) => node.fenced)) {
+      return { status: 'maintenance', icon: <ShieldCheck className="w-4 h-4" /> };
+    }
+    const unhealthyStats = aggregated.filter((stat) => resolveStatHealth(stat) !== 'healthy').length;
+    if (unhealthyStats > 0) {
+      return { status: 'warning', icon: <AlertTriangle className="w-4 h-4" /> };
+    }
+    return { status: 'healthy', icon: <CheckCircle className="w-4 h-4" /> };
+  }, [aggregated, nodes, visibleAlerts]);
+
+  const knownClusters = useMemo(() => {
+    if (!nodes.length) {
+      return [];
+    }
+    return [
+      {
+        id: 'local',
+        name: settings?.cluster_notification_forwarder || 'Local Cluster',
+        location: settings?.net_domain_name || 'Unknown domain',
+        nodes: nodes.length,
+        status: clusterHealth.status,
+      },
+    ];
+  }, [clusterHealth.status, nodes, settings]);
 
   const dismissAlert = (id: string) => {
-    setAlerts(alerts.filter((alert) => alert.id !== id));
+    setDismissedAlertIds((prev) => {
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
   };
 
-  const getSeverityColor = (severity: string) => {
-    switch (severity) {
-      case 'critical':
-        return 'bg-destructive text-destructive-foreground';
-      case 'warning':
-        return 'bg-amber-500 text-white';
-      case 'info':
-        return 'bg-blue-500 text-white';
-      default:
-        return 'bg-muted text-muted-foreground';
-    }
-  };
+  const errorMessage = nodesError ?? alertsError;
 
   return (
     <div className="flex h-full w-full flex-col gap-6 overflow-auto bg-gradient-to-br from-background via-primary/5 to-background p-8">
-      {/* Page Header */}
       <div>
         <h1 className="text-2xl font-semibold text-foreground">Cluster Management</h1>
         <p className="mt-1 text-sm text-muted-foreground">
           Manage cluster operations, node states, and active alerts
         </p>
       </div>
+
+      {(isLoadingNodes || isLoadingAlerts || isLoadingSettings) && (
+        <div className="text-xs text-muted-foreground">Loading cluster data…</div>
+      )}
+      {errorMessage && (
+        <div className="rounded-md border border-destructive/40 bg-destructive/10 px-4 py-2 text-sm text-destructive">
+          {errorMessage}
+        </div>
+      )}
+
       <Card className="border-primary/10 bg-gradient-to-b from-background/80 to-background shadow-lg shadow-primary/10">
         <CardHeader className="flex flex-row items-center justify-between">
           <div>
@@ -92,6 +184,9 @@ export function ClusterManageTab() {
           </Button>
         </CardHeader>
         <CardContent className="flex flex-wrap gap-4">
+          {knownClusters.length === 0 && (
+            <p className="text-sm text-muted-foreground">No nodes are reporting yet.</p>
+          )}
           {knownClusters.map((cluster) => (
             <div
               key={cluster.id}
@@ -100,7 +195,13 @@ export function ClusterManageTab() {
               <div className="flex items-center justify-between">
                 <p className="text-sm font-semibold">{cluster.name}</p>
                 <Badge
-                  className={cluster.status === 'healthy' ? 'bg-emerald-500' : 'bg-amber-500'}
+                  className={
+                    cluster.status === 'healthy'
+                      ? 'bg-emerald-500'
+                      : cluster.status === 'critical'
+                        ? 'bg-destructive'
+                        : 'bg-amber-500'
+                  }
                 >
                   {cluster.status}
                 </Badge>
@@ -112,9 +213,7 @@ export function ClusterManageTab() {
         </CardContent>
       </Card>
 
-      {/* Top Row - Cluster and Node Operations */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        {/* Cluster Operations Card */}
         <Card className="border-primary/10 bg-gradient-to-b from-background/80 to-background shadow-lg shadow-primary/10">
           <CardHeader>
             <CardTitle className="text-foreground/90 flex items-center gap-2">
@@ -151,16 +250,12 @@ export function ClusterManageTab() {
               </Button>
             </div>
 
-            <p
-              className="text-muted-foreground opacity-60"
-              style={{ fontSize: '0.7rem', lineHeight: '1.3' }}
-            >
-              Cluster operations may temporarily affect service availability. Plan accordingly.
+            <p className="text-muted-foreground opacity-60 text-xs leading-relaxed">
+              Cluster status: {clusterHealth.status}. Keep critical alerts clear before scheduling maintenance.
             </p>
           </CardContent>
         </Card>
 
-        {/* Node Operations Card */}
         <Card className="border-primary/10 bg-gradient-to-b from-background/80 to-background shadow-lg shadow-primary/10">
           <CardHeader>
             <CardTitle className="text-foreground/90 flex items-center gap-2">
@@ -178,10 +273,11 @@ export function ClusterManageTab() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="node-1">node-1 (192.168.1.10)</SelectItem>
-                  <SelectItem value="node-2">node-2 (192.168.1.11)</SelectItem>
-                  <SelectItem value="node-3">node-3 (192.168.1.12)</SelectItem>
-                  <SelectItem value="node-4">node-4 (192.168.1.13)</SelectItem>
+                  {nodeOptions.map((node) => (
+                    <SelectItem key={node.id} value={node.id}>
+                      {node.label}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -199,109 +295,62 @@ export function ClusterManageTab() {
 
             <Separator />
 
-            <div>
-              <p className="text-sm text-foreground/75 mb-3">
-                Fence or un-fence node to isolate or restore access.
-              </p>
-              <div className="flex gap-3">
-                <Button variant="outline" className="flex-1">
-                  <ShieldAlert className="w-4 h-4 mr-2 text-destructive" />
-                  Fence Node
-                </Button>
-                <Button variant="outline" className="flex-1">
-                  <ShieldCheck className="w-4 h-4 mr-2 text-green-600" />
-                  Un-fence Node
-                </Button>
-              </div>
-            </div>
-
-            <p
-              className="text-muted-foreground opacity-60"
-              style={{ fontSize: '0.7rem', lineHeight: '1.3' }}
-            >
-              Fencing isolates a node from the cluster. Un-fencing restores normal operation.
+            <p className="text-xs text-muted-foreground">
+              Selected node operations are limited to what the HiveFS guard port allows. Ensure the
+              node is reachable on port {nodes.find((n) => String(n.node_id ?? n.node_name) === selectedNode)?.node_guard_port ?? 22}.
             </p>
           </CardContent>
         </Card>
       </div>
 
-      {/* Bottom Section - Active Alerts */}
       <Card className="border-primary/10 bg-gradient-to-b from-background/80 to-background shadow-lg shadow-primary/10">
         <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle className="text-foreground/90 flex items-center gap-2">
-              <AlertTriangle className="w-5 h-5" />
-              Active Alerts Requiring Action
-            </CardTitle>
-            <Badge variant="secondary" className="text-xs">
-              {alerts.length} Active
-            </Badge>
-          </div>
+          <CardTitle className="text-foreground/90 flex items-center gap-2">
+            {clusterHealth.icon}
+            Active Alerts
+          </CardTitle>
         </CardHeader>
-        <CardContent>
-          {alerts.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              <CheckCircle className="w-12 h-12 mx-auto mb-3 opacity-50" />
-              <p className="text-sm">No active alerts. All systems operating normally.</p>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {alerts.map((alert) => (
-                <div
-                  key={alert.id}
-                  className="flex items-start gap-4 p-4 rounded-lg border border-border bg-muted/30"
-                >
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-1">
-                      <Badge className={getSeverityColor(alert.severity)} style={{ fontSize: '0.65rem', padding: '2px 6px' }}>
-                        {alert.severity.toUpperCase()}
-                      </Badge>
-                      <Badge variant="outline" className="text-xs">
-                        {alert.type === 'cluster' ? 'Cluster-wide' : alert.node}
-                      </Badge>
-                      <span className="text-xs text-muted-foreground ml-auto">
-                        {formatTimeAgo(alert.timestamp)}
-                      </span>
-                    </div>
-                    <p className="text-sm text-foreground/90">{alert.message}</p>
-                  </div>
-                  <div className="flex gap-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="text-xs h-8"
-                    >
-                      <CheckCircle className="w-3 h-3 mr-1" />
-                      Resolve
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="text-xs h-8"
-                      onClick={() => dismissAlert(alert.id)}
-                    >
-                      <XCircle className="w-3 h-3 mr-1" />
-                      Dismiss
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
+        <CardContent className="space-y-3">
+          {isLoadingAlerts && (
+            <p className="text-sm text-muted-foreground">Loading alerts…</p>
           )}
-
-          <Separator className="my-4" />
-
-          <div className="flex justify-between items-center">
-            <p
-              className="text-muted-foreground opacity-60"
-              style={{ fontSize: '0.7rem', lineHeight: '1.3' }}
-            >
-              View all alerts and historical data on the Alerts page.
-            </p>
-            <Button variant="link" className="text-xs h-auto p-0">
-              View All Alerts →
-            </Button>
-          </div>
+          {!isLoadingAlerts && visibleAlerts.length === 0 && (
+            <p className="text-sm text-muted-foreground">No active alerts reported.</p>
+          )}
+          {visibleAlerts.map((alert) => {
+            const severityClass =
+              severityBadge[alert.severity ?? 'info'] ?? 'bg-muted text-muted-foreground';
+            return (
+              <div
+                key={alert.alert_id ?? alert.title}
+                className="flex items-start justify-between rounded-lg border border-border/60 p-3"
+              >
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Badge className={severityClass}>{alert.severity ?? 'info'}</Badge>
+                    <p className="font-medium text-sm">{alert.title ?? alert.source ?? 'Alert'}</p>
+                  </div>
+                  <p className="text-xs text-muted-foreground mb-1">
+                    {alert.message ?? 'Alert raised by workflow'} • {formatTimeAgo(alert.triggered_at)}
+                  </p>
+                  {alert.metadata?.node_id && (
+                    <p className="text-xs text-muted-foreground">
+                      Node {String(alert.metadata.node_id)}
+                    </p>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => dismissAlert(String(alert.alert_id ?? alert.title))}
+                  >
+                    <XCircle className="w-4 h-4" />
+                  </Button>
+                </div>
+              </div>
+            );
+          })}
         </CardContent>
       </Card>
     </div>

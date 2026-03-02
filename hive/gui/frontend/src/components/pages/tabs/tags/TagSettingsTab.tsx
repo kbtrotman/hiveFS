@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../../../ui/card';
 import { Input } from '../../../ui/input';
 import { Label } from '../../../ui/label';
@@ -21,6 +21,7 @@ import {
   Users,
   Clock,
 } from 'lucide-react';
+import { useApiResource } from '../../../useApiResource';
 
 interface TagDefinition {
   id: string;
@@ -35,6 +36,14 @@ interface TagDefinition {
   fileCount: number;
 }
 
+interface SettingsPayload {
+  fs_enable_tags: boolean;
+  cluster_allow_cli_access: boolean;
+  cluster_allow_gui_management: boolean;
+  fs_metadata_space_gib: number;
+  perm_roles?: Record<string, string>;
+}
+
 export function TagSettingsTab() {
   const [isCreatingTag, setIsCreatingTag] = useState(false);
   const [newTagName, setNewTagName] = useState('');
@@ -46,6 +55,23 @@ export function TagSettingsTab() {
   const [tagPermissions, setTagPermissions] = useState('admins-only');
   const [selectedTagForNesting, setSelectedTagForNesting] = useState<string | null>(null);
   const [parentTagToAssign, setParentTagToAssign] = useState<string>('none');
+  const {
+    data: settings,
+    isLoading: isLoadingSettings,
+    error: settingsError,
+  } = useApiResource<SettingsPayload | null>('settings', { initialData: null });
+
+  useEffect(() => {
+    if (!settings) return;
+    setAutoCleanup(settings.fs_enable_tags ? 'enabled' : 'disabled');
+    if (settings.fs_metadata_space_gib) {
+      setRetentionDays(String(Math.max(30, settings.fs_metadata_space_gib)));
+    }
+    if (settings.perm_roles) {
+      const role = Object.keys(settings.perm_roles)[0];
+      setTagPermissions(role ? `${role}-only` : tagPermissions);
+    }
+  }, [settings]);
 
   // Mock tag definitions
   const [tagDefinitions, setTagDefinitions] = useState<TagDefinition[]>([
@@ -249,6 +275,35 @@ export function TagSettingsTab() {
 
   return (
     <div className="flex h-full w-full flex-col gap-6 overflow-auto bg-gradient-to-br from-background via-primary/5 to-background p-8">
+      {settingsError && (
+        <div className="rounded-md border border-destructive/40 bg-destructive/10 px-4 py-2 text-sm text-destructive">
+          {settingsError}
+        </div>
+      )}
+      {settings && (
+        <Card className="border-primary/10 bg-gradient-to-b from-background/80 to-background shadow-lg shadow-primary/10">
+          <CardHeader>
+            <CardTitle className="text-foreground/90 flex items-center gap-2">
+              <FolderTree className="w-5 h-5" />
+              Tag Engine Status
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-wrap gap-4 text-sm">
+            <div className="flex flex-col">
+              <span className="text-xs text-muted-foreground uppercase">Tags Enabled</span>
+              <span>{settings.fs_enable_tags ? 'Yes' : 'No'}</span>
+            </div>
+            <div className="flex flex-col">
+              <span className="text-xs text-muted-foreground uppercase">Metadata Space (GiB)</span>
+              <span>{settings.fs_metadata_space_gib || 'n/a'}</span>
+            </div>
+            <div className="flex flex-col">
+              <span className="text-xs text-muted-foreground uppercase">CLI Access</span>
+              <span>{settings.cluster_allow_cli_access ? 'Allowed' : 'Restricted'}</span>
+            </div>
+          </CardContent>
+        </Card>
+      )}
       {/* Page Header */}
       <div>
         <h1 className="text-foreground/80">File Tag Settings</h1>

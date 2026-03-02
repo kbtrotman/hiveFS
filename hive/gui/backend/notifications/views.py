@@ -4,14 +4,19 @@ from uuid import uuid4
 
 from django.db.models import Q
 from django.utils import timezone
-from rest_framework import mixins, status
+from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet
 
-from .models import Alert, Notification
-from .serializers import AlertSerializer, NotificationSerializer
+from .models import Alert, EmailTarget, Notification, Schedule
+from .serializers import (
+    AlertSerializer,
+    EmailTargetSerializer,
+    NotificationSerializer,
+    ScheduleSerializer,
+)
 
 
 RECENT_DEFAULT_LIMIT = 5
@@ -341,3 +346,30 @@ class AlertViewSet(BaseWorkflowViewSet):
         alerts = Alert.objects.filter(severity__in=severities).order_by("-triggered_at")[:limit]
         serializer = AlertSerializer(alerts, many=True)
         return Response({"results": serializer.data, "filters": {"severity": severities}})
+
+
+class ScheduleViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAuthenticated]
+    serializer_class = ScheduleSerializer
+
+    def get_queryset(self):
+        qs = Schedule.objects.all().order_by("schedule_id")
+        name = self.request.query_params.get("name")
+        if name:
+            qs = qs.filter(schedule_name__icontains=name)
+        return qs
+
+
+class EmailTargetViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAuthenticated]
+    serializer_class = EmailTargetSerializer
+
+    def get_queryset(self):
+        qs = EmailTarget.objects.select_related("schedule").order_by("target_id")
+        schedule_id = self.request.query_params.get("schedule_id")
+        if schedule_id:
+            qs = qs.filter(schedule_id=schedule_id)
+        user_id = self.request.query_params.get("user_id")
+        if user_id:
+            qs = qs.filter(user_id=user_id)
+        return qs

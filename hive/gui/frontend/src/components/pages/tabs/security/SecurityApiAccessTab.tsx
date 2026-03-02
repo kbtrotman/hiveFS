@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../../../ui/card';
 import { Input } from '../../../ui/input';
 import { Label } from '../../../ui/label';
@@ -23,6 +23,7 @@ import {
   Calendar,
   RotateCw,
 } from 'lucide-react';
+import { useApiResource } from '../../../useApiResource';
 
 interface ApiKey {
   id: string;
@@ -38,6 +39,32 @@ interface ApiKey {
   permissions: string[];
   rateLimit: number;
   usageCount: number;
+}
+
+interface SystemUser {
+  id: number;
+  email: string;
+  username: string;
+  first_name: string;
+  last_name: string;
+}
+
+interface MfaRecord {
+  mfa_enabled: boolean;
+  user: number;
+  method: string;
+  secret: string;
+  created_at: string;
+}
+
+interface RoleRecord {
+  role_id: number;
+  name: string;
+}
+
+interface GroupRecord {
+  group_id: number;
+  name: string;
 }
 
 export function SecurityApiAccessTab() {
@@ -67,66 +94,68 @@ export function SecurityApiAccessTab() {
     { id: 'admin:full', label: 'Full Administrative Access', category: 'admin' },
   ];
 
-  // Mock API keys data
-  const [apiKeys, setApiKeys] = useState<ApiKey[]>([
-    {
-      id: '1',
-      name: 'Production Monitoring',
-      description: 'Used by monitoring system for cluster health checks',
-      key: 'hfs_prod_a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6',
-      prefix: 'hfs_prod_a1b2c3',
-      createdAt: '2026-01-15T10:00:00Z',
-      createdBy: 'john.smith@hivefs.com',
-      expiresAt: '2026-04-15T10:00:00Z',
-      lastUsed: '2026-01-25T14:30:00Z',
-      status: 'active',
-      permissions: ['read:cluster', 'read:nodes', 'read:storage'],
-      rateLimit: 1000,
-      usageCount: 45230,
-    },
-    {
-      id: '2',
-      name: 'Automation Scripts',
-      description: 'API key for automated deployment scripts',
-      key: 'hfs_auto_z9y8x7w6v5u4t3s2r1q0p9o8n7m6l5k4',
-      prefix: 'hfs_auto_z9y8x7',
-      createdAt: '2026-01-10T08:00:00Z',
-      createdBy: 'sarah.johnson@hivefs.com',
-      expiresAt: '2026-07-10T08:00:00Z',
-      lastUsed: '2026-01-24T16:45:00Z',
-      status: 'active',
-      permissions: ['read:cluster', 'write:cluster', 'write:nodes'],
-      rateLimit: 500,
-      usageCount: 12450,
-    },
-    {
-      id: '3',
-      name: 'Development Testing',
-      description: 'Test key for development environment',
-      key: 'hfs_dev_m5n6o7p8q9r0s1t2u3v4w5x6y7z8a9b0',
-      prefix: 'hfs_dev_m5n6o7',
-      createdAt: '2025-12-01T12:00:00Z',
-      createdBy: 'michael.chen@hivefs.com',
-      expiresAt: '2026-01-01T12:00:00Z',
-      status: 'expired',
-      permissions: ['read:cluster', 'read:nodes'],
-      rateLimit: 100,
-      usageCount: 8920,
-    },
-    {
-      id: '4',
-      name: 'Legacy Integration',
-      description: 'Old integration that was replaced',
-      key: 'hfs_legacy_c1d2e3f4g5h6i7j8k9l0m1n2o3p4q5r6',
-      prefix: 'hfs_legacy_c1d2e3',
-      createdAt: '2025-11-01T09:00:00Z',
-      createdBy: 'john.smith@hivefs.com',
-      status: 'revoked',
-      permissions: ['read:cluster'],
-      rateLimit: 200,
-      usageCount: 3450,
-    },
-  ]);
+  const {
+    data: users,
+    isLoading: isLoadingUsers,
+  } = useApiResource<SystemUser[]>('accounts', {
+    initialData: [],
+    transform: (payload) => (Array.isArray(payload) ? payload : []),
+  });
+  const {
+    data: mfaRecords,
+    isLoading: isLoadingMfa,
+    error: mfaError,
+  } = useApiResource<MfaRecord[]>('mfa', {
+    initialData: [],
+    transform: (payload) => (Array.isArray(payload) ? payload : []),
+  });
+  const { data: roles } = useApiResource<RoleRecord[]>('roles', {
+    initialData: [],
+    transform: (payload) => (Array.isArray(payload) ? payload : []),
+  });
+  const { data: groups } = useApiResource<GroupRecord[]>('groups', {
+    initialData: [],
+    transform: (payload) => (Array.isArray(payload) ? payload : []),
+  });
+
+  const userLookup = useMemo(() => {
+    const map = new Map<number, SystemUser>();
+    users.forEach((user) => map.set(user.id, user));
+    return map;
+  }, [users]);
+
+  const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
+
+  useEffect(() => {
+    if (!mfaRecords.length) {
+      setApiKeys((prev) => prev.filter((key) => key.id.startsWith('manual-')));
+      return;
+    }
+    setApiKeys((prev) => {
+      const manualKeys = prev.filter((key) => key.id.startsWith('manual-'));
+      const serverKeys = mfaRecords.map((record) => {
+        const owner = userLookup.get(record.user);
+        const displayName =
+          owner && (owner.first_name || owner.last_name)
+            ? `${owner.first_name} ${owner.last_name}`.trim()
+            : owner?.username || owner?.email || `User ${record.user}`;
+        return {
+          id: `server-${record.user}-${record.method}-${record.created_at}`,
+          name: `${displayName} (${record.method || 'token'})`,
+          description: `Issued ${new Date(record.created_at).toLocaleString()}`,
+          key: `hfs_${record.user}_${record.method ?? 'token'}_${record.secret.slice(0, 12)}`,
+          prefix: `hfs_${record.user}_${record.method ?? 'token'}`,
+          createdAt: record.created_at,
+          createdBy: owner?.email ?? 'system',
+          status: record.mfa_enabled ? 'active' : 'revoked',
+          permissions: ['read:cluster'],
+          rateLimit: 1000,
+          usageCount: 0,
+        } satisfies ApiKey;
+      });
+      return [...serverKeys, ...manualKeys];
+    });
+  }, [mfaRecords, userLookup]);
 
   const togglePermission = (permissionId: string) => {
     setSelectedPermissions((prev) =>
@@ -145,7 +174,7 @@ export function SecurityApiAccessTab() {
     expirationDate.setDate(expirationDate.getDate() + parseInt(newKeyExpiration));
 
     const apiKey: ApiKey = {
-      id: Date.now().toString(),
+      id: `manual-${Date.now()}`,
       name: newKeyName,
       description: newKeyDescription,
       key: newKey,
@@ -234,6 +263,9 @@ export function SecurityApiAccessTab() {
     (k) => k.status === 'active' && isExpiringSoon(k.expiresAt)
   ).length;
   const revokedKeys = apiKeys.filter((k) => k.status === 'revoked').length;
+  const totalUsers = users.length;
+  const totalRoles = roles.length;
+  const totalGroups = groups.length;
 
   return (
     <div className="flex h-full w-full flex-col gap-6 overflow-auto bg-gradient-to-br from-background via-primary/5 to-background p-8">
@@ -244,6 +276,12 @@ export function SecurityApiAccessTab() {
           Manage API keys for programmatic access to HiveFS RESTful API
         </p>
       </div>
+
+      {mfaError && (
+        <div className="rounded-md border border-destructive/40 bg-destructive/10 px-4 py-2 text-sm text-destructive">
+          {mfaError}
+        </div>
+      )}
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-4">
@@ -294,6 +332,9 @@ export function SecurityApiAccessTab() {
           </CardContent>
         </Card>
       </div>
+      <p className="text-xs text-muted-foreground">
+        Directory stats • Users: {totalUsers} • Roles: {totalRoles} • Groups: {totalGroups}
+      </p>
 
       {/* Newly Created Key Alert */}
       {newlyCreatedKey && (
