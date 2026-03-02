@@ -79,6 +79,14 @@ export function ServersPerformanceTab() {
     () => buildNetworkSeries(stats, 's_net_in', 's_net_out'),
     [stats],
   );
+  const kvPutSeries = useMemo(
+    () => buildNodeSeriesData(stats, (stat) => safeNumber(stat.kv_putblock_ps as number | null)),
+    [stats],
+  );
+  const kvBytesSeries = useMemo(
+    () => buildNodeSeriesData(stats, (stat) => safeNumber(stat.kv_putblock_bytes as number | null)),
+    [stats],
+  );
 
   const cards = [
     {
@@ -170,24 +178,53 @@ export function ServersPerformanceTab() {
           series={clusterInterfaceSeries.series}
           isLoading={isLoading}
         />
+        <PerformanceChart
+          title="Key-Value Store Blocks Put/sec"
+          description="Per-node KV block puts per second"
+          data={kvPutSeries.data}
+          series={kvPutSeries.series}
+          isLoading={isLoading}
+        />
+        <PerformanceChart
+          title="Key-Value Store Bytes/Sec"
+          description="Per-node KV throughput (bytes/sec)"
+          data={kvBytesSeries.data}
+          series={kvBytesSeries.series}
+          isLoading={isLoading}
+        />
       </div>
 
       {/* Additional Metrics */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <Card>
           <CardHeader>
-            <CardTitle>Latency Overview</CardTitle>
+            <CardTitle>Key-Value Store Overview</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="space-y-3">
-              <MetricRow label="Avg Read" value={`${formatNumber(summary.avgLatency)} ms`} />
+              <MetricRow label="KV Put Calls" value={formatNumber(sumStatField(aggregated, 'kv_putblock_calls'))} />
+              <MetricRow label="KV Dedup Hits" value={formatNumber(sumStatField(aggregated, 'kv_putblock_dedup_hits'))} />
               <MetricRow
-                label="Avg Write"
-                value={`${formatNumber(sumStatField(aggregated, 'avg_wr_latency') / (aggregated.length || 1))} ms`}
+                label="KV Dedup Misses"
+                value={formatNumber(sumStatField(aggregated, 'kv_putblock_dedup_misses'))}
               />
               <MetricRow
-                label="Meta Ops/s"
-                value={`${formatNumber(sumStatField(aggregated, 'meta_chan_ps'))}`}
+                label="KV Writes"
+                value={formatNumber(sumStatField(aggregated, 'kv_rocksdb_writes'))}
+              />
+              <MetricRow
+                label="KV Write Time"
+                value={`${formatNumber(sumStatField(aggregated, 'kv_rocksdb_write_ns') / 1e6, {
+                  maximumFractionDigits: 2,
+                })} ms`}
+              />
+              <MetricRow
+                label="Contiguous Write Calls"
+                value={formatNumber(sumStatField(aggregated, 'contig_write_calls'))}
+              />
+              <MetricRow
+                label="Contiguous Write Bytes"
+                value={`${formatNumber(sumStatField(aggregated, 'contig_write_bytes'))} B`}
               />
               <MetricRow label="Last Sample" value={lastUpdated ? formatTimestamp(lastUpdated) : '—'} />
             </div>
