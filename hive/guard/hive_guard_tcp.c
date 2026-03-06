@@ -1183,6 +1183,14 @@ static bool handle_volume_block_put(Client *c, const JVal *root)
 		return send_error_json(c->fd, "bad_request", "invalid hash");
 	}
 
+	/* Keep the receive path explicit: validate first, then leader check,
+	 * then queue the request so apply-time can deliver the ack. This avoids
+	 * registering a pending ack only to immediately cancel it on followers. */
+	if (!hg_guard_local_can_write()) {
+		free(blob);
+		return send_error_json(c->fd, "not_leader", "forward to leader");
+	}
+
 	if (!pending_write_register(c->fd, volume_id, block_no, hash_bytes)) {
 		free(blob);
 		return send_error_json(c->fd, "server_busy", "unable to queue write ack");
@@ -1258,6 +1266,14 @@ static bool handle_volume_block_put_contig(Client *c, const JVal *root)
 		(const struct hifs_block_hash_wire *)(blob + meta_len);
 	cursor = blob + meta_len + hash_bytes;
 	data_len = blob_len - meta_len - hash_bytes;
+
+	/* Same phase split as the single-block path: validate the payload batch,
+	 * confirm we are allowed to propose locally, then hand blocks off to the
+	 * write path that will eventually drive Raft commit/apply. */
+	if (!hg_guard_local_can_write()) {
+		free(blob);
+		return send_error_json(c->fd, "not_leader", "forward to leader");
+	}
 
 	/* TODO: Once the writer is working well, this needs to be changed. here
 	 * it currently iterates through blocks and writes each individually.

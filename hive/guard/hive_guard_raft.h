@@ -417,6 +417,14 @@ void hg_raft_shutdown(void);
 
 /* Helper: is this node currently the Raft leader? */
 bool hg_guard_local_can_write(void);
+
+/* Local scaffold until libraft is fully wired:
+ * propose -> mark committed -> apply in log order.
+ * The submit helpers below intentionally hide commit/apply so callers stop
+ * treating commit callbacks as the only place where real work happens. */
+int hg_raft_submit_cmd_sync(const struct RaftCmd *cmd, uint64_t *out_index);
+uint64_t hg_raft_last_committed_index(void);
+uint64_t hg_raft_last_applied_index(void);
 int hifs_raft_submit_put_block(const struct RaftPutBlock *cmd);
 int hifs_raft_submit_put_dirent(const struct RaftPutDirent *cmd);
 int hifs_raft_submit_session(const struct RaftPutSession *session);

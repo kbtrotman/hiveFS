@@ -117,8 +117,10 @@ bool hifs_volume_inode_store(uint64_t volume_id,
 bool hifs_volume_block_load(uint64_t volume_id, uint64_t block_no,
                             uint8_t *buf, uint32_t *len);
 bool hifs_volume_block_send(uint64_t volume_id, uint64_t block_no,
-                             const uint8_t *buf, uint32_t len,
-			     const uint8_t *hash, uint8_t hash_algo);
+			     const uint8_t *buf, uint32_t len,
+			     const uint8_t *hash, uint8_t hash_algo,
+			     const uint8_t *stripe_id, uint8_t stripe_id_algo,
+			     uint32_t placement_epoch);
 bool hifs_contig_block_send(uint64_t volume_id, uint64_t block_start,
 			    const uint32_t *lengths, size_t block_count,
 			    const uint8_t *data, size_t data_len,

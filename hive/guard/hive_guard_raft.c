@@ -51,11 +51,7 @@ static pthread_mutex_t      g_state_mu = PTHREAD_MUTEX_INITIALIZER;
 static int                  g_is_leader = 0;
 static int                  g_should_stop = 0;
 static pthread_mutex_t      g_log_mu = PTHREAD_MUTEX_INITIALIZER;
-#if defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 201112L)
-static _Thread_local uint64_t g_thread_committed_index;
-#else
-static __thread uint64_t g_thread_committed_index;
-#endif
+static pthread_cond_t       g_log_cv = PTHREAD_COND_INITIALIZER;
 
 struct raft_log_state {
     struct RaftCmd *entries;
@@ -64,6 +60,7 @@ struct raft_log_state {
     size_t          size;
     uint64_t        next_index;
     uint64_t        committed_index;
+    uint64_t        applied_index;
 };
 
 static struct raft_log_state g_raft_log = {
@@ -73,6 +70,7 @@ static struct raft_log_state g_raft_log = {
     .size = 0,
     .next_index = 1,
     .committed_index = 0,
+    .applied_index = 0,
 };
 
 static pthread_mutex_t g_snap_mu = PTHREAD_MUTEX_INITIALIZER;
@@ -100,7 +98,11 @@ static size_t g_token_count;
 static size_t g_token_capacity;
 
 static int raft_log_append_entry(const struct RaftCmd *cmd, uint64_t *out_idx);
-static int raft_log_commit_up_to(uint64_t idx);
+static int raft_log_mark_committed_up_to(uint64_t idx);
+static int raft_log_apply_ready_entries(void);
+static int hg_raft_submit_entry_sync(const struct RaftCmd *entry, uint64_t *out_idx);
+static int hg_raft_apply_cmd(const struct RaftCmd *cmd, uint64_t log_index);
+static int hg_raft_on_commit(uint64_t idx);
 
 static void hg_guard_session_remove_locked(size_t idx)
 {
@@ -122,12 +124,7 @@ int hifs_raft_submit_session(const struct RaftPutSession *session)
     struct RaftCmd entry = {0};
     entry.op_type = HG_OP_PUT_SESSION;
     entry.u.session_put = *session;
-
-    uint64_t idx = 0;
-    int rc = raft_log_append_entry(&entry, &idx);
-    if (rc != 0)
-        return rc;
-    return raft_log_commit_up_to(idx);
+    return hg_raft_submit_entry_sync(&entry, NULL);
 }
 
 static int hg_guard_session_store(const struct RaftPutSession *session)
@@ -739,7 +736,7 @@ raft_put_block_serialize(const struct RaftPutBlock *cmd,
 
     struct RaftCmd rcmd = {0};
     rcmd.op_type = HG_OP_PUT_BLOCK;
-    rcmd.u.block = *cmd;
+    rcmd->u.block = *cmd;
 
     out_buf->len = sizeof(struct RaftCmd);
     out_buf->base = (char *)malloc(out_buf->len);
@@ -761,7 +758,7 @@ raft_put_inode_serialize(const struct RaftPutInode *cmd,
 
     struct RaftCmd rcmd = {0};
     rcmd.op_type   = HG_OP_PUT_INODE;
-    rcmd.u.inode   = *cmd;
+    rcmd->u.inode   = *cmd;
 
     out_buf->len = sizeof(struct RaftCmd);
     out_buf->base = (char *)malloc(out_buf->len);
@@ -787,9 +784,10 @@ static int raft_put_deserialize(struct RaftCmd *cmd,
 }
 
 static int __attribute__((unused))
-commitCb(struct uv_raft *raft,
-         int type,
-         const uv_buf_t *buf)
+hg_raft_apply_cb(struct uv_raft *raft,
+                 int type,
+                 const uv_buf_t *buf,
+                 uint64_t log_index)
 {
     (void)raft;
 
@@ -801,10 +799,18 @@ commitCb(struct uv_raft *raft,
     if (raft_put_deserialize(&cmd, buf) != 0)
         return 0;
 
-    switch (cmd.op_type) {
+    return hg_raft_apply_cmd(&cmd, log_index);
+}
+
+static int hg_raft_apply_cmd(const struct RaftCmd *cmd, uint64_t log_index)
+{
+    if (!cmd)
+        return -EINVAL;
+
+    switch (cmd->op_type) {
 
     case HG_OP_PUT_INODE: {
-        const struct RaftPutInode *pi = &cmd.u.inode;
+        const struct RaftPutInode *pi = &cmd->u.inode;
         if (!hifs_volume_inode_store(pi->volume_id, &pi->inode))
             return -EIO;
         if (pi->fp_index < HIFS_MAX_BLOCK_HASHES) {
@@ -822,20 +828,23 @@ commitCb(struct uv_raft *raft,
     }
 
     case HG_OP_PUT_BLOCK: {
+        /* Apply-time is now the only place that mutates state for this entry.
+         * The heavy data-plane work below is still a placeholder and should
+         * eventually move behind deterministic metadata decisions. */
         ///// THIS NEEDS TO BE CHANGED TO HANDLE STRIPE LOCATIONS ////
         ///// BASED ON ERASURE CODING ////////////////////////////////
         /////////////////////////////////////////////////////////////
         ///// THE FOLLOWING IS A TEMPORARY PLACEHOLDER //////////////
         /////// FOR TESTING PURPOSES ONLY //////////////////////////
-        hg_kv_apply_put_block(&cmd.u.block); /////TESTING ONLY/////
+        hg_kv_apply_put_block(&cmd->u.block); /////TESTING ONLY/////
         ////////////////////////////////////////////////////////////
         struct stripe_location locs[HIFS_EC_STRIPES];
         for (size_t i = 0; i < HIFS_EC_STRIPES; ++i) {
             locs[i].stripe_index = i;
-            locs[i].storage_node_id = cmd.u.block.ec_stripes[i].storage_node_id;
-            locs[i].shard_id = cmd.u.block.ec_stripes[i].shard_id;
-            locs[i].estripe_id = cmd.u.block.ec_stripes[i].estripe_id;
-            locs[i].block_offset = cmd.u.block.ec_stripes[i].block_offset;
+            locs[i].storage_node_id = cmd->u.block.ec_stripes[i].storage_node_id;
+            locs[i].shard_id = cmd->u.block.ec_stripes[i].shard_id;
+            locs[i].estripe_id = cmd->u.block.ec_stripes[i].estripe_id;
+            locs[i].block_offset = cmd->u.block.ec_stripes[i].block_offset;
         }
 
         // TODO:
@@ -846,31 +855,31 @@ commitCb(struct uv_raft *raft,
             /* This is the driod we're looking for */
 
             // Commented out for testing purposes only.
-            //hg_kv_apply_put_block(storage_node_id, &cmd.u.block); 
+            //hg_kv_apply_put_block(storage_node_id, &cmd->u.block); 
 
-            hifs_store_block_to_stripe_locations(cmd.u.block.volume_id,
-                                            cmd.u.block.block_no,
-                                            cmd.u.block.hash_algo,
-                                            cmd.u.block.hash,
+            hifs_store_block_to_stripe_locations(cmd->u.block.volume_id,
+                                            cmd->u.block.block_no,
+                                            cmd->u.block.hash_algo,
+                                            cmd->u.block.hash,
                                             locs,
                                             HIFS_EC_STRIPES);
         }
         
-        hifs_guard_notify_write_ack(cmd.u.block.volume_id,
-                                    cmd.u.block.block_no,
-                                    cmd.u.block.hash,
+        hifs_guard_notify_write_ack(cmd->u.block.volume_id,
+                                    cmd->u.block.block_no,
+                                    cmd->u.block.hash,
                                     HIFS_BLOCK_HASH_SIZE);
         return 0;
     }
     case HG_OP_PUT_DIRENT: {
-        const struct RaftPutDirent *pd = &cmd.u.dirent;
+        const struct RaftPutDirent *pd = &cmd->u.dirent;
         if (!hifs_volume_dentry_store(pd->volume_id,
                                       (const struct hifs_volume_dentry *)&pd->dirent))
             return -EIO;
         return 0;
     }
     case HG_OP_PUT_SETTING:
-        return hg_guard_setting_store(&cmd.u.setting);
+        return hg_guard_setting_store(&cmd->u.setting);
 
     case HG_OP_PUT_CLUSTER_CERT:
 
@@ -883,18 +892,18 @@ commitCb(struct uv_raft *raft,
     case HG_OP_DELETE_INODE:
 
     case HG_OP_PUT_SESSION:
-        return hg_guard_session_store(&cmd.u.session_put);
+        return hg_guard_session_store(&cmd->u.session_put);
 
     case HG_OP_SESSION_CLEANUP:
-        return hg_guard_session_cleanup(&cmd.u.session_cleanup);
+        return hg_guard_session_cleanup(&cmd->u.session_cleanup);
 
     case HG_OP_SET_NODE_FULL_SYNC: {
-        (void)cmd.u.node_full_sync;
+        (void)cmd->u.node_full_sync;
         return 0;
     }
 
     case HG_OP_PUT_JOIN_NODE: {
-        const struct RaftJoinSec *src = &cmd.u.join_sec;
+        const struct RaftJoinSec *src = &cmd->u.join_sec;
         struct hive_guard_sock_join_sec req = {0};
 
         req.cluster_id = src->cluster_id;
@@ -924,56 +933,56 @@ commitCb(struct uv_raft *raft,
     }
 
     case HG_OP_PUT_NODE_DOWN: {
-        (void)cmd.u.node_down;
+        (void)cmd->u.node_down;
         return 0;
     }
 
     case HG_OP_CLUSTER_NODE_UP: {
-        (void)cmd.u.cluster_node_up;
+        (void)cmd->u.cluster_node_up;
         return 0;
     }
 
     case HG_OP_CLUSTER_FORCE_HEARTBEAT: {
-        (void)cmd.u.cluster_force_heartbeat;
+        (void)cmd->u.cluster_force_heartbeat;
         return 0;
     }
 
     case HG_OP_CLUSTER_DOWN: {
-        (void)cmd.u.cluster_down;
+        (void)cmd->u.cluster_down;
         return 0;
     }
 
     case HG_OP_CLUSTER_UP: {
-        (void)cmd.u.cluster_up;
+        (void)cmd->u.cluster_up;
         return 0;
     }
 
     case HG_OP_CLUSTER_INIT: {
-        (void)cmd.u.cluster_init;
+        (void)cmd->u.cluster_init;
         return 0;
     }
 
     case HG_OP_CLUSTER_NODE_FENCE: {
-        (void)cmd.u.cluster_node_fence;
+        (void)cmd->u.cluster_node_fence;
         return 0;
     }
 
     case HG_OP_SET_NODE_TO_LEARNER: {
-        (void)cmd.u.node_to_learner;
+        (void)cmd->u.node_to_learner;
         return 0;
     }
 
     case HG_OP_LEASE_MAKE:
-        return hg_leasing_apply_lease_make(&cmd.u.lease);
+        return hg_leasing_apply_lease_make(&cmd->u.lease);
 
     case HG_OP_LEASE_RENEW:
-        return hg_leasing_apply_lease_renew(&cmd.u.lease);
+        return hg_leasing_apply_lease_renew(&cmd->u.lease);
 
     case HG_OP_LEASE_RELEASE:
-        return hg_leasing_apply_lease_release(&cmd.u.lease);
+        return hg_leasing_apply_lease_release(&cmd->u.lease);
 
     case HG_OP_NEW_TOKEN: {
-        int rc = hg_sql_update_token_entry(&cmd.u.new_token.meta);
+        int rc = hg_sql_update_token_entry(&cmd->u.new_token.meta);
         if (rc != 0)
             return rc;
 
@@ -981,14 +990,14 @@ commitCb(struct uv_raft *raft,
         if (rc != 0) {
             hifs_warning("hg_guard_refresh_tokens_from_sql failed rc=%d, using local token cache",
                          rc);
-            int store_rc = hg_guard_token_store(&cmd.u.new_token);
+            int store_rc = hg_guard_token_store(&cmd->u.new_token);
             return store_rc != 0 ? store_rc : rc;
         }
         return 0;
     }
 
     case HG_OP_EXPIRE_TOKEN:
-        return hg_guard_token_expire(&cmd.u.expire_token);
+        return hg_guard_token_expire(&cmd->u.expire_token);
 
     case HG_OP_CACHE_CHECK:
 
@@ -999,15 +1008,16 @@ commitCb(struct uv_raft *raft,
     case HG_OP_CACHE_PURGE:
 
     case HG_OP_SNAPSHOT_MARK: {
+        /* This still performs leader-style side effects during apply.
+         * Next step: keep only deterministic marker persistence here and move
+         * artifact creation to a leader-only worker triggered after apply. */
         MYSQL *db = hg_sql_get_db();
         if (!db) return -EIO;
 
-        const uint64_t snap_id = cmd.u.snapshot.snap_id;
+        const uint64_t snap_id = cmd->u.snapshot.snap_id;
 
-        /* Commit loop copies the index into a thread-local so each callback sees
-         * the entry it is applying even when multiple threads are advancing the
-         * log concurrently. */
-        const uint64_t snap_index = g_thread_committed_index;
+        /* Apply-time work must use the exact log index being applied. */
+        const uint64_t snap_index = log_index;
 
         // 1) Persist marker row (your existing bookkeeping function)
         int rc = hg_sql_snapshot_take(db, snap_id, snap_index);
@@ -1052,7 +1062,7 @@ commitCb(struct uv_raft *raft,
 
     case HG_OP_STORAGE_NODE_UPDATE: {
         const struct hive_guard_storage_update_cmd *su =
-            &cmd.u.storage_update;
+            &cmd->u.storage_update;
         hive_guard_apply_storage_node_update(su);
         return 0;
     }
@@ -1060,6 +1070,16 @@ commitCb(struct uv_raft *raft,
     default:
         return hg_raft_handle_unimplemented(&cmd);
     }
+    return 0;
+}
+
+static int hg_raft_on_commit(uint64_t idx)
+{
+    /* Keep commit-time work intentionally light. In the real libraft
+     * integration this is the point where waiters would be signaled and an
+     * apply worker would be nudged forward. */
+    (void)idx;
+    pthread_cond_broadcast(&g_log_cv);
     return 0;
 }
 
@@ -1126,15 +1146,12 @@ static int raft_log_append_entry(const struct RaftCmd *cmd, uint64_t *out_idx)
     return 0;
 }
 
-static int raft_log_commit_up_to(uint64_t idx)
+static int raft_log_mark_committed_up_to(uint64_t idx)
 {
     if (idx == 0)
         return -EINVAL;
 
-    uint64_t committed_idx = 0;
     for (;;) {
-        struct RaftCmd entry;
-
         pthread_mutex_lock(&g_log_mu);
         uint64_t highest = g_raft_log.next_index ? (g_raft_log.next_index - 1) : 0;
         if (idx > highest) {
@@ -1143,7 +1160,28 @@ static int raft_log_commit_up_to(uint64_t idx)
         }
         if (g_raft_log.committed_index >= idx) {
             pthread_mutex_unlock(&g_log_mu);
-            break;
+            return 0;
+        }
+        g_raft_log.committed_index++;
+        uint64_t committed_idx = g_raft_log.committed_index;
+        pthread_mutex_unlock(&g_log_mu);
+
+        int rc = hg_raft_on_commit(committed_idx);
+        if (rc != 0)
+            return rc;
+    }
+}
+
+static int raft_log_apply_ready_entries(void)
+{
+    for (;;) {
+        struct RaftCmd entry;
+        uint64_t apply_idx = 0;
+
+        pthread_mutex_lock(&g_log_mu);
+        if (g_raft_log.applied_index >= g_raft_log.committed_index) {
+            pthread_mutex_unlock(&g_log_mu);
+            return 0;
         }
         if (g_raft_log.size == 0) {
             pthread_mutex_unlock(&g_log_mu);
@@ -1153,25 +1191,69 @@ static int raft_log_commit_up_to(uint64_t idx)
         entry = g_raft_log.entries[g_raft_log.head];
         g_raft_log.head++;
         g_raft_log.size--;
-        g_raft_log.committed_index++;
-        committed_idx = g_raft_log.committed_index;
+        g_raft_log.applied_index++;
+        apply_idx = g_raft_log.applied_index;
         if (g_raft_log.size == 0)
             g_raft_log.head = 0;
         pthread_mutex_unlock(&g_log_mu);
 
-        g_thread_committed_index = committed_idx;
         uv_buf_t buf = {
             .base = (char *)&entry,
             .len = sizeof(entry),
         };
-        int rc = commitCb(NULL, RAFT_COMMAND, &buf);
+        int rc = hg_raft_apply_cb(NULL, RAFT_COMMAND, &buf, apply_idx);
         if (rc != 0)
             return rc;
     }
+}
 
+static int hg_raft_submit_entry_sync(const struct RaftCmd *entry, uint64_t *out_idx)
+{
+    if (!entry)
+        return -EINVAL;
+
+    uint64_t idx = 0;
+    int rc = raft_log_append_entry(entry, &idx);
+    if (rc != 0)
+        return rc;
+
+    rc = raft_log_mark_committed_up_to(idx);
+    if (rc != 0)
+        return rc;
+
+    rc = raft_log_apply_ready_entries();
+    if (rc != 0)
+        return rc;
+
+    if (out_idx)
+        *out_idx = idx;
     return 0;
 }
 
+int hg_raft_submit_cmd_sync(const struct RaftCmd *cmd, uint64_t *out_index)
+{
+    if (!cmd)
+        return -EINVAL;
+    if (!hg_guard_local_can_write())
+        return -EAGAIN;
+    return hg_raft_submit_entry_sync(cmd, out_index);
+}
+
+uint64_t hg_raft_last_committed_index(void)
+{
+    pthread_mutex_lock(&g_log_mu);
+    uint64_t idx = g_raft_log.committed_index;
+    pthread_mutex_unlock(&g_log_mu);
+    return idx;
+}
+
+uint64_t hg_raft_last_applied_index(void)
+{
+    pthread_mutex_lock(&g_log_mu);
+    uint64_t idx = g_raft_log.applied_index;
+    pthread_mutex_unlock(&g_log_mu);
+    return idx;
+}
 
 int hifs_raft_submit_put_block(const struct RaftPutBlock *cmd)
 {
@@ -1184,13 +1266,7 @@ int hifs_raft_submit_put_block(const struct RaftPutBlock *cmd)
     struct RaftCmd entry = {0};
     entry.op_type = HG_OP_PUT_BLOCK;
     entry.u.block = *cmd;
-
-    uint64_t idx = 0;
-    int rc = raft_log_append_entry(&entry, &idx);
-    if (rc != 0)
-        return rc;
-
-    return raft_log_commit_up_to(idx);
+    return hg_raft_submit_entry_sync(&entry, NULL);
 }
 
 int hifs_raft_submit_put_dirent(const struct RaftPutDirent *cmd)
@@ -1203,12 +1279,7 @@ int hifs_raft_submit_put_dirent(const struct RaftPutDirent *cmd)
     struct RaftCmd entry = {0};
     entry.op_type = HG_OP_PUT_DIRENT;
     entry.u.dirent = *cmd;
-
-    uint64_t idx = 0;
-    int rc = raft_log_append_entry(&entry, &idx);
-    if (rc != 0)
-        return rc;
-    return raft_log_commit_up_to(idx);
+    return hg_raft_submit_entry_sync(&entry, NULL);
 }
 
 int hifs_raft_submit_join_sec(const struct hive_guard_join_context *ctx)
@@ -1255,12 +1326,7 @@ int hifs_raft_submit_join_sec(const struct hive_guard_join_context *ctx)
 
     dst->raft_replay = ctx->raft_replay;
     dst->reserved_i32 = 0;
-
-    uint64_t idx = 0;
-    int rc = raft_log_append_entry(&entry, &idx);
-    if (rc != 0)
-        return rc;
-    return raft_log_commit_up_to(idx);
+    return hg_raft_submit_entry_sync(&entry, NULL);
 }
 
 // raft snapshot instance:
@@ -1272,13 +1338,7 @@ int hifs_raft_submit_snapshot_mark(uint64_t snap_id)
     struct RaftCmd entry = {0};
     entry.op_type = HG_OP_SNAPSHOT_MARK;
     entry.u.snapshot.snap_id = snap_id;
-
-    uint64_t idx = 0;
-    int rc = raft_log_append_entry(&entry, &idx);
-    if (rc != 0)
-        return rc;
-
-    return raft_log_commit_up_to(idx);
+    return hg_raft_submit_entry_sync(&entry, NULL);
 }
 
 int hifs_raft_submit_storage_update(const struct hive_guard_storage_update_cmd *cmd)
@@ -1291,13 +1351,7 @@ int hifs_raft_submit_storage_update(const struct hive_guard_storage_update_cmd *
     struct RaftCmd entry = {0};
     entry.op_type = HG_OP_STORAGE_NODE_UPDATE;
     entry.u.storage_update = *cmd;
-
-    uint64_t idx = 0;
-    int rc = raft_log_append_entry(&entry, &idx);
-    if (rc != 0)
-        return rc;
-
-    return raft_log_commit_up_to(idx);
+    return hg_raft_submit_entry_sync(&entry, NULL);
 }
 
 static int hg_wait_local_snapshot_ready(uint64_t snap_id,
@@ -1468,10 +1522,5 @@ int hg_raft_call_update_token(const struct hive_guard_token_metadata *meta)
                      hg_token_metadata_pick_uid(meta));
     hg_raft_copy_str(dst->token, sizeof(dst->token), meta->bootstrap_token);
     dst->meta = *meta;
-
-    uint64_t idx = 0;
-    int rc = raft_log_append_entry(&entry, &idx);
-    if (rc != 0)
-        return rc;
-    return raft_log_commit_up_to(idx);
+    return hg_raft_submit_entry_sync(&entry, NULL);
 }

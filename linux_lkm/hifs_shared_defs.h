@@ -413,6 +413,33 @@ struct hifs_extent_wire {
 struct hifs_inode
 {
 	//const struct super_block	i_sb;      /* Superblock position */
+#ifdef __KERNEL__
+	size_t		i_runtime_dirty_bytes;
+	unsigned long	i_runtime_last_sync;
+	__le32		i_cached_epoch;
+	__le32      i_epoch;
+	__le8		i_version;	/* layout version */
+	__le8		i_flags;	/* inode flags: TYPE */
+	__le32		i_mode;		/* File mode */
+	__le64		i_ino;		/* inode number */
+	__le16_t	i_uid;		/* owner's user id */
+	__le16_t	i_gid;		/* owner's group id */
+	__le16_t	i_hrd_lnk;	/* number of hard links */
+	__le32    	i_atime; /* Archive Time */
+	__le32		i_mtime; /* Modified Time */
+	__le32		i_ctime; /* Creation Time */
+	__le64 		i_size;	 /* Number of bytes in file */
+	char    	i_name[HIFS_MAX_NAME_SIZE]; /* File name */
+	//void		*i_private;  /* Private/Unpublished filesystrem member */
+	//const struct inode_operations	i_op;       /* operation */
+	//const struct file_operations	i_fop;	      /* file operation */
+	struct 	hifs_extent extents[HIFS_INODE_TSIZE];
+	__le32		i_blocks;	/* Number of blocks */
+	__le32		i_bytes;	/* Number of bytes */
+	__le8		i_links;    /* Number of links to an inode */
+	__le32	    i_use_count;
+#else
+	// 1st 2 fields replaced by cache system in kernel
     uint32_t    i_epoch;	/* host-order epoch/version */
 	uint8_t		i_version;	/* layout version */
 	uint8_t		i_flags;	/* inode flags: TYPE */
@@ -424,7 +451,7 @@ struct hifs_inode
 	uint32_t    i_atime; /* Archive Time */
 	uint32_t	i_mtime; /* Modified Time */
 	uint32_t	i_ctime; /* Creation Time */
-	uint32_t	i_size;		/* Number of bytes in file */
+	uint64_t 	i_size;	 /* Number of bytes in file */
 	char    	i_name[HIFS_MAX_NAME_SIZE]; /* File name */
 	//void		*i_private;  /* Private/Unpublished filesystrem member */
 	//const struct inode_operations	i_op;       /* operation */
@@ -439,10 +466,7 @@ struct hifs_inode
 	uint16_t	i_hash_head;
 	uint32_t	i_cache_epoch; /* epoch of the last time this inode was cached on disk */
 	uint32_t	i_placement_epoch; /* epoch of the last time this inode was synced to disk */
-#ifdef __KERNEL__
-	size_t		i_runtime_dirty_bytes;
-	unsigned long	i_runtime_last_sync;
-	uint32_t	i_cached_epoch;
+	uint32_t	i_use_count;  /* number of times used, when zero, the block can be moved to versioning repo for later cleanup */
 #endif
 };
 
@@ -702,6 +726,7 @@ struct hifs_volume_superblock {
     __le32 s_rev_level;   /* epoch/generation */
     __le32 s_wtime;       /* last write time (epoch) */
     __le32 s_flags;       /* optional flags */
+	__le32 s_generational_epoch; /* epoch for generation of this superblock */	
 #else
     uint32_t s_magic;
     uint32_t s_blocksize;
@@ -718,6 +743,7 @@ struct hifs_volume_superblock {
     uint32_t s_rev_level;
     uint32_t s_wtime;
     uint32_t s_flags;
+	uint32_t s_generational_epoch;
 #endif
     char     s_volume_name[16]; /* optional label */
 };
@@ -884,7 +910,7 @@ struct hifs_inode_wire {
     __le32 i_atime;
     __le32 i_mtime;
     __le32 i_ctime;
-    __le32 i_size;
+    __le64 i_size;
     __u8  i_name[HIFS_MAX_NAME_SIZE];
     struct hifs_extent_wire extents[HIFS_INODE_TSIZE];
     __le32 i_blocks;
@@ -908,7 +934,7 @@ struct hifs_inode_wire {
     uint32_t i_atime;
     uint32_t i_mtime;
     uint32_t i_ctime;
-    uint32_t i_size;
+    uint64_t i_size;
     uint8_t  i_name[HIFS_MAX_NAME_SIZE];
     struct hifs_extent_wire extents[HIFS_INODE_TSIZE];
     uint32_t i_blocks;

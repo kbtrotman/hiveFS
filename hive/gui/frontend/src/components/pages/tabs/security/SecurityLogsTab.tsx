@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../../../ui/card';
 import { Input } from '../../../ui/input';
 import { Label } from '../../../ui/label';
@@ -18,7 +18,6 @@ import {
   XCircle,
   Bug,
   Filter,
-  Download,
   Mail,
   Bell,
   CheckSquare,
@@ -29,7 +28,7 @@ import {
   Package,
   Activity,
 } from 'lucide-react';
-import { useApiResource } from '../../../useApiResource';
+import { API_BASE, useApiResource } from '../../../useApiResource';
 interface LogEntry {
   id: string;
   timestamp: string;
@@ -41,6 +40,15 @@ interface LogEntry {
   stackTrace?: string;
   metadata?: Record<string, any>;
 }
+
+const LOG_SOURCES = [
+  { label: 'Hive Guard (legacy)', key: 'hive_guard_log' },
+  { label: 'Hive Bootstrap (legacy)', key: 'hive_bootstrap_log' },
+  { label: 'Hive Guard SQL', key: 'hive_guard_sql_log' },
+  { label: 'Hive Guard', key: 'hive_guard.log' },
+  { label: 'Hive Bootstrap', key: 'hive_bootstrap.log' },
+];
+const LOG_SOURCE_KEYS = new Set(LOG_SOURCES.map((log) => log.key));
 
 interface User {
   id: string;
@@ -71,7 +79,7 @@ interface AccountRecord {
 
 export function SecurityLogsTab() {
   const [filterLevel, setFilterLevel] = useState<string>('all');
-  const [filterSource, setFilterSource] = useState<string>('all');
+  const [selectedLogSource, setSelectedLogSource] = useState<string>('all');
   const [filterNode, setFilterNode] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedLogs, setExpandedLogs] = useState<string[]>([]);
@@ -81,19 +89,16 @@ export function SecurityLogsTab() {
   const [showNotificationDialog, setShowNotificationDialog] = useState(false);
   const [exportRecipients, setExportRecipients] = useState<string[]>([]);
   const [exportIncludeSupport, setExportIncludeSupport] = useState(false);
+  const [logContent, setLogContent] = useState<Record<string, string>>({});
+  const [logMeta, setLogMeta] = useState<Record<string, { truncated: boolean }>>({});
+  const [logLoading, setLogLoading] = useState(false);
+  const [logError, setLogError] = useState<string | null>(null);
 
-  const {
-    data: auditEntries,
-    isLoading: isLoadingLogs,
-    error: logsError,
-  } = useApiResource<AuditEntryRecord[]>('audit?limit=200', {
+  const { data: auditEntries } = useApiResource<AuditEntryRecord[]>('audit?limit=200', {
     initialData: [],
     transform: (payload) => (Array.isArray(payload) ? payload : []),
   });
-  const {
-    data: accountRecords,
-    isLoading: isLoadingAccounts,
-  } = useApiResource<AccountRecord[]>('accounts', {
+  const { data: accountRecords } = useApiResource<AccountRecord[]>('accounts', {
     initialData: [],
     transform: (payload) => (Array.isArray(payload) ? payload : []),
   });
@@ -111,6 +116,117 @@ export function SecurityLogsTab() {
       })),
     [accountRecords],
   );
+
+  const isLogViewerActive = selectedLogSource === 'all' || LOG_SOURCE_KEYS.has(selectedLogSource);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadLogs = async () => {
+      if (!isLogViewerActive) {
+        setLogLoading(false);
+        setLogError(null);
+        return;
+      }
+
+      const keysToFetch =
+        selectedLogSource === 'all'
+          ? LOG_SOURCES.map((source) => source.key)
+          : [selectedLogSource];
+      const missingKeys = keysToFetch.filter((key) => !logContent[key]);
+      if (!missingKeys.length) {
+        setLogLoading(false);
+        setLogError(null);
+        return;
+      }
+
+      setLogLoading(true);
+      setLogError(null);
+
+      try {
+        const token = localStorage.getItem('authToken');
+        const authHeaders: Record<string, string> = token ? { Authorization: `Token ${token}` } : {};
+
+        const results = await Promise.all(
+          missingKeys.map(async (key) => {
+            const response = await fetch(
+              `${API_BASE}/audit/logs?log=${encodeURIComponent(key)}&max_bytes=1048576`,
+              { headers: authHeaders },
+            );
+            if (!response.ok) {
+              throw new Error(`Failed to load ${key} (${response.status})`);
+            }
+            const payload = await response.json();
+            return {
+              key,
+              content: payload?.content ?? '',
+              truncated: Boolean(payload?.truncated),
+            };
+          }),
+        );
+
+        if (cancelled) {
+          return;
+        }
+
+        setLogContent((prev) => {
+          const next = { ...prev };
+          for (const item of results) {
+            next[item.key] = item.content;
+          }
+          return next;
+        });
+        setLogMeta((prev) => {
+          const next = { ...prev };
+          for (const item of results) {
+            next[item.key] = { truncated: item.truncated };
+          }
+          return next;
+        });
+      } catch (error) {
+        if (!cancelled) {
+          setLogError(error instanceof Error ? error.message : 'Unable to load log content');
+        }
+      } finally {
+        if (!cancelled) {
+          setLogLoading(false);
+        }
+      }
+    };
+
+    void loadLogs();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isLogViewerActive, logContent, selectedLogSource]);
+
+  const logViewerText = useMemo(() => {
+    if (!isLogViewerActive) {
+      return '';
+    }
+    if (selectedLogSource === 'all') {
+      const segments = LOG_SOURCES.map(({ label, key }) => {
+        const content = logContent[key];
+        if (!content) {
+          return null;
+        }
+        return `===== ${label} (${key}) =====\n${content.trim()}`;
+      }).filter(Boolean);
+      return segments.join('\n\n');
+    }
+
+    return logContent[selectedLogSource] ?? '';
+  }, [isLogViewerActive, logContent, selectedLogSource]);
+
+  const logsTruncated =
+    selectedLogSource === 'all'
+      ? LOG_SOURCES.some(({ key }) => logMeta[key]?.truncated)
+      : Boolean(logMeta[selectedLogSource]?.truncated);
+  const selectedLogLabel =
+    selectedLogSource === 'all'
+      ? 'All Logs'
+      : LOG_SOURCES.find((source) => source.key === selectedLogSource)?.label ?? selectedLogSource;
 
   const logEntries: LogEntry[] = useMemo(() => {
     if (!auditEntries.length) return [];
@@ -136,6 +252,7 @@ export function SecurityLogsTab() {
       };
     });
   }, [auditEntries]);
+
 
   const getLevelColor = (level: string) => {
     switch (level) {
@@ -212,17 +329,17 @@ export function SecurityLogsTab() {
     return date.toLocaleString();
   };
 
-  // Get unique sources and nodes for filters
-  const uniqueSources = Array.from(new Set(logEntries.map((e) => e.source))).sort();
   const uniqueNodes = Array.from(new Set(logEntries.map((e) => e.node))).sort();
 
   // Filter logs
   const filteredLogs = logEntries.filter((log) => {
     if (filterLevel !== 'all' && log.level !== filterLevel) return false;
-    if (filterSource !== 'all' && log.source !== filterSource) return false;
     if (filterNode !== 'all' && log.node !== filterNode) return false;
-    if (searchQuery && !log.message.toLowerCase().includes(searchQuery.toLowerCase()) &&
-        !log.details?.toLowerCase().includes(searchQuery.toLowerCase())) {
+    if (
+      searchQuery &&
+      !log.message.toLowerCase().includes(searchQuery.toLowerCase()) &&
+      !log.details?.toLowerCase().includes(searchQuery.toLowerCase())
+    ) {
       return false;
     }
     return true;
@@ -284,14 +401,8 @@ export function SecurityLogsTab() {
         </p>
       </div>
 
-      {logsError && (
-        <div className="rounded-md border border-destructive/40 bg-destructive/10 px-4 py-2 text-sm text-destructive">
-          {logsError}
-        </div>
-      )}
-
       {/* Statistics Cards */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Card className="border-primary/10 bg-gradient-to-b from-background/80 to-background shadow-lg shadow-primary/10">
           <CardContent className="pt-4">
             <div className="flex items-center justify-between">
@@ -350,8 +461,27 @@ export function SecurityLogsTab() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-5 gap-4 mb-4">
-            <div>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="flex flex-col">
+              <Label htmlFor="log-source" className="text-xs text-muted-foreground">
+                Log Source
+              </Label>
+              <Select value={selectedLogSource} onValueChange={setSelectedLogSource}>
+                <SelectTrigger id="log-source" className="mt-1 text-sm h-8">
+                  <SelectValue placeholder="Select log" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Logs (concatenated)</SelectItem>
+                  {LOG_SOURCES.map((source) => (
+                    <SelectItem key={source.key} value={source.key}>
+                      {source.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="flex flex-col">
               <Label htmlFor="filter-level" className="text-xs text-muted-foreground">
                 Log Level
               </Label>
@@ -370,26 +500,7 @@ export function SecurityLogsTab() {
               </Select>
             </div>
 
-            <div>
-              <Label htmlFor="filter-source" className="text-xs text-muted-foreground">
-                Source
-              </Label>
-              <Select value={filterSource} onValueChange={setFilterSource}>
-                <SelectTrigger id="filter-source" className="mt-1 text-sm h-8">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Sources</SelectItem>
-                  {uniqueSources.map((source) => (
-                    <SelectItem key={source} value={source}>
-                      {source}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div>
+            <div className="flex flex-col">
               <Label htmlFor="filter-node" className="text-xs text-muted-foreground">
                 Node
               </Label>
@@ -408,7 +519,7 @@ export function SecurityLogsTab() {
               </Select>
             </div>
 
-            <div className="col-span-2">
+            <div className="flex flex-col sm:col-span-2 lg:col-span-1">
               <Label htmlFor="search" className="text-xs text-muted-foreground">
                 Search
               </Label>
@@ -419,31 +530,29 @@ export function SecurityLogsTab() {
                   placeholder="Search log messages..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-8 text-sm h-8"
+                  className="pl-8 text-sm h-8 w-full min-w-[10ch]"
                 />
               </div>
             </div>
           </div>
 
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-2">
-                <Checkbox
-                  id="live-mode"
-                  checked={isLiveMode}
-                  onCheckedChange={(checked) => setIsLiveMode(checked as boolean)}
-                />
-                <Label htmlFor="live-mode" className="text-xs cursor-pointer flex items-center gap-1">
-                  <Activity className="w-3 h-3" />
-                  Live Mode
-                </Label>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                {selectedLogs.length > 0 && `${selectedLogs.length} log(s) selected`}
-              </p>
+          <div className="mt-6 flex flex-wrap items-center gap-3 border-t border-border/50 pt-4">
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="live-mode"
+                checked={isLiveMode}
+                onCheckedChange={(checked) => setIsLiveMode(checked as boolean)}
+              />
+              <Label htmlFor="live-mode" className="text-xs cursor-pointer flex items-center gap-1">
+                <Activity className="w-3 h-3" />
+                Live Mode
+              </Label>
             </div>
+            <p className="text-xs text-muted-foreground">
+              {selectedLogs.length > 0 && `${selectedLogs.length} log(s) selected`}
+            </p>
 
-            <div className="flex gap-2">
+            <div className="ml-auto flex flex-wrap gap-2">
               <Button
                 size="sm"
                 variant="outline"
@@ -469,166 +578,56 @@ export function SecurityLogsTab() {
         </CardContent>
       </Card>
 
-      {/* Log Entries */}
+      {/* Raw Log Viewer */}
       <Card className="border-primary/10 bg-gradient-to-b from-background/80 to-background shadow-lg shadow-primary/10">
         <CardHeader>
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
             <CardTitle className="text-foreground/90 flex items-center gap-2">
               <FileText className="w-5 h-5" />
-              Log Entries ({filteredLogs.length})
+              Raw Log Viewer
             </CardTitle>
-            <Button
-              size="sm"
-              variant="ghost"
-              className="text-xs h-7"
-              onClick={toggleSelectAll}
-            >
-              {selectedLogs.length === filteredLogs.length ? (
-                <>
-                  <Square className="w-3 h-3 mr-1" />
-                  Deselect All
-                </>
-              ) : (
-                <>
-                  <CheckSquare className="w-3 h-3 mr-1" />
-                  Select All
-                </>
-              )}
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-2">
-            {filteredLogs.map((log) => {
-              const isExpanded = expandedLogs.includes(log.id);
-              const isSelected = selectedLogs.includes(log.id);
-
-              return (
-                <div
-                  key={log.id}
-                  className={`border rounded-lg transition-all ${
-                    isSelected ? 'border-primary bg-primary/5' : 'border-border bg-background'
-                  }`}
-                >
-                  {/* Summary Row */}
-                  <div className="p-3 flex items-center gap-3">
-                    <Checkbox
-                      checked={isSelected}
-                      onCheckedChange={() => toggleSelected(log.id)}
-                    />
-
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-6 w-6 p-0"
-                      onClick={() => toggleExpanded(log.id)}
-                    >
-                      {isExpanded ? (
-                        <ChevronDown className="w-4 h-4" />
-                      ) : (
-                        <ChevronRight className="w-4 h-4" />
-                      )}
-                    </Button>
-
-                    <div className="flex-1 grid grid-cols-12 gap-3 items-center">
-                      <div className="col-span-2 text-xs font-mono text-muted-foreground">
-                        {formatTimestamp(log.timestamp)}
-                      </div>
-
-                      <div className="col-span-1">
-                        {getLevelBadge(log.level)}
-                      </div>
-
-                      <div className="col-span-2">
-                        <Badge variant="outline" className="text-xs">
-                          {log.source}
-                        </Badge>
-                      </div>
-
-                      <div className="col-span-1">
-                        <Badge variant="secondary" className="text-xs">
-                          {log.node}
-                        </Badge>
-                      </div>
-
-                      <div className="col-span-6">
-                        <p className="text-sm text-foreground/90 truncate">{log.message}</p>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Expanded Details */}
-                  {isExpanded && (
-                    <>
-                      <Separator />
-                      <div className="p-4 space-y-3 bg-muted/20">
-                        {/* Full Timestamp */}
-                        <div>
-                          <p className="text-xs text-muted-foreground mb-1">Full Timestamp</p>
-                          <p className="text-sm font-mono">{formatFullTimestamp(log.timestamp)}</p>
-                        </div>
-
-                        {/* Message */}
-                        <div>
-                          <p className="text-xs text-muted-foreground mb-1">Message</p>
-                          <p className="text-sm bg-muted/50 rounded p-2 border border-border">
-                            {log.message}
-                          </p>
-                        </div>
-
-                        {/* Details */}
-                        {log.details && (
-                          <div>
-                            <p className="text-xs text-muted-foreground mb-1">Details</p>
-                            <p className="text-sm bg-muted/50 rounded p-2 border border-border">
-                              {log.details}
-                            </p>
-                          </div>
-                        )}
-
-                        {/* Stack Trace */}
-                        {log.stackTrace && (
-                          <div>
-                            <p className="text-xs text-muted-foreground mb-1">Stack Trace</p>
-                            <pre className="text-xs bg-black/80 text-green-400 rounded p-3 border border-border overflow-x-auto font-mono">
-                              {log.stackTrace}
-                            </pre>
-                          </div>
-                        )}
-
-                        {/* Metadata */}
-                        {log.metadata && Object.keys(log.metadata).length > 0 && (
-                          <div>
-                            <p className="text-xs text-muted-foreground mb-2">Metadata</p>
-                            <div className="bg-muted/50 rounded p-3 border border-border">
-                              <div className="grid grid-cols-2 gap-2">
-                                {Object.entries(log.metadata).map(([key, value]) => (
-                                  <div key={key} className="text-xs">
-                                    <span className="text-muted-foreground">{key}:</span>{' '}
-                                    <span className="font-mono">{JSON.stringify(value)}</span>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </>
-                  )}
-                </div>
-              );
-            })}
-
-            {filteredLogs.length === 0 && (
-              <div className="text-center py-12 text-muted-foreground">
-                <FileText className="w-12 h-12 mx-auto mb-3 opacity-50" />
-                <p className="text-sm">No log entries found</p>
-                <p className="text-xs mt-1">Try adjusting your filters</p>
-              </div>
+            {isLogViewerActive && (
+              <Badge variant="outline" className="text-xs w-max">
+                {selectedLogLabel}
+              </Badge>
             )}
           </div>
+          <p className="text-xs text-muted-foreground">
+            Displays log content from the selected HiveFS daemon using <code>api/v1/audit/logs</code>.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {logError && (
+            <div className="rounded border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+              {logError}
+            </div>
+          )}
+
+          {!isLogViewerActive && (
+            <p className="text-xs text-muted-foreground">
+              Choose a log source above to fetch and display raw log output, or keep <strong>All Logs</strong> to
+              preview every file concatenated together.
+            </p>
+          )}
+
+          {isLogViewerActive && (
+            <div className="rounded border border-border bg-muted/20 p-3">
+              {logLoading && (
+                <p className="text-xs text-muted-foreground mb-2">Loading log data…</p>
+              )}
+              <pre className="max-h-80 overflow-auto whitespace-pre-wrap text-xs font-mono text-foreground">
+                {logViewerText || 'No log data available.'}
+              </pre>
+              {logsTruncated && (
+                <p className="text-[11px] text-amber-600 mt-2">
+                  Output truncated to 1MB per file for performance. Download full logs from the CLI if needed.
+                </p>
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
+
 
       {/* Export Dialog */}
       {showExportDialog && (

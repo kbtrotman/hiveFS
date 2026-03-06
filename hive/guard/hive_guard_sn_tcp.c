@@ -710,6 +710,36 @@ static int hg_handle_token_metadata_locally(
 	return hg_raft_call_update_token(meta);
 }
 
+static int hg_submit_token_metadata_request(
+	uint16_t command,
+	const struct hive_guard_token_metadata *meta)
+{
+	if (!meta)
+		return -EINVAL;
+	if (command != HG_TOKEN_METADATA_CMD_STORE)
+		return -ENOTSUP;
+	if (!hg_guard_local_can_write())
+		return -EAGAIN;
+	return hg_handle_token_metadata_locally(command, meta);
+}
+
+static int hg_validate_join_request(unsigned int node_id)
+{
+	if (node_id == 0)
+		return -EINVAL;
+	return 0;
+}
+
+static int hg_submit_join_request(unsigned int node_id, uint32_t join_flags)
+{
+	int rc = hg_validate_join_request(node_id);
+	if (rc != 0)
+		return rc;
+	if (!hg_guard_local_can_write())
+		return -EAGAIN;
+	return hg_acept_request_to_join_cluster(node_id, join_flags);
+}
+
 static void handle_token_metadata_request(int fd)
 {
 	if (fd < 0)
@@ -749,9 +779,7 @@ static void handle_token_metadata_request(int fd)
 	struct hive_guard_token_metadata meta;
 	hg_token_metadata_payload_to_meta(&meta, &payload);
 
-	int rc = -EAGAIN;
-	if (hg_guard_local_can_write())
-		rc = hg_handle_token_metadata_locally(command, &meta);
+	int rc = hg_submit_token_metadata_request(command, &meta);
 
 	resp.status = htonl((uint32_t)rc);
 	write_full(fd, &resp, sizeof(resp));
@@ -784,11 +812,8 @@ static void handle_join_cluster_request(int fd)
 	}
 
 	unsigned int node_id = ntohl(req.storage_node_id);
-	int rc = -EAGAIN;
-
 	uint32_t join_flags = ntohl(req.flags);
-	if (hg_guard_local_can_write())
-		rc = hg_acept_request_to_join_cluster(node_id, join_flags);
+	int rc = hg_submit_join_request(node_id, join_flags);
 
 	resp.status = htonl(rc);
 	write_full(fd, &resp, sizeof(resp));
@@ -1577,12 +1602,12 @@ static int hg_send_token_metadata_to_peer(
 
 int hg_ask_to_join_cluster(unsigned int storage_node_id, uint32_t join_flags)
 {
-	if (storage_node_id == 0)
-		return -EINVAL;
+	int validate_rc = hg_validate_join_request(storage_node_id);
+	if (validate_rc != 0)
+		return validate_rc;
 
 	if (hg_guard_local_can_write())
-		return hg_acept_request_to_join_cluster(storage_node_id,
-							join_flags);
+		return hg_submit_join_request(storage_node_id, join_flags);
 
 	size_t count = 0;
 	const struct hive_storage_node *nodes = hifs_get_storage_nodes(&count);
@@ -1672,8 +1697,9 @@ static int hg_submit_join_sec_for_new_node(const struct hive_storage_node *node,
 int hg_acept_request_to_join_cluster(unsigned int storage_node_id,
 				     uint32_t join_flags)
 {
-	if (storage_node_id == 0)
-		return -EINVAL;
+	int validate_rc = hg_validate_join_request(storage_node_id);
+	if (validate_rc != 0)
+		return validate_rc;
 	if (!hg_guard_local_can_write())
 		return -EAGAIN;
 
@@ -1719,7 +1745,7 @@ int hg_send_token_metadata_to_leader(
 		return -EINVAL;
 
 	if (hg_guard_local_can_write())
-		return hg_handle_token_metadata_locally(
+		return hg_submit_token_metadata_request(
 			HG_TOKEN_METADATA_CMD_STORE,
 			meta);
 

@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from django.db.models import Count, Q
 from django.utils.dateparse import parse_datetime
-from rest_framework import mixins, viewsets
+from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from .models import AuditEntry
 from .serializers import AuditEntrySerializer
+from .log_management import LogManager, InvalidLogError, LogNotFoundError
 
 
 class AuditEntryViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.GenericViewSet):
@@ -17,6 +18,7 @@ class AuditEntryViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewse
     permission_classes = [IsAuthenticated]
     serializer_class = AuditEntrySerializer
     queryset = AuditEntry.objects.all()
+    MAX_LOG_BYTES = 5 * 1024 * 1024  # hard stop at 5MB payloads
 
     def get_queryset(self):
         qs = super().get_queryset().order_by("-created_at")
@@ -49,6 +51,64 @@ class AuditEntryViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewse
             .annotate(entry_count=Count("audit_entry_id"))
         )
         return Response(list(aggregates))
+
+    @action(detail=False, methods=["get"], url_path="logs")
+    def fetch_log(self, request):
+        """Return the requested log (or archive) content via LogManager."""
+
+        manager = LogManager()
+        log_key = request.query_params.get("log")
+        if not log_key:
+            return Response(
+                {
+                    "detail": "Query parameter 'log' is required.",
+                    "available_logs": manager.list_logs(),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        archive_name = request.query_params.get("archive")
+        max_bytes_param = request.query_params.get("max_bytes")
+        max_bytes: int | None = None
+        if max_bytes_param:
+            try:
+                parsed = int(max_bytes_param)
+            except (TypeError, ValueError):
+                return Response(
+                    {"detail": "Query parameter 'max_bytes' must be an integer."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if parsed > 0:
+                max_bytes = min(parsed, self.MAX_LOG_BYTES)
+
+        try:
+            if archive_name:
+                content = manager.view_archive(log_key, archive_name)
+                response_payload = {
+                    "log": log_key,
+                    "archive": archive_name,
+                    "content": content,
+                    "is_archive": True,
+                }
+            else:
+                content = manager.get_current_log(log_key, max_bytes=max_bytes)
+                response_payload = {
+                    "log": log_key,
+                    "content": content,
+                    "is_archive": False,
+                }
+            response_payload["available_archives"] = manager.list_archives(log_key)
+            response_payload["truncated"] = (
+                max_bytes is not None and len(content.encode("utf-8")) >= max_bytes
+            )
+            return Response(response_payload)
+        except InvalidLogError as exc:
+            return Response(
+                {"detail": str(exc), "available_logs": manager.list_logs()},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except LogNotFoundError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_404_NOT_FOUND)
 
     def _parse_dt(self, value):
         if not value:

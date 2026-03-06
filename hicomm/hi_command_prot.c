@@ -34,6 +34,9 @@ struct hifs_block_chain_ctx {
 	uint32_t *lengths;
 	uint8_t *hashes;
 	uint8_t *algos;
+	uint8_t *stripe_ids;
+	uint8_t *stripe_algos;
+	uint32_t *placement_epochs;
 	size_t data_len;
 	size_t data_cap;
 	size_t lengths_len;
@@ -42,6 +45,12 @@ struct hifs_block_chain_ctx {
 	size_t hashes_cap;
 	size_t algos_len;
 	size_t algos_cap;
+	size_t stripe_ids_len;
+	size_t stripe_ids_cap;
+	size_t stripe_algos_len;
+	size_t stripe_algos_cap;
+	size_t placement_len;
+	size_t placement_cap;
 	uint64_t volume_id;
 	uint64_t start_block;
 	uint64_t next_block;
@@ -63,6 +72,9 @@ static void hifs_block_chain_reset(struct hifs_block_chain_ctx *ctx)
 	ctx->lengths_len = 0;
 	ctx->hashes_len = 0;
 	ctx->algos_len = 0;
+	ctx->stripe_ids_len = 0;
+	ctx->stripe_algos_len = 0;
+	ctx->placement_len = 0;
 }
 
 static bool hifs_block_chain_reserve(void **buf, size_t *cap,
@@ -141,10 +153,18 @@ static bool hifs_block_chain_flush(struct hifs_block_chain_ctx *ctx)
 				sent = false;
 				break;
 			}
+			const uint8_t *hash_ptr = ctx->hashes + (i * HIFS_BLOCK_HASH_SIZE);
+			uint8_t hash_algo = ctx->algos ? ctx->algos[i] : HIFS_HASH_ALGO_SHA256;
+			const uint8_t *stripe_id =
+				ctx->stripe_ids ? ctx->stripe_ids + (i * HIFS_STRIPE_ID_SIZE) : NULL;
+			uint8_t stripe_algo = ctx->stripe_algos ? ctx->stripe_algos[i] : HIFS_HASH_ALGO_NONE;
+			uint32_t placement_epoch = ctx->placement_epochs ? ctx->placement_epochs[i] : 0;
+
 			if (!hifs_volume_block_send(ctx->volume_id, block_no,
 						     cursor, len,
-						     ctx->hashes + (i * HIFS_BLOCK_HASH_SIZE),
-						     ctx->algos ? ctx->algos[i] : HIFS_HASH_ALGO_SHA256)) {
+						     hash_ptr, hash_algo,
+						     stripe_id, stripe_algo,
+						     placement_epoch)) {
 				hifs_err("Failed to persist contiguous block %llu for volume %llu",
 					 (unsigned long long)block_no,
 					 (unsigned long long)ctx->volume_id);
@@ -178,15 +198,21 @@ static bool hifs_block_chain_begin(struct hifs_block_chain_ctx *ctx,
 	ctx->lengths_len = 0;
 	ctx->hashes_len = 0;
 	ctx->algos_len = 0;
+	ctx->stripe_ids_len = 0;
+	ctx->stripe_algos_len = 0;
+	ctx->placement_len = 0;
 	return true;
 }
 
 static bool hifs_block_chain_append(struct hifs_block_chain_ctx *ctx,
 				    uint64_t block_no,
 				    const uint8_t *data, uint32_t len,
-				    const uint8_t *hash, uint8_t hash_algo)
+				    const uint8_t *hash, uint8_t hash_algo,
+				    const uint8_t *stripe_id,
+				    uint8_t stripe_algo,
+				    uint32_t placement_epoch)
 {
-	if (!ctx || !ctx->active || !data || !len || !hash)
+	if (!ctx || !ctx->active || !data || !len || !hash || !stripe_id)
 		return false;
 	if (block_no != ctx->next_block)
 		return false;
@@ -205,6 +231,16 @@ static bool hifs_block_chain_append(struct hifs_block_chain_ctx *ctx,
 	if (!hifs_block_chain_reserve((void **)&ctx->algos, &ctx->algos_cap,
 				      ctx->lengths_len + 1, sizeof(uint8_t), 16))
 		return false;
+	if (!hifs_block_chain_reserve((void **)&ctx->stripe_ids, &ctx->stripe_ids_cap,
+				      (ctx->lengths_len + 1) * HIFS_STRIPE_ID_SIZE,
+				      sizeof(uint8_t), HIFS_STRIPE_ID_SIZE))
+		return false;
+	if (!hifs_block_chain_reserve((void **)&ctx->stripe_algos, &ctx->stripe_algos_cap,
+				      ctx->lengths_len + 1, sizeof(uint8_t), 16))
+		return false;
+	if (!hifs_block_chain_reserve((void **)&ctx->placement_epochs, &ctx->placement_cap,
+				      ctx->lengths_len + 1, sizeof(uint32_t), 16))
+		return false;
 
 	memcpy(ctx->data + ctx->data_len, data, len);
 	ctx->data_len += len;
@@ -212,6 +248,10 @@ static bool hifs_block_chain_append(struct hifs_block_chain_ctx *ctx,
 	memcpy(ctx->hashes + ctx->hashes_len, hash, HIFS_BLOCK_HASH_SIZE);
 	ctx->hashes_len += HIFS_BLOCK_HASH_SIZE;
 	ctx->algos[ctx->algos_len++] = hash_algo;
+	memcpy(ctx->stripe_ids + ctx->stripe_ids_len, stripe_id, HIFS_STRIPE_ID_SIZE);
+	ctx->stripe_ids_len += HIFS_STRIPE_ID_SIZE;
+	ctx->stripe_algos[ctx->stripe_algos_len++] = stripe_algo;
+	ctx->placement_epochs[ctx->placement_len++] = placement_epoch;
 	ctx->next_block++;
 	return true;
 }
@@ -220,30 +260,32 @@ static bool hifs_block_chain_append(struct hifs_block_chain_ctx *ctx,
 static int hifs_compare_sb_newer(const struct hifs_volume_superblock *a,
 				 const struct hifs_volume_superblock *b)
 {
-	uint32_t a_gen = a ? a->s_rev_level : 0;
-	uint32_t b_gen = b ? b->s_rev_level : 0;
+	uint32_t a_gen = a ? le32toh(a->s_generational_epoch) : 0;
+	uint32_t b_gen = b ? le32toh(b->s_generational_epoch) : 0;
 	if (a_gen != b_gen)
 		return (a_gen > b_gen) ? 1 : -1;
 
-	uint32_t a_wtime = a ? a->s_wtime : 0;
-	uint32_t b_wtime = b ? b->s_wtime : 0;
+	uint32_t a_wtime = a ? le32toh(a->s_wtime) : 0;
+	uint32_t b_wtime = b ? le32toh(b->s_wtime) : 0;
 	if (a_wtime != b_wtime)
 		return (a_wtime > b_wtime) ? 1 : -1;
+
 	return 0;
 }
 
 static int hifs_compare_dentry_newer(const struct hifs_volume_dentry *a,
-				    const struct hifs_volume_dentry *b)
+				     const struct hifs_volume_dentry *b)
 {
-	uint32_t a_gen = a ? a->d_generational_epoch : 0;
-	uint32_t b_gen = b ? b->d_generational_epoch : 0;
+	uint32_t a_gen = a ? le32toh(a->d_generational_epoch) : 0;
+	uint32_t b_gen = b ? le32toh(b->d_generational_epoch) : 0;
 	if (a_gen != b_gen)
 		return (a_gen > b_gen) ? 1 : -1;
 
-	uint32_t a_epoch = a ? a->de_epoch : 0;
-	uint32_t b_epoch = b ? b->de_epoch : 0;
+	uint32_t a_epoch = a ? le32toh(a->de_epoch) : 0;
+	uint32_t b_epoch = b ? le32toh(b->de_epoch) : 0;
 	if (a_epoch != b_epoch)
 		return (a_epoch > b_epoch) ? 1 : -1;
+
 	return 0;
 }
 
@@ -258,8 +300,13 @@ static void bin_to_hex(const char *src, size_t len, char *dst)
 }
 
 static int hifs_compare_inode_newer(const struct hifs_inode_wire *a,
-				 const struct hifs_inode_wire *b)
+				    const struct hifs_inode_wire *b)
 {
+	uint32_t a_epoch = a ? le32toh(a->i_generational_epoch) : 0;
+	uint32_t b_epoch = b ? le32toh(b->i_generational_epoch) : 0;
+	if (a_epoch != b_epoch)
+		return (a_epoch > b_epoch) ? 1 : -1;
+
 	uint32_t a_ctime = a ? le32toh(a->i_ctime) : 0;
 	uint32_t b_ctime = b ? le32toh(b->i_ctime) : 0;
 	if (a_ctime != b_ctime)
@@ -270,8 +317,8 @@ static int hifs_compare_inode_newer(const struct hifs_inode_wire *a,
 	if (a_mtime != b_mtime)
 		return (a_mtime > b_mtime) ? 1 : -1;
 
-	uint32_t a_size = a ? le32toh(a->i_size) : 0;
-	uint32_t b_size = b ? le32toh(b->i_size) : 0;
+	uint64_t a_size = a ? le64toh(a->i_size) : 0;
+	uint64_t b_size = b ? le64toh(b->i_size) : 0;
 	if (a_size != b_size)
 		return (a_size > b_size) ? 1 : -1;
 
@@ -282,23 +329,23 @@ static int hifs_compare_inode_newer(const struct hifs_inode_wire *a,
 static int hifs_compare_root_newer(const struct hifs_volume_root_dentry *a,
 				   const struct hifs_volume_root_dentry *b)
 {
-	uint32_t a_epoch = a ? a->rd_epoch : 0;
-	uint32_t b_epoch = b ? b->rd_epoch : 0;
+	uint32_t a_epoch = a ? le32toh(a->rd_epoch) : 0;
+	uint32_t b_epoch = b ? le32toh(b->rd_epoch) : 0;
 	if (a_epoch != b_epoch)
 		return (a_epoch > b_epoch) ? 1 : -1;
 
-	uint32_t a_ctime = a ? a->rd_ctime : 0;
-	uint32_t b_ctime = b ? b->rd_ctime : 0;
+	uint32_t a_ctime = a ? le32toh(a->rd_ctime) : 0;
+	uint32_t b_ctime = b ? le32toh(b->rd_ctime) : 0;
 	if (a_ctime != b_ctime)
 		return (a_ctime > b_ctime) ? 1 : -1;
 
-	uint32_t a_mtime = a ? a->rd_mtime : 0;
-	uint32_t b_mtime = b ? b->rd_mtime : 0;
+	uint32_t a_mtime = a ? le32toh(a->rd_mtime) : 0;
+	uint32_t b_mtime = b ? le32toh(b->rd_mtime) : 0;
 	if (a_mtime != b_mtime)
 		return (a_mtime > b_mtime) ? 1 : -1;
 
-	uint64_t a_inode = a ? a->rd_inode : 0;
-	uint64_t b_inode = b ? b->rd_inode : 0;
+	uint64_t a_inode = a ? le64toh(a->rd_inode) : 0;
+	uint64_t b_inode = b ? le64toh(b->rd_inode) : 0;
 	if (a_inode != b_inode)
 		return (a_inode > b_inode) ? 1 : -1;
 
@@ -667,114 +714,170 @@ int hicomm_handle_command(int fd, const struct hifs_cmds *cmd)
 		return ret;
 	}
 
-	if (VSB_CMD_EQUALS(HIFS_Q_PROTO_CMD_BLOCK_SEND)) {
-		struct hifs_data_frame frame;
-		struct hifs_block_msg msg_local;
-		struct hifs_block_msg msg_reply;
-		bool have_db = false;
-		bool save_local = false;
-		int err;
-		uint64_t volume_id;
-		uint64_t block_no;
-		uint32_t msg_flags;
-		bool request_only;
-		bool contig_start;
-		bool contig_end;
-		uint8_t block_buf[HIFS_DEFAULT_BLOCK_SIZE];
-		uint32_t block_len = 0;
-		struct hifs_data_frame data_frame;
-		const uint8_t *incoming_data = NULL;
-		uint32_t incoming_len = 0;
+if (VSB_CMD_EQUALS(HIFS_Q_PROTO_CMD_BLOCK_SEND)) {
+	struct hifs_data_frame frame;
+	struct hifs_block_msg msg_local;
+	struct hifs_block_msg msg_reply;
+	bool have_db = false;
+	bool save_local = false;
+	int err;
+	uint64_t volume_id;
+	uint64_t block_no;
+	uint32_t msg_flags;
+	uint32_t placement_epoch;
+	bool request_only;
+	bool contig_start;
+	bool contig_end;
+	uint8_t *block_buf = NULL;
+	uint32_t block_len = 0;
+	struct hifs_data_frame data_frame;
+	const uint8_t *incoming_data = NULL;
+	uint32_t incoming_len = 0;
+	size_t expected;
 
-		ret = hicomm_comm_recv_data(fd, &frame, false);
-		if (ret) {
-			if (ret == -EAGAIN)
-				return 0;
-			hifs_err("Failed to fetch block payload: %d", ret);
-			return ret;
-		}
-		{
-			size_t expected = sizeof(struct hifs_block_msg);
-			if (frame.len < expected) {
-				hifs_err("Block payload too small: got %u need %zu",
-					 frame.len, expected);
-				return -EINVAL;
-			}
-			if (frame.len > expected)
-				hifs_warning("Block payload larger than expected (%u > %zu); truncating extra metadata",
-					     frame.len, expected);
-			memcpy(&msg_local, frame.data, expected);
-		}
-		msg_reply = msg_local;
-		volume_id = le64toh(msg_local.volume_id);
-		block_no = le64toh(msg_local.block_no);
-		msg_flags = le32toh(msg_local.flags);
-		request_only = (msg_flags & HIFS_BLOCK_MSGF_REQUEST) != 0;
-		contig_start = (msg_flags & HIFS_BLOCK_MSGF_CONTIG_START) != 0;
-		contig_end = (msg_flags & HIFS_BLOCK_MSGF_CONTIG_END) != 0;
+	block_buf = kmalloc(HIFS_DEFAULT_BLOCK_SIZE, GFP_KERNEL);
+	if (!block_buf)
+		return -ENOMEM;
 
-		if (request_only) {
-			have_db = hifs_volume_block_load(volume_id, block_no,
-				block_buf, &block_len);
-			if (have_db) {
-				msg_reply.flags = htole32(0);
-				msg_reply.data_len = htole32(block_len);
+	ret = hicomm_comm_recv_data(fd, &frame, false);
+	if (ret) {
+		if (ret == -EAGAIN) {
+			ret = 0;
+			goto out_free_block_buf;
+		}
+		hifs_err("Failed to fetch block payload: %d", ret);
+		goto out_free_block_buf;
+	}
+
+	expected = sizeof(struct hifs_block_msg);
+	if (frame.len < expected) {
+		hifs_err("Block payload too small: got %u need %zu",
+			 frame.len, expected);
+		ret = -EINVAL;
+		goto out_free_block_buf;
+	}
+	if (frame.len > expected) {
+		hifs_warning("Block payload larger than expected (%u > %zu); truncating extra metadata",
+			     frame.len, expected);
+	}
+
+	memcpy(&msg_local, frame.data, expected);
+	msg_reply = msg_local;
+
+	volume_id = le64toh(msg_local.volume_id);
+	block_no = le64toh(msg_local.block_no);
+	msg_flags = le32toh(msg_local.flags);
+	placement_epoch = le32toh(msg_local.placement_epoch);
+
+	request_only = (msg_flags & HIFS_BLOCK_MSGF_REQUEST) != 0;
+	contig_start = (msg_flags & HIFS_BLOCK_MSGF_CONTIG_START) != 0;
+	contig_end = (msg_flags & HIFS_BLOCK_MSGF_CONTIG_END) != 0;
+
+	/* Hybrid-CAS sanity checks for store operations */
+	if (!request_only) {
+		if (msg_local.stripe_id_algo == HIFS_HASH_ALGO_NONE) {
+			hifs_err("Block %" PRIu64 " volume %" PRIu64
+				 " missing stripe_id algorithm",
+				 block_no, volume_id);
+			ret = -EINVAL;
+			goto out_free_block_buf;
+		}
+
+		if (placement_epoch == 0) {
+			hifs_warning("Block %" PRIu64 " volume %" PRIu64
+				     " has placement_epoch=0",
+				     block_no, volume_id);
+		}
+	}
+
+	if (request_only) {
+		have_db = hifs_volume_block_load(volume_id, block_no,
+						 block_buf, &block_len);
+		if (have_db) {
+			msg_reply.flags = htole32(0);
+			msg_reply.data_len = htole32(block_len);
+
+			/*
+			 * For now we echo back the request's placement fields.
+			 * Later, if guard returns authoritative stripe metadata,
+			 * populate msg_reply.{placement_epoch,stripe_id,*algo}
+			 * from that source instead.
+			 */
+		}
+	} else {
+		save_local = true;
+		have_db = true;
+
+		if (le32toh(msg_local.data_len) > 0) {
+			ret = hicomm_comm_recv_data(fd, &data_frame, false);
+			if (ret) {
+				goto out_free_block_buf;
 			}
+			incoming_len = data_frame.len;
+			incoming_data = data_frame.data;
+		}
+	}
+
+	if (save_local && have_db) {
+		uint32_t store_len =
+			incoming_len ? incoming_len : le32toh(msg_local.data_len);
+		const uint8_t *store_buf =
+			incoming_data ? incoming_data : block_buf;
+		bool buffered = false;
+
+		if (!store_len || !store_buf) {
+			hifs_err("Block %" PRIu64 " volume %" PRIu64 " missing payload",
+				 block_no, volume_id);
+			store_len = 0;
 		} else {
-			save_local = true;
-			have_db = true;
-			if (le32toh(msg_local.data_len) > 0) {
-				ret = hicomm_comm_recv_data(fd, &data_frame, false);
-				if (ret)
-					return ret;
-				incoming_len = data_frame.len;
-				incoming_data = data_frame.data;
-			}
-		}
+			if (contig_start)
+				hifs_block_chain_begin(&g_block_chain_ctx,
+						       volume_id, block_no);
 
-		if (save_local && have_db) {
-			uint32_t store_len = incoming_len ? incoming_len : le32toh(msg_local.data_len);
-			const uint8_t *store_buf = incoming_data ? incoming_data : block_buf;
-			bool buffered = false;
-
-			if (!store_len || !store_buf) {
-				hifs_err("Block %" PRIu64 " volume %" PRIu64 " missing payload",
-					 block_no, volume_id);
-				store_len = 0;
-			} else {
-				if (contig_start)
-					hifs_block_chain_begin(&g_block_chain_ctx, volume_id, block_no);
-
-				if (g_block_chain_ctx.active) {
-					if (!hifs_block_chain_append(&g_block_chain_ctx, block_no,
-								     store_buf, store_len,
-								     msg_local.hash,
-								     msg_local.hash_algo)) {
-						hifs_warning("Failed to append block %" PRIu64
-							     " for volume %" PRIu64 " to contiguous buffer",
-							     block_no, volume_id);
-						hifs_block_chain_reset(&g_block_chain_ctx);
-					} else {
-						buffered = true;
-						if (contig_end && !hifs_block_chain_flush(&g_block_chain_ctx))
-							hifs_warning("Flushing contiguous block run failed");
+			if (g_block_chain_ctx.active) {
+				if (!hifs_block_chain_append(&g_block_chain_ctx,
+							     block_no,
+							     store_buf,
+							     store_len,
+							     msg_local.hash,
+							     msg_local.hash_algo,
+							     msg_local.stripe_id,
+							     msg_local.stripe_id_algo,
+							     placement_epoch)) {
+					hifs_warning("Failed to append block %" PRIu64
+						     " for volume %" PRIu64
+						     " to contiguous buffer",
+						     block_no, volume_id);
+					hifs_block_chain_reset(&g_block_chain_ctx);
+				} else {
+					buffered = true;
+					if (contig_end &&
+					    !hifs_block_chain_flush(&g_block_chain_ctx)) {
+						hifs_warning("Flushing contiguous block run failed");
 					}
 				}
 			}
+		}
 
-			if (!buffered && store_len) {
-				if (!hifs_volume_block_send(volume_id, block_no,
-							     store_buf, store_len,
-							     msg_local.hash,
-							     msg_local.hash_algo)) {
-					hifs_err("Failed to persist block %" PRIu64 " for volume %" PRIu64,
-						 block_no, volume_id);
-				}
+		if (!buffered && store_len) {
+			if (!hifs_volume_block_send(volume_id, block_no,
+						    store_buf, store_len,
+						    msg_local.hash,
+						    msg_local.hash_algo,
+						    msg_local.stripe_id,
+						    msg_local.stripe_id_algo,
+						    placement_epoch)) {
+				hifs_err("Failed to persist block %" PRIu64
+					 " for volume %" PRIu64,
+					 block_no, volume_id);
 			}
 		}
-		if (!request_only)
-			msg_reply.data_len = htole32(0);
+	}
 
+	if (!request_only)
+		msg_reply.data_len = htole32(0);
+
+	{
 		struct hifs_data_frame out_frame = {0};
 		out_frame.len = sizeof(msg_reply);
 		memcpy(out_frame.data, &msg_reply, sizeof(msg_reply));
@@ -784,24 +887,32 @@ int hicomm_handle_command(int fd, const struct hifs_cmds *cmd)
 			hifs_err("Failed to send block response data: %d", err);
 			ret = err;
 		}
-		if (block_len > 0 && have_db) {
-			struct hifs_data_frame data_out = {0};
-			data_out.len = block_len;
-			memcpy(data_out.data, block_buf, block_len);
-			err = hicomm_comm_send_data(fd, &data_out);
-			if (err) {
-				hifs_err("Failed to send block data payload: %d", err);
-				if (!ret)
-					ret = err;
-			}
-		}
-		err = hicomm_send_cmd_str(fd, HIFS_Q_PROTO_CMD_BLOCK_RECV);
-		if (err && !ret)
-			ret = err;
-		return ret;
 	}
 
-    return ret;
+	if (block_len > 0 && have_db) {
+		struct hifs_data_frame data_out = {0};
+		data_out.len = block_len;
+		memcpy(data_out.data, block_buf, block_len);
+
+		err = hicomm_comm_send_data(fd, &data_out);
+		if (err) {
+			hifs_err("Failed to send block data payload: %d", err);
+			if (!ret)
+				ret = err;
+		}
+	}
+
+	kfree(block_buf);
+
+	err = hicomm_send_cmd_str(fd, HIFS_Q_PROTO_CMD_BLOCK_RECV);
+	if (err && !ret)
+		ret = err;
+
+	return ret;
+
+out_free_block_buf:
+	kfree(block_buf);
+	return ret;
 }
 
 /* Print inode information */

@@ -1460,13 +1460,20 @@ bool hifs_volume_block_load(uint64_t volume_id, uint64_t block_no,
 
 bool hifs_volume_block_send(uint64_t volume_id, uint64_t block_no,
 			     const uint8_t *buf, uint32_t len,
-			     const uint8_t *hash, uint8_t hash_algo)
+			     const uint8_t *hash, uint8_t hash_algo,
+			     const uint8_t *stripe_id, uint8_t stripe_id_algo,
+			     uint32_t placement_epoch)
 {
 	if (!buf || len == 0)
 		return false;
 
 	char hash_hex[HIFS_BLOCK_HASH_SIZE * 2 + 1];
+	char stripe_hex[HIFS_STRIPE_ID_SIZE * 2 + 1];
 	uint8_t algo = hash_algo;
+	const char *stripe_algo_str = hifs_hash_algo_to_str(stripe_id_algo);
+	const char *stripe_hex_ptr = "";
+	if (!stripe_algo_str)
+		stripe_algo_str = "";
 
 	if (!hash) {
 		sha256_hex(buf, len, hash_hex);
@@ -1474,12 +1481,20 @@ bool hifs_volume_block_send(uint64_t volume_id, uint64_t block_no,
 	} else {
 		bytes_to_hex(hash, HIFS_BLOCK_HASH_SIZE, hash_hex);
 	}
+	if (stripe_id) {
+		bytes_to_hex(stripe_id, HIFS_STRIPE_ID_SIZE, stripe_hex);
+		stripe_hex_ptr = stripe_hex;
+	}
 
 	struct guard_field fields[] = {
 		GUARD_FIELD_U64("volume_id", volume_id),
 		GUARD_FIELD_U64("block_no", block_no),
-		GUARD_FIELD_U32("hash_algo", algo),
+		GUARD_FIELD_U64("hash_algo", algo),
 		GUARD_FIELD_STR("hash", hash_hex),
+		GUARD_FIELD_STR("hash_algo_str", hifs_hash_algo_to_str(algo)),
+		GUARD_FIELD_STR("strip_id", stripe_hex_ptr),
+		GUARD_FIELD_STR("strip_id_algorithm", stripe_algo_str),
+		GUARD_FIELD_U64("placement_epoch", placement_epoch),
 	};
 	return guard_store_struct("volume_block_put",
 				  fields, ARRAY_SIZE(fields),

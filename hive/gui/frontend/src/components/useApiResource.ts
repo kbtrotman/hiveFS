@@ -42,7 +42,23 @@ export function useApiResource<T>(
     setError(null);
 
     try {
-      const response = await fetch(`${API_BASE}/${normalizedPath}`);
+      let token: string | null = null;
+      if (typeof window !== 'undefined') {
+        try {
+          token = localStorage.getItem('authToken');
+        } catch {
+          token = null;
+        }
+      }
+
+      const headers: Record<string, string> = {};
+      if (token) {
+        headers.Authorization = `Token ${token}`;
+      }
+
+      const response = await fetch(`${API_BASE}/${normalizedPath}`, {
+        headers,
+      });
       if (!response.ok) {
         throw new Error(`Failed to load ${normalizedPath} (${response.status})`);
       }
