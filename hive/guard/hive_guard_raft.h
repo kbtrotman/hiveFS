@@ -117,6 +117,11 @@ struct RaftPutBlock {
     uint64_t  block_no;
     uint64_t  version;
     uint8_t   hash[32];             /* SHA-256 of block */
+    uint8_t   stripe_id_algo;
+    uint8_t   stripe_reserved[3];
+    uint8_t   stripe_id[HIFS_STRIPE_ID_SIZE];
+    uint32_t  placement_epoch;
+    uint32_t  reserved32;
     struct StripeId ec_stripes[HIFS_EC_STRIPES];
 };
 

@@ -1492,8 +1492,11 @@ bool hifs_volume_block_send(uint64_t volume_id, uint64_t block_no,
 		GUARD_FIELD_U64("hash_algo", algo),
 		GUARD_FIELD_STR("hash", hash_hex),
 		GUARD_FIELD_STR("hash_algo_str", hifs_hash_algo_to_str(algo)),
-		GUARD_FIELD_STR("strip_id", stripe_hex_ptr),
-		GUARD_FIELD_STR("strip_id_algorithm", stripe_algo_str),
+		GUARD_FIELD_STR("stripe_id", stripe_hex_ptr),
+		GUARD_FIELD_STR("strip_id", stripe_hex_ptr), /* backward compat */
+		GUARD_FIELD_U64("stripe_id_algo", stripe_id_algo),
+		GUARD_FIELD_STR("stripe_id_algo_str", stripe_algo_str),
+		GUARD_FIELD_STR("strip_id_algorithm", stripe_algo_str), /* backward compat */
 		GUARD_FIELD_U64("placement_epoch", placement_epoch),
 	};
 	return guard_store_struct("volume_block_put",
@@ -1505,7 +1508,10 @@ bool hifs_contig_block_send(uint64_t volume_id, uint64_t block_start,
 			    const uint32_t *lengths, size_t block_count,
 			    const uint8_t *data, size_t data_len,
 			    const uint8_t *hash_algos,
-			    const uint8_t *hashes)
+			    const uint8_t *hashes,
+			    const uint8_t *stripe_id_algos,
+			    const uint8_t *stripe_ids,
+			    const uint32_t *placement_epochs)
 {
 	struct guard_field fields[] = {
 		GUARD_FIELD_U64("volume_id", volume_id),
@@ -1524,7 +1530,9 @@ bool hifs_contig_block_send(uint64_t volume_id, uint64_t block_start,
 	uint8_t *cursor;
 	bool ok;
 
-	if (!lengths || !data || !hash_algos || !hashes || !block_count)
+	if (!lengths || !data || !hash_algos || !hashes ||
+	    !stripe_id_algos || !stripe_ids || !placement_epochs ||
+	    !block_count)
 		return false;
 
 	for (size_t i = 0; i < block_count; ++i) {
@@ -1556,9 +1564,16 @@ bool hifs_contig_block_send(uint64_t volume_id, uint64_t block_start,
 	for (size_t i = 0; i < block_count; ++i) {
 		struct hifs_block_hash_wire *entry = &meta[i];
 		entry->hash_algo = hash_algos[i];
-		memset(entry->reserved, 0, sizeof(entry->reserved));
+		memset(entry->hash_reserved, 0, sizeof(entry->hash_reserved));
 		memcpy(entry->hash, hashes + i * HIFS_BLOCK_HASH_SIZE,
 		       HIFS_BLOCK_HASH_SIZE);
+		entry->stripe_id_algo = stripe_id_algos[i];
+		memset(entry->stripe_reserved, 0, sizeof(entry->stripe_reserved));
+		memcpy(entry->stripe_id,
+		       stripe_ids + i * HIFS_STRIPE_ID_SIZE,
+		       HIFS_STRIPE_ID_SIZE);
+		entry->placement_epoch = htole32(placement_epochs[i]);
+		entry->meta_reserved = 0;
 	}
 	memcpy((uint8_t *)meta + meta_bytes, data, data_len);
 

@@ -136,7 +136,9 @@ static bool hifs_block_chain_flush(struct hifs_block_chain_ctx *ctx)
 		sent = hifs_contig_block_send(ctx->volume_id, ctx->start_block,
 					      ctx->lengths, ctx->lengths_len,
 					      ctx->data, ctx->data_len,
-					      ctx->algos, ctx->hashes);
+					      ctx->algos, ctx->hashes,
+					      ctx->stripe_algos, ctx->stripe_ids,
+					      ctx->placement_epochs);
 		if (!sent)
 			hifs_warning("contiguous block send failed for volume %llu start %llu, falling back",
 				     (unsigned long long)ctx->volume_id,

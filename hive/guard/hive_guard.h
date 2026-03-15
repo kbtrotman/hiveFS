@@ -41,6 +41,17 @@
 #define HIFS_GUARD_HOST "127.0.0.1"
 #define HIFS_GUARD_PORT_STR "7070"
 
+struct hifs_ec_stripe_set {
+	char stripe_id[HIFS_STRIPE_ID_SIZE];
+	enum hifs_stripe_id_algorithm stripe_id_algo;
+	uint32_t placement_epoch;
+	size_t chunk_count;
+	size_t chunk_len;
+	uint8_t **chunks;
+	enum hifs_hash_algorithm hash_algo;
+	uint8_t hash[HIFS_BLOCK_HASH_SIZE];
+};
+
 extern unsigned int storage_node_id;
 extern char storage_node_name[50];
 extern char storage_node_address[64];
@@ -67,7 +78,7 @@ extern	uint32_t storage_node_storage_node_connect_timeout_ms;
 // Prototypes
 int hive_guard_server_main(void);
 
-/* hi_command_erasure_encoding.c */
+/* hive_guard_erasure_code.c */
 int hifs_ec_ensure_init(void);
 int hicomm_erasure_coding_init(void);
 int hicomm_erasure_coding_encode(const uint8_t *data, size_t data_len,
@@ -80,14 +91,6 @@ int hicomm_erasure_coding_rebuild_from_partial(uint8_t **encoded_chunks, size_t 
                                  size_t num_data_chunks, size_t num_parity_chunks,
                                  uint8_t *decoded_data, size_t *data_len);
 
-struct hifs_ec_stripe_set {
-	size_t chunk_count;
-	size_t chunk_len;
-	uint8_t **chunks;
-	enum hifs_hash_algorithm hash_algo;
-	uint8_t hash[HIFS_BLOCK_HASH_SIZE];
-};
-
 bool hifs_volume_block_ec_encode(const uint8_t *buf, uint32_t len,
 				 enum hifs_hash_algorithm algo,
 				 const uint8_t *pre_hash,
@@ -97,10 +100,15 @@ bool hifs_volume_block_store_encoded(uint64_t volume_id, uint64_t block_no,
 				     const struct hifs_ec_stripe_set *ec);
 int hifs_put_block_stripes(uint64_t volume_id, uint64_t block_no,
 			   const struct hifs_ec_stripe_set *ec,
-			   enum hifs_hash_algorithm algo);
+			   enum hifs_hash_algorithm algo,
+			   const uint8_t *stripe_id,
+			   enum hifs_stripe_id_algorithm stripe_id_algo,
+			   uint32_t placement_epoch);
 int hifs_put_block(uint64_t volume_id, uint64_t block_no,
 		   const void *data, size_t len,
 		   enum hifs_hash_algorithm algo,
-		   const uint8_t hash[HIFS_BLOCK_HASH_SIZE]);
+		   const uint8_t hash[HIFS_BLOCK_HASH_SIZE],
+		   const uint8_t *stripe_id, enum hifs_stripe_id_algorithm stripe_id_algo,
+		   uint32_t placement_epoch);
 void hifs_guard_notify_write_ack(uint64_t volume_id, uint64_t block_no,
 			 const uint8_t *hash, size_t hash_len);

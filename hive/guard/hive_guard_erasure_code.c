@@ -14,6 +14,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <endian.h>
 #include <openssl/sha.h>
 #include "hive_guard.h"
 #include "hive_guard_kv.h"
@@ -441,6 +442,29 @@ void hifs_ec_choose_placement(uint64_t volume_id,
 	NEXT_STRIPE_NODE(last_node_in_cascade, cascade_length);
 }
 
+void hifs_compute_stripe_id(uint64_t volume_id,
+			    uint64_t block_no,
+			    uint32_t placement_epoch,
+			    uint8_t out[HIFS_STRIPE_ID_SIZE])
+{
+	static const char tag[] = "STRIPE";
+	const char layout[] = HIFS_STRIPE_LAYOUT_VERSION;
+	SHA256_CTX ctx;
+	uint64_t volume_le = htole64(volume_id);
+	uint64_t block_le = htole64(block_no);
+	uint32_t epoch_le = htole32(placement_epoch);
+	uint8_t digest[SHA256_DIGEST_LENGTH];
+
+	SHA256_Init(&ctx);
+	SHA256_Update(&ctx, tag, sizeof(tag) - 1);
+	SHA256_Update(&ctx, layout, sizeof(layout) - 1);
+	SHA256_Update(&ctx, &volume_le, sizeof(volume_le));
+	SHA256_Update(&ctx, &block_le, sizeof(block_le));
+	SHA256_Update(&ctx, &epoch_le, sizeof(epoch_le));
+	SHA256_Final(digest, &ctx);
+	memcpy(out, digest, HIFS_STRIPE_ID_SIZE);
+}
+
 
 bool hifs_volume_block_ec_encode(const uint8_t *buf, uint32_t len,
 				 enum hifs_hash_algorithm algo,
@@ -588,7 +612,14 @@ bool hifs_volume_block_store(uint64_t volume_id, uint64_t block_no,
 	if (!hifs_volume_block_ec_encode(buf, len, algo, hash, &ec))
 		return false;
 
-	if (hifs_put_block_stripes(volume_id, block_no, &ec, ec.hash_algo) == 0)
+	ec.placement_epoch = 0;
+	ec.stripe_id_algo = HIFS_HASH_ALGO_SHA256;
+	hifs_compute_stripe_id(volume_id, block_no, ec.placement_epoch,
+			       (uint8_t *)ec.stripe_id);
+
+	if (hifs_put_block_stripes(volume_id, block_no, &ec, ec.hash_algo,
+				   ec.stripe_id, ec.stripe_id_algo,
+				   ec.placement_epoch) == 0)
 		ok = true;
 
 	hifs_volume_block_ec_free(&ec);
@@ -598,7 +629,10 @@ bool hifs_volume_block_store(uint64_t volume_id, uint64_t block_no,
 int hifs_put_block(uint64_t volume_id, uint64_t block_no,
 		   const void *data, size_t len,
 		   enum hifs_hash_algorithm algo,
-		   const uint8_t hash[HIFS_BLOCK_HASH_SIZE])
+		   const uint8_t hash[HIFS_BLOCK_HASH_SIZE],
+		   const uint8_t *stripe_id,
+		   enum hifs_stripe_id_algorithm stripe_id_algo,
+		   uint32_t placement_epoch)
 {
 	struct hifs_ec_stripe_set ec = {0};
 	int rc;
@@ -608,6 +642,13 @@ int hifs_put_block(uint64_t volume_id, uint64_t block_no,
 		return -EAGAIN;
 	if (!data || len == 0 || len > HIFS_DEFAULT_BLOCK_SIZE)
 		return -EINVAL;
+	uint8_t derived_stripe[HIFS_STRIPE_ID_SIZE];
+	if (!stripe_id || stripe_id_algo == HIFS_HASH_ALGO_NONE) {
+		hifs_compute_stripe_id(volume_id, block_no, placement_epoch,
+				       derived_stripe);
+		stripe_id = derived_stripe;
+		stripe_id_algo = HIFS_HASH_ALGO_SHA256;
+	}
 
 	if (hash) {
 		uint8_t hash_full[32] = {0};
@@ -626,14 +667,22 @@ int hifs_put_block(uint64_t volume_id, uint64_t block_no,
 	if (!hifs_volume_block_ec_encode(data, (uint32_t)len, algo, hash, &ec))
 		return -EIO;
 
-	rc = hifs_put_block_stripes(volume_id, block_no, &ec, algo);
+	memcpy(ec.stripe_id, stripe_id, HIFS_STRIPE_ID_SIZE);
+	ec.stripe_id_algo = stripe_id_algo;
+	ec.placement_epoch = placement_epoch;
+
+	rc = hifs_put_block_stripes(volume_id, block_no, &ec, algo,
+				    stripe_id, stripe_id_algo, placement_epoch);
 	hifs_volume_block_ec_free(&ec);
 	return rc;
 }
 
 int hifs_put_block_stripes(uint64_t volume_id, uint64_t block_no,
 			   const struct hifs_ec_stripe_set *ec,
-			   enum hifs_hash_algorithm algo)
+			   enum hifs_hash_algorithm algo,
+			   const uint8_t *stripe_id,
+			   enum hifs_stripe_id_algorithm stripe_id_algo,
+			   uint32_t placement_epoch)
 {
 	struct HifsEstripeLocations stripes[HIFS_EC_STRIPES];
 	struct RaftPutBlock cmd;
@@ -668,6 +717,13 @@ int hifs_put_block_stripes(uint64_t volume_id, uint64_t block_no,
 	cmd.volume_id = volume_id;
 	cmd.block_no = block_no;
 	memcpy(cmd.hash, ec->hash, HIFS_BLOCK_HASH_SIZE);
+	cmd.stripe_id_algo = (uint8_t)stripe_id_algo;
+	if (stripe_id) {
+		memcpy(cmd.stripe_id, stripe_id, HIFS_STRIPE_ID_SIZE);
+	} else {
+		memcpy(cmd.stripe_id, ec->stripe_id, HIFS_STRIPE_ID_SIZE);
+	}
+	cmd.placement_epoch = placement_epoch;
 
 	for (size_t i = 0; i < HIFS_EC_STRIPES; ++i) {
 		cmd.ec_stripes[i].storage_node_id = stripes[i].storage_node_id;

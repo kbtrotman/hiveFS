@@ -26,6 +26,7 @@
 #include "../../hifs_shared_defs.h"
 #include <endian.h>
 #include <string.h>
+#include <strings.h>
 #include <limits.h>
 #include <errno.h>
 #include <pthread.h>
@@ -913,6 +914,61 @@ static bool get_u32(const JVal *root, const char *key, uint32_t *out)
 	return true;
 }
 
+static bool algo_from_string(const char *str,
+			     enum hifs_stripe_id_algorithm *out)
+{
+	if (!str || !out)
+		return false;
+	if (strcasecmp(str, "sha256") == 0) {
+		*out = HIFS_HASH_ALGO_SHA256;
+		return true;
+	}
+	if (strcasecmp(str, "siphash") == 0) {
+		*out = HIFS_HASH_ALGO_SIPHASH;
+		return true;
+	}
+	if (strcasecmp(str, "none") == 0) {
+		*out = HIFS_HASH_ALGO_NONE;
+		return true;
+	}
+	return false;
+}
+
+static bool parse_stripe_algo_field(const JVal *root,
+				    enum hifs_stripe_id_algorithm *out)
+{
+	const JVal *v;
+
+	if (!root || !out)
+		return false;
+
+	v = jobj_get(root, "stripe_id_algo");
+	if (!v)
+		v = jobj_get(root, "stripe_id_algorithm");
+	if (!v)
+		v = jobj_get(root, "strip_id_algorithm");
+	if (!v)
+		return false;
+
+	if (v->t == JT_NUM) {
+		if (v->num < 0 || v->num > UINT8_MAX)
+			return false;
+		*out = (enum hifs_stripe_id_algorithm)(uint8_t)v->num;
+		return true;
+	}
+	if (v->t == JT_STR && v->str)
+		return algo_from_string(v->str, out);
+	return false;
+}
+
+static const char *get_stripe_hex_field(const JVal *root)
+{
+	const char *hex = jstr(jobj_get(root, "stripe_id"));
+	if (!hex)
+		hex = jstr(jobj_get(root, "strip_id"));
+	return hex;
+}
+
 static const char *safe_str(const char *s)
 {
 	return s ? s : "";
@@ -1166,6 +1222,10 @@ static bool handle_volume_block_put(Client *c, const JVal *root)
 	const char *hash_hex = jstr(jobj_get(root, "hash"));
 	if (!get_u32(root, "hash_algo", &hash_algo) || !hash_hex)
 		return send_error_json(c->fd, "bad_request", "missing hash metadata");
+	const char *stripe_hex = get_stripe_hex_field(root);
+	enum hifs_stripe_id_algorithm stripe_algo = HIFS_HASH_ALGO_NONE;
+	uint32_t placement_epoch = 0;
+	uint8_t stripe_bytes[HIFS_STRIPE_ID_SIZE];
 
 	uint8_t *blob = NULL;
 	size_t blob_len = 0;
@@ -1182,6 +1242,20 @@ static bool handle_volume_block_put(Client *c, const JVal *root)
 		free(blob);
 		return send_error_json(c->fd, "bad_request", "invalid hash");
 	}
+	if (!stripe_hex ||
+	    !hex_to_bytes_local(stripe_hex, strlen(stripe_hex),
+				stripe_bytes, sizeof(stripe_bytes))) {
+		free(blob);
+		return send_error_json(c->fd, "bad_request", "invalid stripe_id");
+	}
+	if (!parse_stripe_algo_field(root, &stripe_algo)) {
+		free(blob);
+		return send_error_json(c->fd, "bad_request", "missing stripe_id_algo");
+	}
+	if (!get_u32(root, "placement_epoch", &placement_epoch)) {
+		free(blob);
+		return send_error_json(c->fd, "bad_request", "missing placement_epoch");
+	}
 
 	/* Keep the receive path explicit: validate first, then leader check,
 	 * then queue the request so apply-time can deliver the ack. This avoids
@@ -1197,7 +1271,8 @@ static bool handle_volume_block_put(Client *c, const JVal *root)
 	}
 
 	int rc = hifs_put_block(volume_id, block_no, blob, blob_len,
-				(enum hifs_hash_algorithm)hash_algo, hash_bytes);
+				(enum hifs_hash_algorithm)hash_algo, hash_bytes,
+				stripe_bytes, stripe_algo, placement_epoch);
 	free(blob);
 	if (rc == -EAGAIN) {
 		pending_write_cancel(c->fd, volume_id, block_no, hash_bytes);
@@ -1257,15 +1332,15 @@ static bool handle_volume_block_put_contig(Client *c, const JVal *root)
 	}
 
 	lens = (const uint32_t *)(blob + sizeof(hdr));
-	size_t hash_bytes = (size_t)block_count * sizeof(struct hifs_block_hash_wire);
-	if (blob_len < meta_len + hash_bytes) {
+	size_t meta_bytes = (size_t)block_count * sizeof(struct hifs_block_hash_wire);
+	if (blob_len < meta_len + meta_bytes) {
 		free(blob);
 		return send_error_json(c->fd, "bad_request", "payload truncated");
 	}
-	const struct hifs_block_hash_wire *hash_entries =
+	const struct hifs_block_hash_wire *meta_entries =
 		(const struct hifs_block_hash_wire *)(blob + meta_len);
-	cursor = blob + meta_len + hash_bytes;
-	data_len = blob_len - meta_len - hash_bytes;
+	cursor = blob + meta_len + meta_bytes;
+	data_len = blob_len - meta_len - meta_bytes;
 
 	/* Same phase split as the single-block path: validate the payload batch,
 	 * confirm we are allowed to propose locally, then hand blocks off to the
@@ -1297,11 +1372,17 @@ static bool handle_volume_block_put_contig(Client *c, const JVal *root)
 		}
 
 		const uint8_t *blk_data = cursor + consumed;
-		const struct hifs_block_hash_wire *entry = &hash_entries[i];
+		const struct hifs_block_hash_wire *entry = &meta_entries[i];
+		enum hifs_stripe_id_algorithm stripe_algo =
+			(enum hifs_stripe_id_algorithm)entry->stripe_id_algo;
+		uint32_t placement_epoch = le32toh(entry->placement_epoch);
 		int rc = hifs_put_block(volume_id, block_start + i,
 					blk_data, len,
 					(enum hifs_hash_algorithm)entry->hash_algo,
-					entry->hash);
+					entry->hash,
+					entry->stripe_id,
+					stripe_algo,
+					placement_epoch);
 		if (rc == -EAGAIN) {
 			free(blob);
 			return send_error_json(c->fd, "not_leader", "forward to leader");

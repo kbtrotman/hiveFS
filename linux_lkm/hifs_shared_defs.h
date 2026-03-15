@@ -300,6 +300,8 @@ extern struct
 #define HIFS_STRIPE_ID_SIZE      32  /* same size as block hash = 256-bit ID, low collision rate with existing stripes */
 #define HIFS_MAX_BLOCK_HASHES    128
 
+#define HIFS_STRIPE_LAYOUT_VERSION ".01"
+
 #define HIFS_BOOT_OFFSET		 0
 #define HIFS_BOOT_LEN            512
 #define HIFS_BOOT2_OFFSET		 (HIFS_BOOT_LEN + 512)
@@ -324,6 +326,12 @@ extern struct
 
 
 enum hifs_hash_algorithm {
+	HIFS_HASH_ALGO_NONE = 0,
+	HIFS_HASH_ALGO_SHA256 = 1,
+	HIFS_HASH_ALGO_SIPHASH = 2,
+};
+
+enum hifs_stripe_id_algorithm {
 	HIFS_HASH_ALGO_NONE = 0,
 	HIFS_HASH_ALGO_SHA256 = 1,
 	HIFS_HASH_ALGO_SIPHASH = 2,
@@ -886,12 +894,22 @@ struct hifs_contig_block_stream {
 struct hifs_block_hash_wire {
 #ifdef __KERNEL__
 	__u8  hash_algo;
-	__u8  reserved[3];
+	__u8  hash_reserved[3];
 	__u8  hash[HIFS_BLOCK_HASH_SIZE];
+	__u8  stripe_id_algo;
+	__u8  stripe_reserved[3];
+	__u8  stripe_id[HIFS_STRIPE_ID_SIZE];
+	__le32 placement_epoch;
+	__le32 meta_reserved;
 #else
 	uint8_t  hash_algo;
-	uint8_t  reserved[3];
+	uint8_t  hash_reserved[3];
 	uint8_t  hash[HIFS_BLOCK_HASH_SIZE];
+	uint8_t  stripe_id_algo;
+	uint8_t  stripe_reserved[3];
+	uint8_t  stripe_id[HIFS_STRIPE_ID_SIZE];
+	uint32_t placement_epoch;
+	uint32_t meta_reserved;
 #endif
 };
 

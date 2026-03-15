@@ -41,6 +41,11 @@ void hifs_ec_choose_placement(uint64_t volume_id,
                               uint64_t block_no,
                               struct HifsEstripeLocations out_stripes[HIFS_EC_STRIPES]);
 
+void hifs_compute_stripe_id(uint64_t volume_id,
+                            uint64_t block_no,
+                            uint32_t placement_epoch,
+                            uint8_t out[HIFS_STRIPE_ID_SIZE]);
+
 /* Allocate a unique global stripe id (could be per-Raft-group counter) */
 uint64_t hifs_alloc_estripe_id(void);
 
