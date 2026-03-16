@@ -15,11 +15,7 @@
 #define HIVE_WBLFILE HIVE_WBL_DIR "/wbl-%llu.log"
 
 #define HIFS_WBL_VERSION       1
-#define HIFS_MCL_VERSION       1
 
-#define HIFS_WBL_SIZE 10  /*Sizes here in GB because they don;t need to be large.*/
-#define HIFS_MCL_SIZE 10
-#define HIFS_WLOGS_HEADROOM_SIZE 10
 #define HIFS_WBL_TYPE "write-back-log"
 #define HIFS_WBL_END "AT_END_AT_END"
 

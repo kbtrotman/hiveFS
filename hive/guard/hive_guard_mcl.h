@@ -9,11 +9,23 @@
 
  #include <string.h>
 
+#include "hive_guard_erasure_code.h"
 #include "../common/hive_common.h"
-
+#include "../../linux_lkm/hifs_shared_defs.h"
 
 #define HIVE_MCLFILE HIVE_MCL_DIR "/mcl-%llu.log"
 #define HIVE_MCL_DIR HIVE_DATA_DIR "/hive_mcl"
+
+#define HIFS_MCL_VERSION       1
+
+
+#define HIFS_MCL_TYPE "metadata-change-log"
+#define HIFS_MCL_END "AT_END_AT_END"
+
+#define HIFS_MCL_MAX_LOGS 7
+#define HIFS_MCL_GB (1024ULL * 1024ULL * 1024ULL)
+#define HIFS_MCL_MAX_BYTES ((uint64_t)HIFS_MCL_SIZE * HIFS_MCL_GB)
+#define HIFS_MCL_MAGIC_VALUE 0xABBADABBUL
 
 struct hifs_mcl_hdr {
     uint32_t magic;
@@ -26,29 +38,31 @@ struct hifs_mcl_hdr {
     uint32_t crc32;
 };
 
-enum hifs_mcl_rec_type {
-    HIFS_MCL_INODE_HOT_UPDATE = 1,
-    HIFS_MCL_MAP_DELTA_APPEND,
-    HIFS_MCL_DIR_DELTA_APPEND,
-    HIFS_MCL_STRIPE_REF_UPDATE,
-    HIFS_MCL_PERSIST_STATE_UPDATE,
-    HIFS_MCL_CACHE_STATE_UPDATE,
-    HIFS_MCL_COALESCE_CHECKPOINT
+enum hifs_meta_change_item {
+    CHANGE_INODE,
+    CHANGE_DIRENTRY,
+    CHANGE_STRIPE_INFO,
+    CHANGE_ROOT_DIRENTRY,
+    CHANGE_VOLUME_SUPERBLOCK
 };
 
-enum change_type {
-    CHANGE_INODE,
-    CHANGE_MAP,
-    CHANGE_DIR,
-    CHANGE_STRIPE_REF,
-    CHANGE_PERSIST_STATE,
-    CHANGE_CACHE_STATE,
-    CHANGE_SIZE,
-    CHANGE_DELETE
+enum hifs_mcl_change_type {
+    HIFS_MCL_UPDATE = 1,
+    HIFS_MCL_NEW,
+    HIFS_MCL_DELETE,
+    HIFS_MCL_STRIPE_ADD,
+    HIFS_MCL_STATE_UPDATE,
+    HIFS_MCL_TIME_UPDATE,
+    HIFS_MCL_CHECKPOINT
 };
+
+struct hifs_mcl_record_prefix {
+    uint8_t item;
+    uint8_t change_type;
+}
 
 struct hifs_mcl_mem_entry {
-    enum change_type type;
+    enum hifs_mcl_change_type type;
     uint64_t stripe_id[HIFS_EC_TOTAL_SRIPES];  /* for stripe ref updates */
     uint64_t txn_id;
     uint32_t state;
@@ -65,11 +79,18 @@ struct hifs_mcl_mem_entry {
 
 /* Prototypes */
 
-int hifs_mcl_open(...);
-int hifs_mcl_close(...);
-int hifs_mcl_append(...);
-int hifs_mcl_replay(...);
-int hifs_mcl_checkpoint(...);
-int hifs_mcl_mark_placement_assigned(...);
-int hifs_mcl_mark_fragment_sent(...);
-int hifs_mcl_mark_committed(...);
+struct hifs_mcl_ctx {
+    int fd;
+    uint64_t next_seqno;
+    char path[256];
+};
+
+int hifs_mcl_open(struct hifs_mcl_ctx *ctx, const char *path, bool create);
+int hifs_mcl_close(struct hifs_mcl_ctx *ctx);
+int hifs_mcl_append(struct hifs_mcl_ctx *ctx,
+                    enum hifs_meta_change_item item,
+                    enum hifs_mcl_change_type change_type,
+                    const void *entry,
+                    size_t entry_len,
+                    uint64_t txn_id,
+                    uint64_t object_id);

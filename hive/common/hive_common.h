@@ -91,6 +91,10 @@
 #define HIVE_BOOTSTRAP_BACKLOG   4
 #define HIVE_JOB_ID_LEN          64
 
+#define HIFS_WBL_SIZE 10  /*Sizes here in GB because they don't need to be large.*/
+#define HIFS_MCL_SIZE 10
+#define HIFS_WLOGS_HEADROOM_SIZE 10
+
 #define HIFS_OBJ_ID_LEN 33
 #define HIFS_EC_DATA_FRAGS   4
 #define HIFS_EC_PARITY_FRAGS 2
