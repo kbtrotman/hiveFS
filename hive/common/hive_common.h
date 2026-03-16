@@ -90,6 +90,11 @@
 #ifndef HIVE_BOOTSTRAP_BACKLOG
 #define HIVE_BOOTSTRAP_BACKLOG   4
 #define HIVE_JOB_ID_LEN          64
+
+#define HIFS_OBJ_ID_LEN 33
+#define HIFS_EC_DATA_FRAGS   4
+#define HIFS_EC_PARITY_FRAGS 2
+#define HIFS_EC_TOTAL_SRIPES 6
 #endif
 
 
