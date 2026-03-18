@@ -127,6 +127,8 @@ struct hifs_wbl_ctx {
     char path[256];
 };
 
+extern struct hifs_wbl_ctx g_hive_guard_wbl_ctx;
+
 /* Prototypes */
 
 int hifs_wbl_open(struct hifs_wbl_ctx *ctx, const char *path, bool create);

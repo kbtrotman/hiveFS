@@ -85,6 +85,8 @@ struct hifs_mcl_ctx {
     char path[256];
 };
 
+extern struct hifs_mcl_ctx g_hive_guard_mcl_ctx;
+
 int hifs_mcl_open(struct hifs_mcl_ctx *ctx, const char *path, bool create);
 int hifs_mcl_close(struct hifs_mcl_ctx *ctx);
 int hifs_mcl_append(struct hifs_mcl_ctx *ctx,

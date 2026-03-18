@@ -21,7 +21,9 @@
 
 #include "hive_guard_mcl.h"
 
-
+struct hifs_mcl_ctx g_hive_guard_mcl_ctx = {
+    .fd = -1,
+};
 
 static pthread_mutex_t g_mcl_rotate_mu = PTHREAD_MUTEX_INITIALIZER;
 static uint32_t g_mcl_next_slot;

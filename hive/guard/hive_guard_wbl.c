@@ -22,6 +22,9 @@
 
 #include "hive_guard_wbl.h"
 
+struct hifs_wbl_ctx g_hive_guard_wbl_ctx = {
+    .fd = -1,
+};
 
 static pthread_mutex_t g_wbl_rotate_mu = PTHREAD_MUTEX_INITIALIZER;
 static uint32_t g_wbl_next_slot;

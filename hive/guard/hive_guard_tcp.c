@@ -23,6 +23,8 @@
 #include "hive_guard.h"
 #include "hive_guard_sql.h"
 #include "hive_guard_stats.h"
+#include "hive_guard_wbl.h"
+#include "hive_guard_mcl.h"
 #include "../../hifs_shared_defs.h"
 #include <endian.h>
 #include <string.h>
@@ -31,6 +33,54 @@
 #include <errno.h>
 #include <pthread.h>
 #include <openssl/sha.h>
+
+static int guard_logs_ensure_directory(const char *path)
+{
+	if (!path || !*path) {
+		errno = EINVAL;
+		return -1;
+	}
+	if (mkdir(path, 0755) == 0 || errno == EEXIST)
+		return 0;
+	hifs_err("hive_guard: mkdir(%s) failed: %s", path, strerror(errno));
+	return -1;
+}
+
+static int guard_logs_start(void)
+{
+	char wbl_path[sizeof(g_hive_guard_wbl_ctx.path)];
+	char mcl_path[sizeof(g_hive_guard_mcl_ctx.path)];
+
+	if (guard_logs_ensure_directory(HIVE_DATA_DIR) < 0)
+		return -1;
+	if (guard_logs_ensure_directory(HIVE_WBL_DIR) < 0)
+		return -1;
+	if (guard_logs_ensure_directory(HIVE_MCL_DIR) < 0)
+		return -1;
+
+	snprintf(wbl_path, sizeof(wbl_path), HIVE_WBLFILE, 0ULL);
+	if (hifs_wbl_open(&g_hive_guard_wbl_ctx, wbl_path, true) < 0) {
+		hifs_err("hive_guard: unable to open WBL %s: %s",
+			 wbl_path, strerror(errno));
+		return -1;
+	}
+
+	snprintf(mcl_path, sizeof(mcl_path), HIVE_MCLFILE, 0ULL);
+	if (hifs_mcl_open(&g_hive_guard_mcl_ctx, mcl_path, true) < 0) {
+		hifs_err("hive_guard: unable to open MCL %s: %s",
+			 mcl_path, strerror(errno));
+		hifs_wbl_close(&g_hive_guard_wbl_ctx);
+		return -1;
+	}
+
+	return 0;
+}
+
+static void guard_logs_stop(void)
+{
+	hifs_wbl_close(&g_hive_guard_wbl_ctx);
+	hifs_mcl_close(&g_hive_guard_mcl_ctx);
+}
 
 static int hex_nibble(char c)
 {
@@ -1559,12 +1609,19 @@ int hive_guard_server_main(void)
 	const char *listen_addr = get_env(ENV_LISTEN_ADDR, "0.0.0.0");
 	int listen_port = get_env_int(ENV_LISTEN_PORT, atoi(HIFS_GUARD_PORT_STR));
 	int idle_ms = load_idle_timeout_ms();
+	bool logs_started = false;
 
 	openlog("hive_guard", LOG_PID | LOG_NDELAY, LOG_USER);
+	if (guard_logs_start() < 0) {
+		return EXIT_FAILURE;
+	}
+	logs_started = true;
 
 	init_hive_link();
 	if (!sqldb.sql_init || !sqldb.conn) {
 		hifs_err("Unable to connect to MariaDB");
+		if (logs_started)
+			guard_logs_stop();
 		return EXIT_FAILURE;
 	}
 
@@ -1573,6 +1630,8 @@ int hive_guard_server_main(void)
 	int sfd = socket(AF_INET, SOCK_STREAM, 0);
 	if (sfd < 0) {
 		perror("socket");
+		if (logs_started)
+			guard_logs_stop();
 		return EXIT_FAILURE;
 	}
 
@@ -1586,11 +1645,15 @@ int hive_guard_server_main(void)
 	if (bind(sfd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
 		perror("bind");
 		close(sfd);
+		if (logs_started)
+			guard_logs_stop();
 		return EXIT_FAILURE;
 	}
 	if (listen(sfd, 128) < 0) {
 		perror("listen");
 		close(sfd);
+		if (logs_started)
+			guard_logs_stop();
 		return EXIT_FAILURE;
 	}
 	set_nonblock(sfd);
@@ -1601,6 +1664,8 @@ int hive_guard_server_main(void)
 	if (ep < 0) {
 		perror("epoll_create1");
 		close(sfd);
+		if (logs_started)
+			guard_logs_stop();
 		return EXIT_FAILURE;
 	}
 	struct epoll_event ev = {
@@ -1685,5 +1750,7 @@ int hive_guard_server_main(void)
 	close(sfd);
 	close_hive_link();
 	closelog();
+	if (logs_started)
+		guard_logs_stop();
 	return EXIT_SUCCESS;
 }
