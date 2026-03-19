@@ -7,10 +7,13 @@
  *
  */
 
- #include <string.h>
+#pragma once
+
+#include <string.h>
 
 #include "../common/hive_common.h"
 
+struct hive_storage_node;
 
 #define HIVE_PLACEMENT_DIR HIVE_DATA_DIR "/hive_placement"
 #define HIVE_PLACEMENT_FILE HIVE_PLACEMENT_DIR "/spl-%llu.log"  /* may not need this, it's probably in the WBL already. */
@@ -27,12 +30,16 @@
 #define HIFS_READ_RETURN_CACHE_PCT       20
 #define HIFS_EMERGENCY_HEADROOM_PCT      10
 
+#define HG_FREE_BONUS_SHIFT   20u
+#define HG_PARITY_RANK_PENALTY ((unsigned)HIFS_EC_TOTAL_SRIPES)
+#define HG_MIN_FREE_BYTES    ((uint64_t)HIFS_SEGMENT_SIZE)
+
 
 enum hifs_stripe_state {
     HIFS_STRIPE_NEW = 0,
     HIFS_STRIPE_INTENT_LOGGED,
     HIFS_STRIPE_LANDING_RESERVED,
-    HIFS_STRIPE_LANDING_WRITTEN,
+    HIFS_STRIPE_LANDING_ECCODED,
     HIFS_STRIPE_PREPARED,
     HIFS_STRIPE_PLACED,
     HIFS_STRIPE_OUTBOUND_QUEUED,
@@ -69,8 +76,44 @@ struct hifs_fragment_target {
 struct hifs_placement_result {
     uint64_t stripe_id;
     uint32_t target_count;
-    struct hifs_fragment_target targets[HIFS_NUM_OF_SRIPES];
+    struct hifs_fragment_target targets[HIFS_EC_TOTAL_SRIPES];
 };
 
+struct hg_node_candidate {
+    const struct hive_storage_node *node;
+    uint32_t node_id;
+    uint64_t free_bytes;
+};
 
+struct hg_node_usage_stats {
+    unsigned total;
+    unsigned parity;
+};
 
+struct hg_choice {
+    const struct hg_node_candidate *candidate;
+    struct hg_node_usage_stats usage_before;
+};
+
+struct hifs_placement_seed {
+    uint64_t cluster_id;
+    uint64_t fs_id;
+    uint64_t inode_id;
+    uint64_t stripe_id;
+    uint64_t txn_id;
+    uint64_t lba_start;
+    uint32_t block_count;
+    uint32_t generation;
+    uint32_t placement_epoch;
+    char block_id[HIFS_OBJ_ID_LEN];
+};
+
+struct hifs_wbl_mem_entry;
+
+int hifs_place_stripe(const struct hifs_placement_seed *seed,
+                      struct hifs_placement_result *out);
+
+int hifs_assign_placement(struct hifs_wbl_mem_entry *entry,
+                          uint64_t fs_id,
+                          uint32_t placement_epoch,
+                          struct hifs_placement_result *out);

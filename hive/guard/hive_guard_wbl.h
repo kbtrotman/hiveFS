@@ -36,7 +36,7 @@ struct hifs_wbl_hdr {
 
 enum hifs_wbl_rec_type {
     HIFS_WBL_REC_WRITE_INTENT = 1,
-    HIFS_WBL_REC_LANDING_WRITTEN,  /* written to raft */
+    HIFS_WBL_REC_LANDING_ECCODED,  /* written to raft */
     HIFS_WBL_REC_STRIPE_PREPARED,  /* EC is done, frags prepared */
     HIFS_WBL_REC_PLACEMENT_ASSIGNED,  /* placement algorithm run*/
     HIFS_WBL_REC_OUTBOUND_QUEUED,
@@ -108,6 +108,13 @@ struct hifs_wbl_placement_rec {
     struct hifs_fragment_target targets[HIFS_EC_TOTAL_SRIPES];
 };
 
+struct hifs_wbl_outbound_queued_rec {
+    uint64_t txn_id;
+    uint64_t stripe_id;
+    uint32_t node_id;
+    struct hifs_seg_loc frag_loc;
+};
+
 struct hifs_wbl_fragment_event_rec {
     uint64_t txn_id;
     uint64_t stripe_id;
@@ -146,12 +153,14 @@ int hifs_wbl_replay(struct hifs_wbl_ctx *ctx,
 int hifs_wbl_checkpoint(...);
 int hifs_wbl_mark_write_intent(struct hifs_wbl_ctx *ctx,
                                const struct hifs_wbl_write_intent_rec *rec);
-int hifs_wbl_mark_landing_written(struct hifs_wbl_ctx *ctx,
+int hifs_wbl_mark_landing_eccoded(struct hifs_wbl_ctx *ctx,
                                   const struct hifs_wbl_landing_rec *rec);
 int hifs_wbl_mark_stripe_prepared(struct hifs_wbl_ctx *ctx,
                                   const struct hifs_wbl_prepared_rec *rec);
 int hifs_wbl_mark_placement_assigned(struct hifs_wbl_ctx *ctx,
                                      const struct hifs_wbl_placement_rec *rec);
+int hifs_wbl_mark_outbound_queued(struct hifs_wbl_ctx *ctx,
+                                  const struct hifs_wbl_outbound_queued_rec *rec);
 int hifs_wbl_mark_fragment_sent(struct hifs_wbl_ctx *ctx,
                                 const struct hifs_wbl_fragment_event_rec *rec);
 int hifs_wbl_mark_fragment_acked(struct hifs_wbl_ctx *ctx,

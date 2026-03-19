@@ -865,10 +865,6 @@ static int hg_raft_apply_cmd(const struct RaftCmd *cmd, uint64_t log_index)
                                             HIFS_EC_STRIPES);
         }
         
-        hifs_guard_notify_write_ack(cmd->u.block.volume_id,
-                                    cmd->u.block.block_no,
-                                    cmd->u.block.hash,
-                                    HIFS_BLOCK_HASH_SIZE);
         return 0;
     }
     case HG_OP_PUT_DIRENT: {

@@ -353,11 +353,11 @@ int hifs_wbl_mark_write_intent(struct hifs_wbl_ctx *ctx,
                          sizeof(*rec));
 }
 
-int hifs_wbl_mark_landing_written(struct hifs_wbl_ctx *ctx,
+int hifs_wbl_mark_landing_eccoded(struct hifs_wbl_ctx *ctx,
                                   const struct hifs_wbl_landing_rec *rec)
 {
     return hifs_wbl_emit(ctx,
-                         HIFS_WBL_REC_LANDING_WRITTEN,
+                         HIFS_WBL_REC_LANDING_ECCODED,
                          rec,
                          sizeof(*rec));
 }
@@ -376,6 +376,15 @@ int hifs_wbl_mark_placement_assigned(struct hifs_wbl_ctx *ctx,
 {
     return hifs_wbl_emit(ctx,
                          HIFS_WBL_REC_PLACEMENT_ASSIGNED,
+                         rec,
+                         sizeof(*rec));
+}
+
+int hifs_wbl_mark_outbound_queued(struct hifs_wbl_ctx *ctx,
+                                  const struct hifs_wbl_outbound_queued_rec *rec)
+{
+    return hifs_wbl_emit(ctx,
+                         HIFS_WBL_REC_OUTBOUND_QUEUED,
                          rec,
                          sizeof(*rec));
 }
