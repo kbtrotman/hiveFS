@@ -134,6 +134,7 @@ struct hive_seg_cache_ctx {
     int read_return_idx_fd;
     struct hive_seg_index_mem landing_idx;
     struct hive_seg_index_mem outbound_idx;
+    struct hive_seg_index_mem read_return_idx;
 };
 
 struct hive_seg_single_request {
@@ -155,3 +156,9 @@ int hive_seg_submit_contig(const struct hive_seg_contig_request *req);
 
 int hive_recieve_data_plane(void);
 void hive_segmentation_shutdown(void);
+
+int hive_seg_checkout_persisted_segment(uint64_t seg_id,
+                                        uint8_t **out_data,
+                                        size_t *out_len);
+void hive_seg_release_persisted_segment(uint64_t seg_id,
+                                        bool changed);

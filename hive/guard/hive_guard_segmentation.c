@@ -17,9 +17,11 @@
 
 #include "hive_guard_segmentation.h"
 #include "hive_guard_wbl.h"
+#include "hive_guard_kv.h"
 #include "hive_guard_raft.h"
 #include "hive_guard_mcl.h"
 #include "hive_guard_stats.h"
+#include "hive_guard_sn_tcp.h"
 #include "hive_guard.h"
 
 
@@ -34,8 +36,8 @@ static pthread_t g_seg_workers[HIVE_SEG_MAX_WORKERS];
 static size_t g_seg_worker_count;
 static _Atomic bool g_seg_started = false;
 static bool g_seg_running;
+static bool g_seg_sn_running;
 static atomic_uint_fast64_t g_seg_txn_seq = ATOMIC_VAR_INIT(1);
-
 static pthread_mutex_t g_seg_landing_io_mu = PTHREAD_MUTEX_INITIALIZER;
 static struct hive_seg_cache_ctx g_seg_cache = {
     .mu = PTHREAD_MUTEX_INITIALIZER,
@@ -53,7 +55,807 @@ static struct hive_seg_cache_ctx g_seg_cache = {
         .count = 0,
         .capacity = 0,
     },
+    .read_return_idx = {
+        .entries = NULL,
+        .count = 0,
+        .capacity = 0,
+    },
 };
+
+_Static_assert(HIFS_EC_TOTAL_SRIPES <= 8,
+               "outbound stripe commit bitmap supports at most 8 fragments");
+_Static_assert(sizeof(struct hifs_fragment_target) ==
+                   sizeof(uint32_t) * 2u,
+               "fragment target layout changed; update outbound commit handling");
+
+#define HIVE_SEG_FULL_ACK_BITMAP                                            \
+    ((uint8_t)(((uint32_t)1u << (uint32_t)HIFS_EC_TOTAL_SRIPES) - 1u))
+
+struct hive_seg_outbound_commit_entry {
+    uint64_t seg_id;
+    uint32_t node_id;
+};
+
+static pthread_mutex_t g_seg_outbound_commit_mu = PTHREAD_MUTEX_INITIALIZER;
+static struct hive_seg_outbound_commit_entry *g_seg_outbound_commits;
+static size_t g_seg_outbound_commit_count;
+static size_t g_seg_outbound_commit_capacity;
+
+static int hive_seg_persist_outbound_segment(uint32_t node_id,
+                                             uint64_t seg_id);
+
+static bool hive_seg_outbound_segment_closed(uint32_t node_id,
+                                             uint64_t seg_id)
+{
+    bool closed = false;
+    pthread_mutex_lock(&g_seg_outbound_commit_mu);
+    for (size_t i = 0; i < g_seg_outbound_commit_count; ++i) {
+        if (g_seg_outbound_commits[i].node_id == node_id &&
+            g_seg_outbound_commits[i].seg_id == seg_id) {
+            closed = true;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&g_seg_outbound_commit_mu);
+    return closed;
+}
+
+struct hive_seg_writable_region {
+    uint64_t seg_id;
+    uint32_t next_offset;
+    uint32_t free_bytes;
+};
+
+static pthread_mutex_t g_seg_writable_mu = PTHREAD_MUTEX_INITIALIZER;
+static struct hive_seg_writable_region *g_seg_writable_regions;
+static size_t g_seg_writable_region_count;
+static size_t g_seg_writable_region_capacity;
+
+static inline uint32_t hive_seg_writable_align(uint32_t len)
+{
+    return hive_seg_align_len(len);
+}
+
+static struct hive_seg_writable_region *
+hive_seg_writable_find_locked(uint64_t seg_id)
+{
+    for (size_t i = 0; i < g_seg_writable_region_count; ++i) {
+        if (g_seg_writable_regions[i].seg_id == seg_id)
+            return &g_seg_writable_regions[i];
+    }
+    return NULL;
+}
+
+static void hive_seg_writable_remove_idx_locked(size_t idx)
+{
+    if (idx >= g_seg_writable_region_count)
+        return;
+    if (idx + 1u < g_seg_writable_region_count) {
+        g_seg_writable_regions[idx] =
+            g_seg_writable_regions[g_seg_writable_region_count - 1u];
+    }
+    --g_seg_writable_region_count;
+}
+
+static bool hive_seg_writable_track(uint64_t seg_id,
+                                    uint32_t start_offset,
+                                    uint32_t free_bytes)
+{
+    uint32_t aligned = hive_seg_writable_align(free_bytes);
+    if (aligned == 0)
+        return false;
+
+    pthread_mutex_lock(&g_seg_writable_mu);
+    struct hive_seg_writable_region *region =
+        hive_seg_writable_find_locked(seg_id);
+    if (!region) {
+        if (g_seg_writable_region_count == g_seg_writable_region_capacity) {
+            size_t new_cap = g_seg_writable_region_capacity ?
+                             g_seg_writable_region_capacity * 2u : 16u;
+            void *tmp = realloc(g_seg_writable_regions,
+                                new_cap * sizeof(*g_seg_writable_regions));
+            if (!tmp) {
+                pthread_mutex_unlock(&g_seg_writable_mu);
+                return false;
+            }
+            g_seg_writable_regions = tmp;
+            g_seg_writable_region_capacity = new_cap;
+        }
+        region = &g_seg_writable_regions[g_seg_writable_region_count++];
+        region->seg_id = seg_id;
+        region->next_offset = start_offset;
+        region->free_bytes = aligned;
+    } else {
+        region->next_offset = start_offset;
+        region->free_bytes = aligned;
+    }
+    pthread_mutex_unlock(&g_seg_writable_mu);
+    return true;
+}
+
+static bool hive_seg_writable_alloc(uint32_t len, struct hifs_seg_loc *loc)
+{
+    if (!loc || len == 0)
+        return false;
+
+    uint32_t aligned = hive_seg_writable_align(len);
+    pthread_mutex_lock(&g_seg_writable_mu);
+    size_t best_idx = SIZE_MAX;
+    uint32_t best_slack = UINT32_MAX;
+    for (size_t i = 0; i < g_seg_writable_region_count; ++i) {
+        struct hive_seg_writable_region *region = &g_seg_writable_regions[i];
+        if (region->free_bytes < aligned)
+            continue;
+        uint32_t slack = region->free_bytes - aligned;
+        if (slack < best_slack) {
+            best_slack = slack;
+            best_idx = i;
+            if (slack == 0)
+                break;
+        }
+    }
+
+    if (best_idx == SIZE_MAX) {
+        pthread_mutex_unlock(&g_seg_writable_mu);
+        return false;
+    }
+
+    struct hive_seg_writable_region *region =
+        &g_seg_writable_regions[best_idx];
+    loc->seg_id = region->seg_id;
+    loc->offset = region->next_offset;
+    loc->length = len;
+
+    region->next_offset += aligned;
+    region->free_bytes -= aligned;
+    if (region->free_bytes == 0)
+        hive_seg_writable_remove_idx_locked(best_idx);
+
+    pthread_mutex_unlock(&g_seg_writable_mu);
+    return true;
+}
+
+static bool hive_seg_outbound_segment_mark_closed(uint32_t node_id,
+                                                  uint64_t seg_id)
+{
+    pthread_mutex_lock(&g_seg_outbound_commit_mu);
+    for (size_t i = 0; i < g_seg_outbound_commit_count; ++i) {
+        if (g_seg_outbound_commits[i].node_id == node_id &&
+            g_seg_outbound_commits[i].seg_id == seg_id) {
+            pthread_mutex_unlock(&g_seg_outbound_commit_mu);
+            return false;
+        }
+    }
+
+    if (g_seg_outbound_commit_count == g_seg_outbound_commit_capacity) {
+        size_t new_cap = g_seg_outbound_commit_capacity ?
+                         g_seg_outbound_commit_capacity * 2u : 64u;
+        void *tmp = realloc(g_seg_outbound_commits,
+                            new_cap * sizeof(*g_seg_outbound_commits));
+        if (!tmp) {
+            pthread_mutex_unlock(&g_seg_outbound_commit_mu);
+            hifs_err("hive_segmentation: unable to grow outbound commit tracking for seg=%llu node=%u",
+                     (unsigned long long)seg_id,
+                     node_id);
+            return true;
+        }
+        g_seg_outbound_commits = tmp;
+        g_seg_outbound_commit_capacity = new_cap;
+    }
+
+    g_seg_outbound_commits[g_seg_outbound_commit_count++] =
+        (struct hive_seg_outbound_commit_entry){
+            .seg_id = seg_id,
+            .node_id = node_id,
+        };
+    pthread_mutex_unlock(&g_seg_outbound_commit_mu);
+    return true;
+}
+
+static struct hive_seg_index_disk_rec *
+hive_seg_cache_find_landing_rec_locked(uint64_t volume_id,
+                                       uint64_t block_no,
+                                       size_t *out_idx)
+{
+    if (!g_seg_cache.landing_idx.entries)
+        return NULL;
+    for (size_t i = 0; i < g_seg_cache.landing_idx.count; ++i) {
+        struct hive_seg_index_disk_rec *rec =
+            &g_seg_cache.landing_idx.entries[i];
+        if (rec->volume_id == volume_id && rec->block_no == block_no) {
+            if (out_idx)
+                *out_idx = i;
+            return rec;
+        }
+    }
+    return NULL;
+}
+
+static bool hive_seg_cache_is_tail_block_locked(const struct hive_seg_index_disk_rec *rec,
+                                                size_t idx)
+{
+    if (!rec)
+        return false;
+    uint64_t seg_id = rec->seg_id;
+    uint64_t tail_end = rec->offset + (uint64_t)hive_seg_align_len(rec->length);
+    for (size_t i = 0; i < g_seg_cache.landing_idx.count; ++i) {
+        if (i == idx)
+            continue;
+        const struct hive_seg_index_disk_rec *other =
+            &g_seg_cache.landing_idx.entries[i];
+        if (other->seg_id != seg_id)
+            continue;
+        uint64_t other_end =
+            other->offset + (uint64_t)hive_seg_align_len(other->length);
+        if (other_end > tail_end)
+            return false;
+        if (other_end == tail_end && other->offset > rec->offset)
+            return false;
+    }
+    return true;
+}
+
+static int hive_seg_landing_sync_entry_locked(size_t idx)
+{
+    if (g_seg_cache.landing_idx_fd < 0)
+        return 0;
+    if (idx >= g_seg_cache.landing_idx.count)
+        return -EINVAL;
+    off_t offset = (off_t)idx * (off_t)sizeof(struct hive_seg_index_disk_rec);
+    return hive_seg_pwrite_all(g_seg_cache.landing_idx_fd,
+                               &g_seg_cache.landing_idx.entries[idx],
+                               sizeof(struct hive_seg_index_disk_rec),
+                               offset);
+}
+
+static void hive_seg_landing_remove_entry_locked(size_t idx)
+{
+    struct hive_seg_index_mem *mem = &g_seg_cache.landing_idx;
+    if (idx >= mem->count)
+        return;
+    if (idx + 1u < mem->count) {
+        memmove(&mem->entries[idx],
+                &mem->entries[idx + 1u],
+                (mem->count - idx - 1u) * sizeof(*mem->entries));
+    }
+    --mem->count;
+    hive_seg_rewrite_index_locked(g_seg_cache.landing_idx_fd,
+                                  mem,
+                                  0,
+                                  "landing");
+}
+
+static bool hive_seg_prepare_existing_landing(struct hive_seg_block_input *blk)
+{
+    if (!blk || blk->len == 0)
+        return false;
+
+    if (hive_seg_cache_init() != 0)
+        return false;
+
+    pthread_mutex_lock(&g_seg_cache.mu);
+    if (!g_seg_cache.ready) {
+        pthread_mutex_unlock(&g_seg_cache.mu);
+        return false;
+    }
+
+    size_t idx = 0;
+    struct hive_seg_index_disk_rec *rec =
+        hive_seg_cache_find_landing_rec_locked(blk->volume_id,
+                                               blk->block_no,
+                                               &idx);
+    if (!rec) {
+        pthread_mutex_unlock(&g_seg_cache.mu);
+        return false;
+    }
+
+    uint32_t old_len = rec->length;
+    if (old_len == blk->len) {
+        blk->landing_loc.seg_id = rec->seg_id;
+        blk->landing_loc.offset = rec->offset;
+        blk->landing_loc.length = rec->length;
+        blk->has_landing_loc = true;
+        pthread_mutex_unlock(&g_seg_cache.mu);
+        return true;
+    }
+
+    uint32_t old_aligned = hive_seg_align_len(old_len);
+    uint32_t new_aligned = hive_seg_align_len(blk->len);
+    bool is_tail = hive_seg_cache_is_tail_block_locked(rec, idx);
+    struct hive_seg_index_disk_rec rec_copy = *rec;
+
+    if (blk->len < old_len && is_tail && old_aligned >= new_aligned) {
+        uint32_t freed_bytes = old_aligned - new_aligned;
+        rec->length = blk->len;
+        hive_seg_landing_sync_entry_locked(idx);
+        pthread_mutex_unlock(&g_seg_cache.mu);
+
+        blk->landing_loc.seg_id = rec_copy.seg_id;
+        blk->landing_loc.offset = rec_copy.offset;
+        blk->landing_loc.length = blk->len;
+        blk->has_landing_loc = true;
+
+        if (freed_bytes > 0) {
+            uint32_t start = rec_copy.offset + new_aligned;
+            hive_seg_writable_track(rec_copy.seg_id, start, freed_bytes);
+        }
+        return true;
+    }
+
+    hive_seg_landing_remove_entry_locked(idx);
+    pthread_mutex_unlock(&g_seg_cache.mu);
+
+    if (is_tail && old_aligned > 0)
+        hive_seg_writable_track(rec_copy.seg_id, rec_copy.offset, old_aligned);
+    return false;
+}
+
+static void hive_seg_log_stripe_committed_record(uint64_t seg_id,
+                                                 uint8_t ack_bitmap)
+{
+    struct hifs_wbl_commit_rec rec = {
+        .txn_id = seg_id,
+        .stripe_id = seg_id,
+        .ack_bitmap = ack_bitmap,
+    };
+    if (hifs_wbl_mark_committed(&g_hive_guard_wbl_ctx, &rec) != 0) {
+        hifs_err("hive_segmentation: unable to append WBL stripe committed record for seg=%llu: %s",
+                 (unsigned long long)seg_id,
+                 strerror(errno));
+    }
+}
+
+static void hive_seg_log_stripe_persisting_record(uint64_t seg_id,
+                                                  uint8_t persist_bitmap)
+{
+    struct hifs_wbl_persisting_rec rec = {
+        .txn_id = seg_id,
+        .stripe_id = seg_id,
+        .persist_bitmap = persist_bitmap,
+    };
+    if (hifs_wbl_mark_persisting(&g_hive_guard_wbl_ctx, &rec) != 0) {
+        hifs_err("hive_segmentation: unable to append WBL stripe persisting record for seg=%llu: %s",
+                 (unsigned long long)seg_id,
+                 strerror(errno));
+    }
+}
+
+static void hive_seg_publish_segment_commit(uint32_t node_id,
+                                            uint64_t seg_id,
+                                            uint8_t ack_bitmap)
+{
+    struct RaftCmd cmd = {0};
+    cmd.op_type = HG_OP_PUT_CLUSTER_AUDIT;
+    struct RaftClusterAudit *audit = &cmd.u.cluster_audit;
+    audit->cluster_id = hbc.cluster_id;
+    audit->node_id = storage_node_id;
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    audit->timestamp_ns = (uint64_t)ts.tv_sec * 1000000000ull +
+                          (uint64_t)ts.tv_nsec;
+    snprintf(audit->message,
+             sizeof(audit->message),
+             "stripe-commit seg=%llu node=%u ack=0x%02x",
+             (unsigned long long)seg_id,
+             node_id,
+             ack_bitmap);
+    int rc = hg_raft_submit_cmd_sync(&cmd, NULL);
+    if (rc != 0) {
+        int err = rc < 0 ? -rc : rc;
+        hifs_err("hive_segmentation: failed to publish raft commit for seg=%llu: %s",
+                 (unsigned long long)seg_id,
+                 strerror(err));
+    }
+}
+
+static void hive_seg_finalize_persisting(uint32_t node_id,
+                                         uint64_t seg_id,
+                                         uint8_t persist_bitmap);
+
+static void hive_seg_stripe_commit(uint32_t node_id,
+                                   uint64_t seg_id,
+                                   uint8_t ack_bitmap)
+{
+    if (!hive_seg_outbound_segment_mark_closed(node_id, seg_id))
+        return;
+
+    int rc = hive_seg_persist_outbound_segment(node_id, seg_id);
+    if (rc != 0) {
+        int err = rc < 0 ? -rc : rc;
+        hifs_crit("hive_segmentation: failed to persist outbound segment seg=%llu node=%u: %s",
+                 (unsigned long long)seg_id,
+                 node_id,
+                 strerror(err));
+        return;
+    }
+
+    hive_seg_log_stripe_persisting_record(seg_id, ack_bitmap);
+    hive_seg_publish_segment_commit(node_id, seg_id, ack_bitmap);
+    hive_seg_finalize_persisting(node_id, seg_id, ack_bitmap);
+}
+
+static void hive_seg_remove_outbound_segment(uint32_t node_id,
+                                             uint64_t seg_id)
+{
+    if (node_id == 0 || seg_id == 0)
+        return;
+
+    char path[PATH_MAX];
+    hive_seg_outbound_path(path, sizeof(path), node_id, seg_id);
+    if (unlink(path) != 0 && errno != ENOENT) {
+        hifs_err("hive_segmentation: failed to remove outbound segment seg=%llu node=%u: %s",
+                 (unsigned long long)seg_id,
+                 node_id,
+                 strerror(errno));
+    }
+}
+
+static bool hive_seg_index_mem_prune_seg(struct hive_seg_index_mem *mem,
+                                         uint64_t seg_id)
+{
+    if (!mem || !mem->entries || mem->count == 0)
+        return false;
+
+    size_t write_idx = 0;
+    bool removed = false;
+    for (size_t i = 0; i < mem->count; ++i) {
+        struct hive_seg_index_disk_rec *rec = &mem->entries[i];
+        if (rec->seg_id == seg_id) {
+            removed = true;
+            continue;
+        }
+        if (write_idx != i)
+            mem->entries[write_idx] = *rec;
+        ++write_idx;
+    }
+    if (removed)
+        mem->count = write_idx;
+    return removed;
+}
+
+static void hive_seg_rewrite_index_locked(int fd,
+                                          const struct hive_seg_index_mem *mem,
+                                          uint64_t seg_id,
+                                          const char *label)
+{
+    if (fd < 0 || !mem || !mem->entries)
+        return;
+    if (ftruncate(fd, 0) != 0) {
+        hifs_err("hive_segmentation: failed to truncate %s index after persisting seg=%llu: %s",
+                 label,
+                 (unsigned long long)seg_id,
+                 strerror(errno));
+        return;
+    }
+    if (mem->count == 0)
+        return;
+    if (lseek(fd, 0, SEEK_SET) < 0) {
+        hifs_err("hive_segmentation: failed to seek %s index after persisting seg=%llu: %s",
+                 label,
+                 (unsigned long long)seg_id,
+                 strerror(errno));
+        return;
+    }
+    size_t bytes = mem->count * sizeof(struct hive_seg_index_disk_rec);
+    int rc = hive_seg_write_all(fd, mem->entries, bytes);
+    if (rc != 0) {
+        int err = rc < 0 ? -rc : rc;
+        hifs_err("hive_segmentation: failed to rewrite %s index after persisting seg=%llu: %s",
+                 label,
+                 (unsigned long long)seg_id,
+                 strerror(err));
+    }
+}
+
+static void hive_seg_cache_drop_segment(uint64_t seg_id)
+{
+    if (seg_id == 0)
+        return;
+
+    pthread_mutex_lock(&g_seg_cache.mu);
+    if (!g_seg_cache.ready) {
+        pthread_mutex_unlock(&g_seg_cache.mu);
+        return;
+    }
+
+    bool outbound_removed = hive_seg_index_mem_prune_seg(&g_seg_cache.outbound_idx,
+                                                         seg_id);
+    bool landing_removed = hive_seg_index_mem_prune_seg(&g_seg_cache.landing_idx,
+                                                        seg_id);
+    bool read_return_removed = hive_seg_index_mem_prune_seg(&g_seg_cache.read_return_idx,
+                                                            seg_id);
+
+    if (outbound_removed)
+        hive_seg_rewrite_index_locked(g_seg_cache.outbound_idx_fd,
+                                      &g_seg_cache.outbound_idx,
+                                      seg_id,
+                                      "outbound");
+    if (landing_removed)
+        hive_seg_rewrite_index_locked(g_seg_cache.landing_idx_fd,
+                                      &g_seg_cache.landing_idx,
+                                      seg_id,
+                                      "landing");
+    if (read_return_removed)
+        hive_seg_rewrite_index_locked(g_seg_cache.read_return_idx_fd,
+                                      &g_seg_cache.read_return_idx,
+                                      seg_id,
+                                      "read-return");
+
+    pthread_mutex_unlock(&g_seg_cache.mu);
+}
+
+static struct hive_seg_index_disk_rec *
+hive_seg_cache_find_read_return_locked(uint64_t seg_id)
+{
+    if (!g_seg_cache.read_return_idx.entries)
+        return NULL;
+    for (size_t idx = g_seg_cache.read_return_idx.count; idx > 0; --idx) {
+        struct hive_seg_index_disk_rec *rec =
+            &g_seg_cache.read_return_idx.entries[idx - 1];
+        if (rec->seg_id == seg_id)
+            return rec;
+    }
+    return NULL;
+}
+
+static int hive_seg_cache_track_read_checkout_locked(uint64_t seg_id,
+                                                     uint32_t length)
+{
+    struct hive_seg_index_disk_rec rec = {
+        .seg_id = seg_id,
+        .txn_id = seg_id,
+        .state = HIFS_STRIPE_OUTBOUND_QUEUED,
+        .length = length,
+    };
+
+    if (!hive_seg_index_mem_append(&g_seg_cache.read_return_idx, &rec))
+        return -ENOMEM;
+
+    if (g_seg_cache.read_return_idx_fd >= 0) {
+        int rc = hive_seg_write_all(g_seg_cache.read_return_idx_fd,
+                                    &rec,
+                                    sizeof(rec));
+        if (rc != 0) {
+            --g_seg_cache.read_return_idx.count;
+            return rc;
+        }
+    }
+    return 0;
+}
+
+static bool hive_seg_cache_drop_read_checkout_locked(uint64_t seg_id)
+{
+    bool removed = hive_seg_index_mem_prune_seg(&g_seg_cache.read_return_idx,
+                                                seg_id);
+    if (removed) {
+        hive_seg_rewrite_index_locked(g_seg_cache.read_return_idx_fd,
+                                      &g_seg_cache.read_return_idx,
+                                      seg_id,
+                                      "read-return");
+    }
+    return removed;
+}
+
+int hive_seg_checkout_persisted_segment(uint64_t seg_id,
+                                        uint8_t **out_data,
+                                        size_t *out_len)
+{
+    if (!out_data || !out_len || seg_id == 0)
+        return -EINVAL;
+
+    uint8_t *data = NULL;
+    size_t len = 0;
+    if (hg_kv_get_estripe_chunk(seg_id, &data, &len) != 0)
+        return -ENOENT;
+
+    int rc = hive_seg_cache_init();
+    if (rc != 0) {
+        free(data);
+        return rc;
+    }
+
+    pthread_mutex_lock(&g_seg_cache.mu);
+    if (!g_seg_cache.ready) {
+        pthread_mutex_unlock(&g_seg_cache.mu);
+        free(data);
+        return -ESHUTDOWN;
+    }
+
+    if (hive_seg_cache_find_read_return_locked(seg_id)) {
+        pthread_mutex_unlock(&g_seg_cache.mu);
+        free(data);
+        return -EALREADY;
+    }
+
+    uint32_t tracked_len = len > UINT32_MAX ? UINT32_MAX : (uint32_t)len;
+    rc = hive_seg_cache_track_read_checkout_locked(seg_id, tracked_len);
+    pthread_mutex_unlock(&g_seg_cache.mu);
+
+    if (rc != 0) {
+        free(data);
+        return rc;
+    }
+
+    hive_seg_log_stripe_committed_record(seg_id, HIVE_SEG_FULL_ACK_BITMAP);
+
+    *out_data = data;
+    *out_len = len;
+    return 0;
+}
+
+void hive_seg_release_persisted_segment(uint64_t seg_id, bool changed)
+{
+    if (seg_id == 0)
+        return;
+
+    hive_seg_cache_init();
+    pthread_mutex_lock(&g_seg_cache.mu);
+    if (g_seg_cache.ready)
+        hive_seg_cache_drop_read_checkout_locked(seg_id);
+    pthread_mutex_unlock(&g_seg_cache.mu);
+
+    if (changed) {
+        hive_seg_log_stripe_persisting_record(seg_id, HIVE_SEG_FULL_ACK_BITMAP);
+        hive_seg_log_stripe_persisted_record(seg_id, HIVE_SEG_FULL_ACK_BITMAP);
+    }
+
+    hive_seg_log_stripe_reclaimable_record(seg_id, !changed);
+}
+
+static void hive_seg_publish_segment_persisted(uint32_t node_id,
+                                               uint64_t seg_id)
+{
+    if (node_id == 0 || seg_id == 0)
+        return;
+
+    struct RaftCmd cmd = {0};
+    cmd.op_type = HG_OP_PUT_CLUSTER_AUDIT;
+    struct RaftClusterAudit *audit = &cmd.u.cluster_audit;
+    audit->cluster_id = hbc.cluster_id;
+    audit->node_id = storage_node_id;
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    audit->timestamp_ns = (uint64_t)ts.tv_sec * 1000000000ull +
+                          (uint64_t)ts.tv_nsec;
+    snprintf(audit->message,
+             sizeof(audit->message),
+             "stripe-persisted seg=%llu node=%u",
+             (unsigned long long)seg_id,
+             node_id);
+    int rc = hg_raft_submit_cmd_sync(&cmd, NULL);
+    if (rc != 0) {
+        int err = rc < 0 ? -rc : rc;
+        hifs_err("hive_segmentation: failed to publish raft persisted event for seg=%llu: %s",
+                 (unsigned long long)seg_id,
+                 strerror(err));
+    }
+}
+
+static void hive_seg_log_stripe_persisted_record(uint64_t seg_id,
+                                                 uint8_t persist_bitmap)
+{
+    if (seg_id == 0)
+        return;
+
+    struct hifs_wbl_persisted_rec rec = {
+        .txn_id = seg_id,
+        .stripe_id = seg_id,
+        .persist_bitmap = persist_bitmap,
+    };
+    if (hifs_wbl_mark_persisted(&g_hive_guard_wbl_ctx, &rec) != 0) {
+        hifs_err("hive_segmentation: unable to append WBL stripe persisted record for seg=%llu: %s",
+                 (unsigned long long)seg_id,
+                 strerror(errno));
+    }
+}
+
+static void hive_seg_log_stripe_reclaimable_record(uint64_t seg_id,
+                                                   bool unchanged)
+{
+    if (seg_id == 0)
+        return;
+
+    struct hifs_wbl_reclaimable_rec rec = {
+        .txn_id = seg_id,
+        .stripe_id = seg_id,
+        .flags = unchanged ? HIFS_WBL_RECLAIMABLE_F_UNCHANGED : 0u,
+    };
+    if (hifs_wbl_mark_reclaimable(&g_hive_guard_wbl_ctx, &rec) != 0) {
+        hifs_err("hive_segmentation: unable to append WBL stripe reclaimable record for seg=%llu: %s",
+                 (unsigned long long)seg_id,
+                 strerror(errno));
+    }
+}
+
+static void hive_seg_finalize_persisting(uint32_t node_id,
+                                         uint64_t seg_id,
+                                         uint8_t persist_bitmap)
+{
+    hive_seg_remove_outbound_segment(node_id, seg_id);
+    hive_seg_cache_drop_segment(seg_id);
+    hive_seg_publish_segment_persisted(node_id, seg_id);
+    hive_seg_log_stripe_persisted_record(seg_id, persist_bitmap);
+    hive_seg_log_stripe_reclaimable_record(seg_id, false);
+}
+static void hive_seg_cache_drop_remote_fragment(uint32_t node_id,
+                                                uint64_t seg_id)
+{
+    pthread_mutex_lock(&g_seg_cache.mu);
+    if (!g_seg_cache.ready) {
+        pthread_mutex_unlock(&g_seg_cache.mu);
+        return;
+    }
+
+    bool removed = false;
+    size_t write_idx = 0;
+    for (size_t i = 0; i < g_seg_cache.outbound_idx.count; ++i) {
+        struct hive_seg_index_disk_rec *rec =
+            &g_seg_cache.outbound_idx.entries[i];
+        if (rec->seg_id == seg_id && rec->reserved == node_id &&
+            rec->volume_id == 0 && rec->block_no == 0) {
+            removed = true;
+            continue;
+        }
+        if (write_idx != i)
+            g_seg_cache.outbound_idx.entries[write_idx] = *rec;
+        ++write_idx;
+    }
+
+    if (removed) {
+        g_seg_cache.outbound_idx.count = write_idx;
+        int fd = g_seg_cache.outbound_idx_fd;
+        if (fd >= 0) {
+            if (ftruncate(fd, 0) != 0) {
+                hifs_err("hive_segmentation: failed to truncate outbound index after ack for seg=%llu: %s",
+                         (unsigned long long)seg_id,
+                         strerror(errno));
+            } else {
+                if (write_idx > 0) {
+                    if (lseek(fd, 0, SEEK_SET) < 0 ||
+                        hive_seg_write_all(fd,
+                                           g_seg_cache.outbound_idx.entries,
+                                           write_idx * sizeof(struct hive_seg_index_disk_rec)) != 0) {
+                        hifs_err("hive_segmentation: failed to rewrite outbound index after ack for seg=%llu: %s",
+                                 (unsigned long long)seg_id,
+                                 strerror(errno));
+                    }
+                }
+            }
+        }
+    }
+
+    pthread_mutex_unlock(&g_seg_cache.mu);
+}
+
+static void hive_seg_log_remote_fragment_acked(uint64_t seg_id,
+                                               uint32_t frag_idx,
+                                               uint32_t node_id)
+{
+    struct hifs_wbl_fragment_event_rec rec = {
+        .txn_id = seg_id,
+        .stripe_id = seg_id,
+        .frag_idx = frag_idx,
+        .node_id = node_id,
+    };
+    if (hifs_wbl_mark_fragment_acked(&g_hive_guard_wbl_ctx, &rec) != 0) {
+        hifs_err("hive_segmentation: unable to append WBL fragment acked record for seg=%llu frag=%u node=%u: %s",
+                 (unsigned long long)seg_id,
+                 frag_idx,
+                 node_id,
+                 strerror(errno));
+    }
+}
+
+static inline void hive_seg_ack_remote_fragment(uint32_t node_id,
+                                                uint32_t frag_idx,
+                                                uint64_t seg_id)
+{
+    if (node_id == 0 || seg_id == 0)
+        return;
+
+    hive_seg_cache_drop_remote_fragment(node_id, seg_id);
+    hive_seg_log_remote_fragment_acked(seg_id, frag_idx, node_id);
+}
 
 static bool hive_seg_index_mem_append(struct hive_seg_index_mem *mem,
                                       const struct hive_seg_index_disk_rec *rec);
@@ -62,6 +864,296 @@ static int hive_seg_pwrite_all(int fd,
                                const void *buf,
                                size_t len,
                                off_t offset);
+
+static void hive_seg_outbound_path(char *out,
+                                   size_t out_sz,
+                                   uint32_t node_id,
+                                   uint64_t seg_id)
+{
+    if (!out || out_sz == 0)
+        return;
+    snprintf(out,
+             out_sz,
+             HIVE_GUARD_SEGMT_OUTBOUND "/node-%u-seg-%llu.seg",
+             node_id,
+             (unsigned long long)seg_id);
+}
+
+static int hive_seg_read_all(int fd, void *buf, size_t len)
+{
+    uint8_t *p = buf;
+    size_t read_bytes = 0;
+    while (read_bytes < len) {
+        ssize_t rc = read(fd, p + read_bytes, len - read_bytes);
+        if (rc < 0) {
+            if (errno == EINTR)
+                continue;
+            return -errno;
+        }
+        if (rc == 0)
+            return -EIO;
+        read_bytes += (size_t)rc;
+    }
+    return 0;
+}
+
+static int hive_seg_persist_outbound_segment(uint32_t node_id,
+                                             uint64_t seg_id)
+{
+    if (node_id == 0 || seg_id == 0)
+        return -EINVAL;
+
+    char path[PATH_MAX];
+    hive_seg_outbound_path(path, sizeof(path), node_id, seg_id);
+
+    int fd = open(path,
+                  O_RDONLY
+#ifdef O_CLOEXEC
+                  | O_CLOEXEC
+#endif
+    );
+    if (fd < 0)
+        return -errno;
+
+    struct stat st;
+    if (fstat(fd, &st) != 0) {
+        int err = -errno;
+        close(fd);
+        return err;
+    }
+    if (st.st_size <= 0) {
+        close(fd);
+        return -ENOENT;
+    }
+    if ((uint64_t)st.st_size > SIZE_MAX) {
+        close(fd);
+        return -EFBIG;
+    }
+
+    size_t seg_len = (size_t)st.st_size;
+    uint8_t *buf = malloc(seg_len);
+    if (!buf) {
+        close(fd);
+        return -ENOMEM;
+    }
+
+    int rc = hive_seg_read_all(fd, buf, seg_len);
+    close(fd);
+    if (rc != 0) {
+        free(buf);
+        return rc;
+    }
+
+    rc = hg_kv_put_estripe_chunk(seg_id, buf, seg_len);
+    free(buf);
+    if (rc != 0)
+        return -EIO;
+    return 0;
+}
+
+static int hive_seg_outbound_append(uint32_t node_id,
+                                    uint64_t seg_id,
+                                    const uint8_t *data,
+                                    uint32_t len,
+                                    uint64_t *out_offset,
+                                    uint64_t *out_size)
+{
+    if (!data || len == 0)
+        return -EINVAL;
+
+    char path[PATH_MAX];
+    hive_seg_outbound_path(path, sizeof(path), node_id, seg_id);
+
+    pthread_mutex_lock(&g_seg_landing_io_mu);
+    int fd = open(path,
+                  O_RDWR | O_CREAT
+#ifdef O_CLOEXEC
+                  | O_CLOEXEC
+#endif
+                  ,
+                  S_IRUSR | S_IWUSR | S_IRGRP);
+    if (fd < 0) {
+        int err = errno ? -errno : -EIO;
+        pthread_mutex_unlock(&g_seg_landing_io_mu);
+        return err;
+    }
+
+    off_t start = lseek(fd, 0, SEEK_END);
+    if (start < 0) {
+        int err = errno ? -errno : -EIO;
+        close(fd);
+        pthread_mutex_unlock(&g_seg_landing_io_mu);
+        return err;
+    }
+
+    int rc = hive_seg_pwrite_all(fd, data, len, start);
+    close(fd);
+    pthread_mutex_unlock(&g_seg_landing_io_mu);
+
+    if (rc != 0)
+        return rc;
+
+    if (out_offset)
+        *out_offset = (uint64_t)start;
+    if (out_size)
+        *out_size = (uint64_t)start + (uint64_t)len;
+    return 0;
+}
+
+static int hive_seg_cache_record_remote_fragment(uint32_t node_id,
+                                                 uint64_t seg_id,
+                                                 uint64_t offset,
+                                                 uint32_t len,
+                                                 bool appendable)
+{
+    struct hive_seg_index_disk_rec rec = {
+        .seg_id = seg_id,
+        .volume_id = 0,
+        .block_no = 0,
+        .txn_id = seg_id,
+        .generation = appendable ? 0u : 1u,
+        .state = appendable ? HIFS_STRIPE_ACKED_PARTIAL : HIFS_STRIPE_COMMITTED,
+        .offset = offset,
+        .length = len,
+        .reserved = node_id,
+    };
+
+    pthread_mutex_lock(&g_seg_cache.mu);
+    if (!g_seg_cache.ready) {
+        pthread_mutex_unlock(&g_seg_cache.mu);
+        return -ESHUTDOWN;
+    }
+
+    if (!hive_seg_index_mem_append(&g_seg_cache.outbound_idx, &rec)) {
+        pthread_mutex_unlock(&g_seg_cache.mu);
+        return -ENOMEM;
+    }
+
+    int fd = g_seg_cache.outbound_idx_fd;
+    int rc = 0;
+    if (fd >= 0)
+        rc = hive_seg_write_all(fd, &rec, sizeof(rec));
+
+    pthread_mutex_unlock(&g_seg_cache.mu);
+    return rc;
+}
+
+static void hive_seg_log_segment_received_audit(uint32_t src_node_id,
+                                                uint64_t seg_id,
+                                                uint64_t offset,
+                                                uint32_t len,
+                                                bool appendable)
+{
+    struct RaftCmd cmd = {0};
+    cmd.op_type = HG_OP_PUT_CLUSTER_AUDIT;
+    struct RaftClusterAudit *audit = &cmd.u.cluster_audit;
+    audit->cluster_id = hbc.cluster_id;
+    audit->node_id = storage_node_id;
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    audit->timestamp_ns = (uint64_t)ts.tv_sec * 1000000000ull +
+                          (uint64_t)ts.tv_nsec;
+    snprintf(audit->message,
+             sizeof(audit->message),
+             "SEGMENT_RECIEVED_ON_TARGET seg=%llu src=%u off=%llu len=%u appendable=%s",
+             (unsigned long long)seg_id,
+             src_node_id,
+             (unsigned long long)offset,
+             len,
+             appendable ? "yes" : "no");
+    int rc = hg_raft_submit_cmd_sync(&cmd, NULL);
+    if (rc != 0) {
+        int err = rc < 0 ? -rc : rc;
+        hifs_err("hive_segmentation: failed to log segment received event for seg=%llu: %s",
+                 (unsigned long long)seg_id,
+                 strerror(err));
+    }
+}
+
+static void hive_seg_log_remote_fragment_received(uint64_t seg_id,
+                                                  uint32_t frag_idx)
+{
+    struct hifs_wbl_fragment_event_rec rec = {
+        .txn_id = seg_id,
+        .stripe_id = seg_id,
+        .frag_idx = frag_idx,
+        .node_id = storage_node_id,
+    };
+    if (hifs_wbl_mark_fragment_received(&g_hive_guard_wbl_ctx, &rec) != 0) {
+        hifs_err("hive_segmentation: unable to append WBL fragment received record for seg=%llu frag=%u: %s",
+                 (unsigned long long)seg_id,
+                 frag_idx,
+                 strerror(errno));
+    }
+}
+
+static int hive_seg_process_remote_fragment(uint32_t src_node_id,
+                                            uint32_t shard_id,
+                                            uint64_t seg_id,
+                                            const uint8_t *data,
+                                            uint32_t len,
+                                            uint64_t *out_block_offset)
+{
+    if (!data || len == 0)
+        return -EINVAL;
+    if (hive_seg_outbound_segment_closed(src_node_id, seg_id))
+        return -EALREADY;
+
+    uint64_t offset = 0;
+    uint64_t seg_size = 0;
+    int rc = hive_seg_outbound_append(src_node_id,
+                                      seg_id,
+                                      data,
+                                      len,
+                                      &offset,
+                                      &seg_size);
+    if (rc != 0)
+        return rc;
+
+    if (out_block_offset)
+        *out_block_offset = offset;
+
+    bool appendable = seg_size < (uint64_t)HIFS_SEGMENT_SIZE;
+
+    rc = hive_seg_cache_record_remote_fragment(src_node_id,
+                                               seg_id,
+                                               offset,
+                                               len,
+                                               appendable);
+    if (rc != 0)
+        return rc;
+
+    hive_seg_log_segment_received_audit(src_node_id,
+                                        seg_id,
+                                        offset,
+                                        len,
+                                        appendable);
+    hive_seg_log_remote_fragment_received(seg_id, shard_id);
+    hive_seg_ack_remote_fragment(src_node_id, shard_id, seg_id);
+    if (!appendable) {
+        hive_seg_log_stripe_committed_record(seg_id, HIVE_SEG_FULL_ACK_BITMAP);
+        hive_seg_stripe_commit(src_node_id,
+                               seg_id,
+                               HIVE_SEG_FULL_ACK_BITMAP);
+    }
+    return 0;
+}
+
+static int hive_seg_sn_recv_cb(uint32_t src_node_id,
+                               uint32_t shard_id,
+                               uint64_t estripe_id,
+                               const uint8_t *data,
+                               uint32_t len,
+                               uint64_t *out_block_offset)
+{
+    return hive_seg_process_remote_fragment(src_node_id,
+                                            shard_id,
+                                            estripe_id,
+                                            data,
+                                            len,
+                                            out_block_offset);
+}
+
 static inline struct hive_seg_index_disk_rec *
 hive_seg_cache_find_outbound_rec_locked(uint64_t seg_id,
                                         uint64_t volume_id,
@@ -182,6 +1274,116 @@ static int hive_seg_mark_outbound_queued(uint64_t txn_id,
     if (rc != 0)
         return rc;
     hive_seg_log_outbound_queued(blk, txn_id, node_id, loc);
+    return 0;
+}
+
+static int hive_seg_cache_mark_fragment_sent(uint64_t txn_id,
+                                             uint32_t generation,
+                                             const struct hive_seg_block_input *blk,
+                                             uint32_t node_id,
+                                             const struct hifs_seg_loc *loc)
+{
+    if (!blk || !loc || node_id == 0)
+        return -EINVAL;
+
+    pthread_mutex_lock(&g_seg_cache.mu);
+    if (!g_seg_cache.ready) {
+        pthread_mutex_unlock(&g_seg_cache.mu);
+        return -ESHUTDOWN;
+    }
+
+    struct hive_seg_index_disk_rec *rec =
+        hive_seg_cache_find_outbound_rec_locked(loc->seg_id,
+                                                blk->volume_id,
+                                                blk->block_no,
+                                                node_id,
+                                                loc->offset);
+    if (!rec) {
+        pthread_mutex_unlock(&g_seg_cache.mu);
+        return -ENOENT;
+    }
+
+    rec->txn_id = txn_id;
+    rec->generation = generation;
+    rec->state = HIFS_STRIPE_SENT_PARTIAL;
+    rec->length = loc->length;
+
+    int rc = 0;
+    if (g_seg_cache.outbound_idx_fd >= 0) {
+        size_t idx = (size_t)(rec - g_seg_cache.outbound_idx.entries);
+        rc = hive_seg_pwrite_all(g_seg_cache.outbound_idx_fd,
+                                 rec,
+                                 sizeof(*rec),
+                                 (off_t)idx * (off_t)sizeof(*rec));
+    }
+    pthread_mutex_unlock(&g_seg_cache.mu);
+    return rc;
+}
+
+static inline void hive_seg_log_fragment_sent(const struct hive_seg_block_input *blk,
+                                              uint64_t txn_id,
+                                              uint32_t frag_idx,
+                                              uint32_t node_id)
+{
+    if (!blk || node_id == 0)
+        return;
+
+    struct hifs_wbl_fragment_event_rec rec = {
+        .txn_id = txn_id,
+        .stripe_id = blk->block_no,
+        .frag_idx = frag_idx,
+        .node_id = node_id,
+    };
+
+    if (hifs_wbl_mark_fragment_sent(&g_hive_guard_wbl_ctx, &rec) != 0) {
+        hifs_err("hive_segmentation: unable to append WBL fragment sent record for %llu:%llu frag=%u node=%u: %s",
+                 (unsigned long long)blk->volume_id,
+                 (unsigned long long)blk->block_no,
+                 frag_idx,
+                 node_id,
+                 strerror(errno));
+    }
+}
+
+static int hive_seg_send_fragment(uint64_t txn_id,
+                                  uint32_t generation,
+                                  const struct hive_seg_block_input *blk,
+                                  uint32_t frag_idx,
+                                  uint32_t node_id,
+                                  const struct hifs_seg_loc *loc,
+                                  const uint8_t *data)
+{
+    if (!blk || !loc || !data || loc->length == 0 || node_id == 0)
+        return -EINVAL;
+
+    uint32_t shard_id = frag_idx;
+    uint64_t estripe_id = loc->seg_id ? loc->seg_id : blk->block_no;
+    int rc = hifs_sn_tcp_send(node_id,
+                              shard_id,
+                              estripe_id,
+                              data,
+                              loc->length);
+    if (rc != 0) {
+        int err = errno ? errno : EIO;
+        hifs_err("hive_segmentation: failed to send fragment %u for %llu:%llu node=%u seg=%llu: %s",
+                 frag_idx,
+                 (unsigned long long)blk->volume_id,
+                 (unsigned long long)blk->block_no,
+                 node_id,
+                 (unsigned long long)loc->seg_id,
+                 strerror(err));
+        return -err;
+    }
+
+    rc = hive_seg_cache_mark_fragment_sent(txn_id,
+                                           generation,
+                                           blk,
+                                           node_id,
+                                           loc);
+    if (rc != 0)
+        return rc;
+
+    hive_seg_log_fragment_sent(blk, txn_id, frag_idx, node_id);
     return 0;
 }
 static inline uint64_t hive_seg_now_ns(void)
@@ -626,6 +1828,11 @@ static int hive_seg_cache_init(void)
     if (rc != 0)
         goto fail;
 
+    rc = hive_seg_cache_load_locked(g_seg_cache.read_return_idx_fd,
+                                    &g_seg_cache.read_return_idx);
+    if (rc != 0)
+        goto fail;
+
     g_seg_cache.ready = true;
     pthread_mutex_unlock(&g_seg_cache.mu);
     return 0;
@@ -636,6 +1843,7 @@ fail:
     hive_seg_cache_close_fd(&g_seg_cache.read_return_idx_fd);
     hive_seg_index_mem_reset(&g_seg_cache.landing_idx);
     hive_seg_index_mem_reset(&g_seg_cache.outbound_idx);
+    hive_seg_index_mem_reset(&g_seg_cache.read_return_idx);
     pthread_mutex_unlock(&g_seg_cache.mu);
     return rc;
 }
@@ -645,10 +1853,11 @@ static void hive_seg_cache_shutdown(void)
     pthread_mutex_lock(&g_seg_cache.mu);
     g_seg_cache.ready = false;
     hive_seg_cache_close_fd(&g_seg_cache.landing_idx_fd);
-    hive_seg_cache_close_fd(&g_seg_cache.outbound_idx_fd);
     hive_seg_cache_close_fd(&g_seg_cache.read_return_idx_fd);
+    hive_seg_cache_close_fd(&g_seg_cache.outbound_idx_fd);
     hive_seg_index_mem_reset(&g_seg_cache.landing_idx);
     hive_seg_index_mem_reset(&g_seg_cache.outbound_idx);
+    hive_seg_index_mem_reset(&g_seg_cache.read_return_idx);
     pthread_mutex_unlock(&g_seg_cache.mu);
 }
 
@@ -889,8 +2098,15 @@ out:
 
 static inline void hive_seg_stage_block_locked(struct hive_seg_block_input *blk)
 {
-    if (!blk || blk->len == 0)
+    if (!blk || blk->len == 0 || blk->has_landing_loc)
         return;
+    struct hifs_seg_loc loc;
+    if (hive_seg_writable_alloc(blk->len, &loc)) {
+        blk->landing_loc = loc;
+        blk->has_landing_loc = true;
+        return;
+    }
+
     uint32_t aligned = hive_seg_align_len(blk->len);
     if (aligned == 0)
         aligned = blk->len;
@@ -1160,6 +2376,16 @@ static int hive_seg_prepare_fragments(struct hive_seg_block_input *blk,
                                            &frag_locs[i]);
         if (rc != 0)
             return rc;
+        uint32_t frag_idx = placement.targets[i].frag_idx;
+        rc = hive_seg_send_fragment(txn_id,
+                                    generation,
+                                    blk,
+                                    frag_idx,
+                                    node_id,
+                                    &frag_locs[i],
+                                    ec->chunks[i]);
+        if (rc != 0)
+            return rc;
     }
 
     rc = hive_seg_log_stripe_prepared(txn_id,
@@ -1190,11 +2416,17 @@ static void hive_seg_stage_blocks(struct hive_seg_block_input *blocks,
     if (!blocks || count == 0)
         return;
 
+    for (uint32_t i = 0; i < count; ++i) {
+        if (blocks[i].len == 0 || blocks[i].has_landing_loc)
+            continue;
+        hive_seg_prepare_existing_landing(&blocks[i]);
+    }
+
     pthread_mutex_lock(&g_seg_stage_allocator.mu);
 
     uint64_t total = 0;
     for (uint32_t i = 0; i < count; ++i) {
-        if (blocks[i].len == 0)
+        if (blocks[i].len == 0 || blocks[i].has_landing_loc)
             continue;
         total += hive_seg_align_len(blocks[i].len);
     }
@@ -1449,6 +2681,13 @@ int hive_recieve_data_plane(void)
         hive_segmentation_shutdown();
         return rc;
     }
+
+    rc = hifs_sn_tcp_start(storage_node_stripe_port, hive_seg_sn_recv_cb);
+    if (rc != 0) {
+        hive_segmentation_shutdown();
+        return rc;
+    }
+    g_seg_sn_running = true;
     return 0;
 }
 
@@ -1462,6 +2701,11 @@ void hive_segmentation_shutdown(void)
     pthread_cond_broadcast(&g_seg_cv);
     pthread_cond_broadcast(&g_seg_space_cv);
     pthread_mutex_unlock(&g_seg_mu);
+
+    if (g_seg_sn_running) {
+        hifs_sn_tcp_stop();
+        g_seg_sn_running = false;
+    }
 
     for (size_t i = 0; i < g_seg_worker_count; ++i)
         pthread_join(g_seg_workers[i], NULL);

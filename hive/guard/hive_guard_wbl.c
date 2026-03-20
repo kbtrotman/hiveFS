@@ -398,6 +398,15 @@ int hifs_wbl_mark_fragment_sent(struct hifs_wbl_ctx *ctx,
                          sizeof(*rec));
 }
 
+int hifs_wbl_mark_fragment_received(struct hifs_wbl_ctx *ctx,
+                                    const struct hifs_wbl_fragment_event_rec *rec)
+{
+    return hifs_wbl_emit(ctx,
+                         HIFS_WBL_REC_FRAGMENT_RECEIVED,
+                         rec,
+                         sizeof(*rec));
+}
+
 int hifs_wbl_mark_fragment_acked(struct hifs_wbl_ctx *ctx,
                                  const struct hifs_wbl_fragment_event_rec *rec)
 {
@@ -412,6 +421,33 @@ int hifs_wbl_mark_committed(struct hifs_wbl_ctx *ctx,
 {
     return hifs_wbl_emit(ctx,
                          HIFS_WBL_REC_STRIPE_COMMITTED,
+                         rec,
+                         sizeof(*rec));
+}
+
+int hifs_wbl_mark_persisting(struct hifs_wbl_ctx *ctx,
+                             const struct hifs_wbl_persisting_rec *rec)
+{
+    return hifs_wbl_emit(ctx,
+                         HIFS_WBL_REC_STRIPE_PERSISTING,
+                         rec,
+                         sizeof(*rec));
+}
+
+int hifs_wbl_mark_persisted(struct hifs_wbl_ctx *ctx,
+                             const struct hifs_wbl_persisted_rec *rec)
+{
+    return hifs_wbl_emit(ctx,
+                         HIFS_WBL_REC_STRIPE_PERSISTED,
+                         rec,
+                         sizeof(*rec));
+}
+
+int hifs_wbl_mark_reclaimable(struct hifs_wbl_ctx *ctx,
+                              const struct hifs_wbl_reclaimable_rec *rec)
+{
+    return hifs_wbl_emit(ctx,
+                         HIFS_WBL_REC_STRIPE_RECLAIMABLE,
                          rec,
                          sizeof(*rec));
 }

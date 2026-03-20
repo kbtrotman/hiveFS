@@ -128,6 +128,27 @@ struct hifs_wbl_commit_rec {
     uint8_t ack_bitmap;
 };
 
+struct hifs_wbl_persisting_rec {
+    uint64_t txn_id;
+    uint64_t stripe_id;
+    uint8_t persist_bitmap;
+};
+
+struct hifs_wbl_persisted_rec {
+    uint64_t txn_id;
+    uint64_t stripe_id;
+    uint8_t persist_bitmap;
+};
+
+#define HIFS_WBL_RECLAIMABLE_F_UNCHANGED 0x01u
+
+struct hifs_wbl_reclaimable_rec {
+    uint64_t txn_id;
+    uint64_t stripe_id;
+    uint8_t flags;
+    uint8_t reserved[7];
+};
+
 struct hifs_wbl_ctx {
     int fd;
     uint64_t next_seqno;
@@ -163,7 +184,15 @@ int hifs_wbl_mark_outbound_queued(struct hifs_wbl_ctx *ctx,
                                   const struct hifs_wbl_outbound_queued_rec *rec);
 int hifs_wbl_mark_fragment_sent(struct hifs_wbl_ctx *ctx,
                                 const struct hifs_wbl_fragment_event_rec *rec);
+int hifs_wbl_mark_fragment_received(struct hifs_wbl_ctx *ctx,
+                                    const struct hifs_wbl_fragment_event_rec *rec);
 int hifs_wbl_mark_fragment_acked(struct hifs_wbl_ctx *ctx,
                                  const struct hifs_wbl_fragment_event_rec *rec);
 int hifs_wbl_mark_committed(struct hifs_wbl_ctx *ctx,
                             const struct hifs_wbl_commit_rec *rec);
+int hifs_wbl_mark_persisting(struct hifs_wbl_ctx *ctx,
+                             const struct hifs_wbl_persisting_rec *rec);
+int hifs_wbl_mark_persisted(struct hifs_wbl_ctx *ctx,
+                            const struct hifs_wbl_persisted_rec *rec);
+int hifs_wbl_mark_reclaimable(struct hifs_wbl_ctx *ctx,
+                              const struct hifs_wbl_reclaimable_rec *rec);
