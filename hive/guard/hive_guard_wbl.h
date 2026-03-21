@@ -7,7 +7,9 @@
  *
  */
 
- #include <string.h>
+#include <stdbool.h>
+#include <pthread.h>
+#include <string.h>
 
 #include "../common/hive_common.h"
 
@@ -35,27 +37,25 @@ struct hifs_wbl_hdr {
 };
 
 enum hifs_wbl_rec_type {
-    HIFS_WBL_REC_WRITE_INTENT = 1,
-    HIFS_WBL_REC_LANDING_ECCODED,  /* written to raft */
+    HIFS_WBL_REC_WRITE_RECV = 1,  /* was HIFS_WBL_REC_WRITE_INTENT */
+    HIFS_WBL_REC_LANDING_WRITTEN,  /* written to raft */    /* was HIFS_WBL_REC_LANDING_ECCODED */
     HIFS_WBL_REC_STRIPE_PREPARED,  /* EC is done, frags prepared */
     HIFS_WBL_REC_PLACEMENT_ASSIGNED,  /* placement algorithm run*/
-    HIFS_WBL_REC_OUTBOUND_QUEUED,
-    HIFS_WBL_REC_FRAGMENT_SENT,
-    HIFS_WBL_REC_FRAGMENT_RECEIVED,
-    HIFS_WBL_REC_FRAGMENT_ACKED,
-    HIFS_WBL_REC_STRIPE_COMMITTED,
-    HIFS_WBL_REC_STRIPE_PERSISTING,
-    HIFS_WBL_REC_STRIPE_PERSISTED,
-    HIFS_WBL_REC_STRIPE_RECLAIMABLE,
-    HIFS_WBL_REC_CHECKPOINT
+    HIFS_WBL_REC_OUTBOUND_QUEUED,     /* Freeze the segment to go to TCP/IP to be transferred */
+    HIFS_WBL_REC_FRAGMENT_SENT,      /* written to the foreign node via TCP/IP */
+    HIFS_WBL_REC_FRAGMENT_WRITE_INDX,  /* The foreign node has to add it to its cache and indexes and ensure frags are persisted */ /* was HIFS_WBL_REC_FRAGMENT_RECEIVED*/
+    HIFS_WBL_REC_FRAGMENT_ACKED,       /* The foreign node has to acknowledge reciept of the frag so the sending node can remove it from cache */
+    HIFS_WBL_REC_STRIPE_COMMITTED,     /* Once we reach 16MB, we commit the segment to raft and freeze it from further writes.*/
+    HIFS_WBL_REC_STRIPE_PERSISTING,     /* We persist the fragment segment to KV */
+    HIFS_WBL_REC_STRIPE_REMOVE_CACHE,    /* was HIFS_WBL_REC_STRIPE_PERSISTED */
+    HIFS_WBL_REC_STRIPE_RECLAIMABLE,     /* A segment is returned from KV for a read and the stage marker is set back to HIFS_WBL_REC_STRIPE_COMMITTED */
+    HIFS_WBL_REC_CHECKPOINT           /* Need to implement checkpoints here later */
 };
 
 struct hifs_wbl_mem_entry {
     uint64_t curr_txn_id;
-    uint64_t stripe_id[HIFS_EC_TOTAL_SRIPES];
+    uint64_t stripe_id;
     uint64_t inode_id;
-    uint64_t seg_id;
-    char seg_name[64];
     uint32_t state;
     uint32_t generation;
 
@@ -80,9 +80,11 @@ struct hifs_wbl_mem_entry {
 
 // Define these:
 
+#define HIFS_WBL_UUID_TEXT_LEN 33
+
 struct hifs_wbl_write_intent_rec {
-    uint64_t txn_id;
-    uint64_t stripe_id;
+    char txn_id[HIFS_WBL_UUID_TEXT_LEN];
+    char stripe_id[HIFS_WBL_UUID_TEXT_LEN];
     uint64_t inode_id;
     uint32_t generation;
     struct hifs_block_range range;
@@ -90,61 +92,61 @@ struct hifs_wbl_write_intent_rec {
 };
 
 struct hifs_wbl_landing_rec {
-    uint64_t txn_id;
-    uint64_t stripe_id;
+    char txn_id[HIFS_WBL_UUID_TEXT_LEN];
+    char stripe_id[HIFS_WBL_UUID_TEXT_LEN];
     struct hifs_seg_loc landing_loc;
 };
 
 struct hifs_wbl_prepared_rec {
-    uint64_t txn_id;
-    uint64_t stripe_id;
+    char txn_id[HIFS_WBL_UUID_TEXT_LEN];
+    char stripe_id[HIFS_WBL_UUID_TEXT_LEN];
     uint32_t generation;
     struct hifs_seg_loc frag_locs[HIFS_EC_TOTAL_SRIPES];
 };
 
 struct hifs_wbl_placement_rec {
-    uint64_t txn_id;
-    uint64_t stripe_id;
+    char txn_id[HIFS_WBL_UUID_TEXT_LEN];
+    char stripe_id[HIFS_WBL_UUID_TEXT_LEN];
     struct hifs_fragment_target targets[HIFS_EC_TOTAL_SRIPES];
 };
 
 struct hifs_wbl_outbound_queued_rec {
-    uint64_t txn_id;
-    uint64_t stripe_id;
+    char txn_id[HIFS_WBL_UUID_TEXT_LEN];
+    char stripe_id[HIFS_WBL_UUID_TEXT_LEN];
     uint32_t node_id;
     struct hifs_seg_loc frag_loc;
 };
 
 struct hifs_wbl_fragment_event_rec {
-    uint64_t txn_id;
-    uint64_t stripe_id;
+    char txn_id[HIFS_WBL_UUID_TEXT_LEN];
+    char stripe_id[HIFS_WBL_UUID_TEXT_LEN];
     uint32_t frag_idx;
     uint32_t node_id;
 };
 
 struct hifs_wbl_commit_rec {
-    uint64_t txn_id;
-    uint64_t stripe_id;
+    char txn_id[HIFS_WBL_UUID_TEXT_LEN];
+    char stripe_id[HIFS_WBL_UUID_TEXT_LEN];
     uint8_t ack_bitmap;
 };
 
 struct hifs_wbl_persisting_rec {
-    uint64_t txn_id;
-    uint64_t stripe_id;
+    char txn_id[HIFS_WBL_UUID_TEXT_LEN];
+    char stripe_id[HIFS_WBL_UUID_TEXT_LEN];
     uint8_t persist_bitmap;
 };
 
 struct hifs_wbl_persisted_rec {
-    uint64_t txn_id;
-    uint64_t stripe_id;
+    char txn_id[HIFS_WBL_UUID_TEXT_LEN];
+    char stripe_id[HIFS_WBL_UUID_TEXT_LEN];
     uint8_t persist_bitmap;
 };
 
 #define HIFS_WBL_RECLAIMABLE_F_UNCHANGED 0x01u
 
 struct hifs_wbl_reclaimable_rec {
-    uint64_t txn_id;
-    uint64_t stripe_id;
+    char txn_id[HIFS_WBL_UUID_TEXT_LEN];
+    char stripe_id[HIFS_WBL_UUID_TEXT_LEN];
     uint8_t flags;
     uint8_t reserved[7];
 };
@@ -153,6 +155,8 @@ struct hifs_wbl_ctx {
     int fd;
     uint64_t next_seqno;
     char path[256];
+    pthread_mutex_t mu;
+    bool mu_inited;
 };
 
 extern struct hifs_wbl_ctx g_hive_guard_wbl_ctx;

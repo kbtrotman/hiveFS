@@ -18,13 +18,13 @@
 #include "../common/hive_common.h"
 #include "hive_guard_placement.h"
 
-#define HIVE_GUARD_SEGMT_DIR          HIVE_DATA_DIR "/writeback_cache"
-#define HIVE_GUARD_SEGMT_LANDING      HIVE_GUARD_SEGMT_DIR "/landing"
-#define HIVE_GUARD_SEGMT_OUTBOUND     HIVE_GUARD_SEGMT_DIR "/outbound"
-#define HIVE_GUARD_SEGMT_READ_RETURN  HIVE_GUARD_SEGMT_DIR "/read_return"
-#define HIVE_GUARD_SEGMT_LAND_INDX    HIVE_GUARD_SEGMT_LANDING "/landing_segment.indx"
-#define HIVE_GUARD_SEGMT_OUTB_INDX    HIVE_GUARD_SEGMT_LANDING "/outbound_segment.indx"
-#define HIVE_GUARD_SEGMT_RRET_INDX    HIVE_GUARD_SEGMT_LANDING "/read_return_segment.indx"
+#define HIVE_GUARD_SEGMT_DIR            HIVE_DATA_DIR "/writeback_cache"
+#define HIVE_GUARD_SEGMT_RECV_NEW       HIVE_GUARD_SEGMT_DIR "/recv_new"
+#define HIVE_GUARD_SEGMT_PROC_SEG       HIVE_GUARD_SEGMT_DIR "/process_segments"
+#define HIVE_GUARD_SEGMT_READ_RETURN    HIVE_GUARD_SEGMT_DIR "/read_return"
+#define HIVE_GUARD_SEGMT_RECV_NEW_INDX  HIVE_GUARD_SEGMT_RECV_NEW "/recv_new_segment.indx"
+#define HIVE_GUARD_SEGMT_PROC_SEG_INDX  HIVE_GUARD_SEGMT_PROC_SEG "/proc_seg_segment.indx"
+#define HIVE_GUARD_SEGMT_RRET_INDX      HIVE_GUARD_SEGMT_READ_RETURN "/read_return_segment.indx"
 
 #define HIVE_SEG_BLOCK_FILE_MAGIC   0x48534742u
 #define HIVE_SEG_BLOCK_FILE_VERSION 1u

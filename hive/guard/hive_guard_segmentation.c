@@ -11,6 +11,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#if defined(__linux__)
+#include <sys/random.h>
+#endif
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
@@ -24,6 +27,422 @@
 #include "hive_guard_sn_tcp.h"
 #include "hive_guard.h"
 
+#define HIVE_SEG_UUID_TEXT_LEN HIFS_WBL_UUID_TEXT_LEN
+
+
+struct hive_seg_uuid_pair {
+    char txn_uuid[HIVE_SEG_UUID_TEXT_LEN];
+    char stripe_uuid[HIVE_SEG_UUID_TEXT_LEN];
+};
+
+struct hive_seg_txn_slot {
+    uint64_t txn_id;
+    struct hive_seg_uuid_pair ids;
+};
+
+struct hive_seg_txn_map {
+    struct hive_seg_txn_slot *slots;
+    size_t capacity;
+    size_t count;
+};
+
+struct hive_seg_seg_slot {
+    uint64_t seg_id;
+    struct hive_seg_uuid_pair ids;
+};
+
+struct hive_seg_seg_map {
+    struct hive_seg_seg_slot *slots;
+    size_t capacity;
+    size_t count;
+};
+
+static struct hive_seg_txn_map g_seg_txn_map;
+static struct hive_seg_seg_map g_seg_seg_map;
+static pthread_mutex_t g_seg_txn_map_mu = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t g_seg_seg_map_mu = PTHREAD_MUTEX_INITIALIZER;
+
+static inline size_t hive_seg_uuid_hash(uint64_t key)
+{
+    return (size_t)((key * 0x9e3779b185ebca87ull) >> 1);
+}
+
+static bool hive_seg_random_bytes(uint8_t *out, size_t len)
+{
+    if (!out || len == 0)
+        return false;
+    size_t written = 0;
+#if defined(__linux__)
+    while (written < len) {
+        ssize_t rc = getrandom(out + written, len - written, 0);
+        if (rc < 0) {
+            if (errno == EINTR)
+                continue;
+            if (errno == ENOSYS)
+                break;
+            return false;
+        }
+        written += (size_t)rc;
+    }
+    if (written == len)
+        return true;
+#endif
+    int fd = open("/dev/urandom",
+                  O_RDONLY
+#ifdef O_CLOEXEC
+                  | O_CLOEXEC
+#endif
+    );
+    if (fd < 0)
+        return false;
+    while (written < len) {
+        ssize_t rc = read(fd, out + written, len - written);
+        if (rc < 0) {
+            if (errno == EINTR)
+                continue;
+            close(fd);
+            return false;
+        }
+        if (rc == 0)
+            break;
+        written += (size_t)rc;
+    }
+    close(fd);
+    return written == len;
+}
+
+static bool hive_seg_uuid_generate(char out[HIVE_SEG_UUID_TEXT_LEN])
+{
+    if (!out)
+        return false;
+    uint8_t raw[16];
+    if (!hive_seg_random_bytes(raw, sizeof(raw)))
+        return false;
+    static const char hex[] = "0123456789abcdef";
+    size_t pos = 0;
+    for (size_t i = 0; i < sizeof(raw); ++i) {
+        out[pos++] = hex[raw[i] >> 4];
+        out[pos++] = hex[raw[i] & 0x0F];
+    }
+    out[pos] = '\0';
+    return true;
+}
+
+static bool hive_seg_txn_map_resize(struct hive_seg_txn_map *map, size_t new_cap)
+{
+    if (!map || new_cap == 0 || (new_cap & (new_cap - 1)) != 0)
+        return false;
+    struct hive_seg_txn_slot *slots = calloc(new_cap, sizeof(*slots));
+    if (!slots)
+        return false;
+    size_t inserted = 0;
+    if (map->slots) {
+        for (size_t i = 0; i < map->capacity; ++i) {
+            uint64_t key = map->slots[i].txn_id;
+            if (key == 0 || key == UINT64_MAX)
+                continue;
+            size_t mask = new_cap - 1;
+            size_t idx = hive_seg_uuid_hash(key) & mask;
+            while (slots[idx].txn_id != 0)
+                idx = (idx + 1) & mask;
+            slots[idx] = map->slots[i];
+            ++inserted;
+        }
+    }
+    free(map->slots);
+    map->slots = slots;
+    map->capacity = new_cap;
+    map->count = inserted;
+    return true;
+}
+
+static struct hive_seg_txn_slot *
+hive_seg_txn_map_lookup(struct hive_seg_txn_map *map,
+                        uint64_t key,
+                        bool create)
+{
+    if (!map || key == 0)
+        return NULL;
+    if (map->capacity == 0) {
+        if (!create)
+            return NULL;
+        if (!hive_seg_txn_map_resize(map, 64))
+            return NULL;
+    }
+retry:
+    if (create && (map->count + 1) * 2 > map->capacity) {
+        if (!hive_seg_txn_map_resize(map, map->capacity ? map->capacity * 2 : 64))
+            return NULL;
+        goto retry;
+    }
+    size_t mask = map->capacity - 1;
+    size_t idx = hive_seg_uuid_hash(key) & mask;
+    struct hive_seg_txn_slot *free_slot = NULL;
+    while (1) {
+        struct hive_seg_txn_slot *slot = &map->slots[idx];
+        if (slot->txn_id == key)
+            return slot;
+        if (slot->txn_id == 0) {
+            if (!create)
+                return NULL;
+            if (!free_slot)
+                free_slot = slot;
+            break;
+        }
+        if (slot->txn_id == UINT64_MAX && !free_slot)
+            free_slot = slot;
+        idx = (idx + 1) & mask;
+    }
+    if (!create)
+        return NULL;
+    struct hive_seg_txn_slot *slot = free_slot;
+    memset(slot, 0, sizeof(*slot));
+    slot->txn_id = key;
+    map->count++;
+    return slot;
+}
+
+static void hive_seg_txn_map_remove(struct hive_seg_txn_map *map, uint64_t key)
+{
+    if (!map || map->capacity == 0 || key == 0)
+        return;
+    size_t mask = map->capacity - 1;
+    size_t idx = hive_seg_uuid_hash(key) & mask;
+    while (1) {
+        struct hive_seg_txn_slot *slot = &map->slots[idx];
+        if (slot->txn_id == key) {
+            slot->txn_id = UINT64_MAX;
+            memset(&slot->ids, 0, sizeof(slot->ids));
+            if (map->count > 0)
+                --map->count;
+            return;
+        }
+        if (slot->txn_id == 0)
+            return;
+        idx = (idx + 1) & mask;
+    }
+}
+
+static bool hive_seg_seg_map_resize(struct hive_seg_seg_map *map, size_t new_cap)
+{
+    if (!map || new_cap == 0 || (new_cap & (new_cap - 1)) != 0)
+        return false;
+    struct hive_seg_seg_slot *slots = calloc(new_cap, sizeof(*slots));
+    if (!slots)
+        return false;
+    size_t inserted = 0;
+    if (map->slots) {
+        for (size_t i = 0; i < map->capacity; ++i) {
+            uint64_t key = map->slots[i].seg_id;
+            if (key == 0 || key == UINT64_MAX)
+                continue;
+            size_t mask = new_cap - 1;
+            size_t idx = hive_seg_uuid_hash(key) & mask;
+            while (slots[idx].seg_id != 0)
+                idx = (idx + 1) & mask;
+            slots[idx] = map->slots[i];
+            ++inserted;
+        }
+    }
+    free(map->slots);
+    map->slots = slots;
+    map->capacity = new_cap;
+    map->count = inserted;
+    return true;
+}
+
+static struct hive_seg_seg_slot *
+hive_seg_seg_map_lookup(struct hive_seg_seg_map *map,
+                        uint64_t key,
+                        bool create)
+{
+    if (!map || key == 0)
+        return NULL;
+    if (map->capacity == 0) {
+        if (!create)
+            return NULL;
+        if (!hive_seg_seg_map_resize(map, 64))
+            return NULL;
+    }
+retry:
+    if (create && (map->count + 1) * 2 > map->capacity) {
+        if (!hive_seg_seg_map_resize(map, map->capacity ? map->capacity * 2 : 64))
+            return NULL;
+        goto retry;
+    }
+    size_t mask = map->capacity - 1;
+    size_t idx = hive_seg_uuid_hash(key) & mask;
+    struct hive_seg_seg_slot *free_slot = NULL;
+    while (1) {
+        struct hive_seg_seg_slot *slot = &map->slots[idx];
+        if (slot->seg_id == key)
+            return slot;
+        if (slot->seg_id == 0) {
+            if (!create)
+                return NULL;
+            if (!free_slot)
+                free_slot = slot;
+            break;
+        }
+        if (slot->seg_id == UINT64_MAX && !free_slot)
+            free_slot = slot;
+        idx = (idx + 1) & mask;
+    }
+    if (!create)
+        return NULL;
+    struct hive_seg_seg_slot *slot = free_slot;
+    memset(slot, 0, sizeof(*slot));
+    slot->seg_id = key;
+    map->count++;
+    return slot;
+}
+
+static void hive_seg_seg_map_remove(struct hive_seg_seg_map *map, uint64_t key)
+{
+    if (!map || map->capacity == 0 || key == 0)
+        return;
+    size_t mask = map->capacity - 1;
+    size_t idx = hive_seg_uuid_hash(key) & mask;
+    while (1) {
+        struct hive_seg_seg_slot *slot = &map->slots[idx];
+        if (slot->seg_id == key) {
+            slot->seg_id = UINT64_MAX;
+            memset(&slot->ids, 0, sizeof(slot->ids));
+            if (map->count > 0)
+                --map->count;
+            return;
+        }
+        if (slot->seg_id == 0)
+            return;
+        idx = (idx + 1) & mask;
+    }
+}
+
+static bool hive_seg_txn_uuid_fill(uint64_t txn_id,
+                                   char out[HIVE_SEG_UUID_TEXT_LEN])
+{
+    if (!out || txn_id == 0)
+        return false;
+    bool ok = false;
+    pthread_mutex_lock(&g_seg_txn_map_mu);
+    struct hive_seg_txn_slot *slot =
+        hive_seg_txn_map_lookup(&g_seg_txn_map, txn_id, true);
+    if (slot) {
+        if (slot->ids.txn_uuid[0] == '\0')
+            ok = hive_seg_uuid_generate(slot->ids.txn_uuid);
+        else
+            ok = true;
+        if (ok && slot->ids.stripe_uuid[0] == '\0')
+            ok = hive_seg_uuid_generate(slot->ids.stripe_uuid);
+        if (ok)
+            memcpy(out, slot->ids.txn_uuid, HIVE_SEG_UUID_TEXT_LEN);
+    }
+    pthread_mutex_unlock(&g_seg_txn_map_mu);
+    if (!ok) {
+        hifs_err("hive_segmentation: unable to allocate txn uuid for txn=%llu",
+                 (unsigned long long)txn_id);
+    }
+    return ok;
+}
+
+static bool hive_seg_stripe_uuid_fill(uint64_t txn_id,
+                                      char out[HIVE_SEG_UUID_TEXT_LEN])
+{
+    if (!out || txn_id == 0)
+        return false;
+    pthread_mutex_lock(&g_seg_txn_map_mu);
+    struct hive_seg_txn_slot *slot =
+        hive_seg_txn_map_lookup(&g_seg_txn_map, txn_id, true);
+    bool ok = false;
+    if (slot) {
+        if (slot->ids.stripe_uuid[0] == '\0')
+            ok = hive_seg_uuid_generate(slot->ids.stripe_uuid);
+        else
+            ok = true;
+        if (ok && slot->ids.txn_uuid[0] == '\0')
+            ok = hive_seg_uuid_generate(slot->ids.txn_uuid);
+        if (ok)
+            memcpy(out, slot->ids.stripe_uuid, HIVE_SEG_UUID_TEXT_LEN);
+    }
+    pthread_mutex_unlock(&g_seg_txn_map_mu);
+    if (!ok) {
+        hifs_err("hive_segmentation: unable to allocate stripe uuid for txn=%llu",
+                 (unsigned long long)txn_id);
+    }
+    return ok;
+}
+
+static void hive_seg_txn_identity_forget(uint64_t txn_id)
+{
+    if (txn_id == 0)
+        return;
+    pthread_mutex_lock(&g_seg_txn_map_mu);
+    hive_seg_txn_map_remove(&g_seg_txn_map, txn_id);
+    pthread_mutex_unlock(&g_seg_txn_map_mu);
+}
+
+static bool hive_seg_seg_txn_uuid_fill(uint64_t seg_id,
+                                       char out[HIVE_SEG_UUID_TEXT_LEN])
+{
+    if (!out || seg_id == 0)
+        return false;
+    bool ok = false;
+    pthread_mutex_lock(&g_seg_seg_map_mu);
+    struct hive_seg_seg_slot *slot =
+        hive_seg_seg_map_lookup(&g_seg_seg_map, seg_id, true);
+    if (slot) {
+        if (slot->ids.txn_uuid[0] == '\0')
+            ok = hive_seg_uuid_generate(slot->ids.txn_uuid);
+        else
+            ok = true;
+        if (ok && slot->ids.stripe_uuid[0] == '\0')
+            ok = hive_seg_uuid_generate(slot->ids.stripe_uuid);
+        if (ok)
+            memcpy(out, slot->ids.txn_uuid, HIVE_SEG_UUID_TEXT_LEN);
+    }
+    pthread_mutex_unlock(&g_seg_seg_map_mu);
+    if (!ok) {
+        hifs_err("hive_segmentation: unable to allocate txn uuid for seg=%llu",
+                 (unsigned long long)seg_id);
+    }
+    return ok;
+}
+
+static bool hive_seg_seg_stripe_uuid_fill(uint64_t seg_id,
+                                          char out[HIVE_SEG_UUID_TEXT_LEN])
+{
+    if (!out || seg_id == 0)
+        return false;
+    pthread_mutex_lock(&g_seg_seg_map_mu);
+    struct hive_seg_seg_slot *slot =
+        hive_seg_seg_map_lookup(&g_seg_seg_map, seg_id, true);
+    bool ok = false;
+    if (slot) {
+        if (slot->ids.stripe_uuid[0] == '\0')
+            ok = hive_seg_uuid_generate(slot->ids.stripe_uuid);
+        else
+            ok = true;
+        if (ok && slot->ids.txn_uuid[0] == '\0')
+            ok = hive_seg_uuid_generate(slot->ids.txn_uuid);
+        if (ok)
+            memcpy(out, slot->ids.stripe_uuid, HIVE_SEG_UUID_TEXT_LEN);
+    }
+    pthread_mutex_unlock(&g_seg_seg_map_mu);
+    if (!ok) {
+        hifs_err("hive_segmentation: unable to allocate stripe uuid for seg=%llu",
+                 (unsigned long long)seg_id);
+    }
+    return ok;
+}
+
+static void hive_seg_seg_identity_drop(uint64_t seg_id)
+{
+    if (seg_id == 0)
+        return;
+    pthread_mutex_lock(&g_seg_seg_map_mu);
+    hive_seg_seg_map_remove(&g_seg_seg_map, seg_id);
+    pthread_mutex_unlock(&g_seg_seg_map_mu);
+}
 
 static struct hive_seg_task g_seg_queue[HIVE_SEG_QUEUE_DEPTH];
 static size_t g_seg_head;
@@ -393,11 +812,17 @@ static bool hive_seg_prepare_existing_landing(struct hive_seg_block_input *blk)
 static void hive_seg_log_stripe_committed_record(uint64_t seg_id,
                                                  uint8_t ack_bitmap)
 {
+    char txn_uuid[HIVE_SEG_UUID_TEXT_LEN];
+    char stripe_uuid[HIVE_SEG_UUID_TEXT_LEN];
+    if (!hive_seg_seg_txn_uuid_fill(seg_id, txn_uuid) ||
+        !hive_seg_seg_stripe_uuid_fill(seg_id, stripe_uuid))
+        return;
+
     struct hifs_wbl_commit_rec rec = {
-        .txn_id = seg_id,
-        .stripe_id = seg_id,
         .ack_bitmap = ack_bitmap,
     };
+    memcpy(rec.txn_id, txn_uuid, sizeof(rec.txn_id));
+    memcpy(rec.stripe_id, stripe_uuid, sizeof(rec.stripe_id));
     if (hifs_wbl_mark_committed(&g_hive_guard_wbl_ctx, &rec) != 0) {
         hifs_err("hive_segmentation: unable to append WBL stripe committed record for seg=%llu: %s",
                  (unsigned long long)seg_id,
@@ -408,11 +833,17 @@ static void hive_seg_log_stripe_committed_record(uint64_t seg_id,
 static void hive_seg_log_stripe_persisting_record(uint64_t seg_id,
                                                   uint8_t persist_bitmap)
 {
+    char txn_uuid[HIVE_SEG_UUID_TEXT_LEN];
+    char stripe_uuid[HIVE_SEG_UUID_TEXT_LEN];
+    if (!hive_seg_seg_txn_uuid_fill(seg_id, txn_uuid) ||
+        !hive_seg_seg_stripe_uuid_fill(seg_id, stripe_uuid))
+        return;
+
     struct hifs_wbl_persisting_rec rec = {
-        .txn_id = seg_id,
-        .stripe_id = seg_id,
         .persist_bitmap = persist_bitmap,
     };
+    memcpy(rec.txn_id, txn_uuid, sizeof(rec.txn_id));
+    memcpy(rec.stripe_id, stripe_uuid, sizeof(rec.stripe_id));
     if (hifs_wbl_mark_persisting(&g_hive_guard_wbl_ctx, &rec) != 0) {
         hifs_err("hive_segmentation: unable to append WBL stripe persisting record for seg=%llu: %s",
                  (unsigned long long)seg_id,
@@ -700,6 +1131,7 @@ void hive_seg_release_persisted_segment(uint64_t seg_id, bool changed)
     }
 
     hive_seg_log_stripe_reclaimable_record(seg_id, !changed);
+    hive_seg_seg_identity_drop(seg_id);
 }
 
 static void hive_seg_publish_segment_persisted(uint32_t node_id,
@@ -737,11 +1169,17 @@ static void hive_seg_log_stripe_persisted_record(uint64_t seg_id,
     if (seg_id == 0)
         return;
 
+    char txn_uuid[HIVE_SEG_UUID_TEXT_LEN];
+    char stripe_uuid[HIVE_SEG_UUID_TEXT_LEN];
+    if (!hive_seg_seg_txn_uuid_fill(seg_id, txn_uuid) ||
+        !hive_seg_seg_stripe_uuid_fill(seg_id, stripe_uuid))
+        return;
+
     struct hifs_wbl_persisted_rec rec = {
-        .txn_id = seg_id,
-        .stripe_id = seg_id,
         .persist_bitmap = persist_bitmap,
     };
+    memcpy(rec.txn_id, txn_uuid, sizeof(rec.txn_id));
+    memcpy(rec.stripe_id, stripe_uuid, sizeof(rec.stripe_id));
     if (hifs_wbl_mark_persisted(&g_hive_guard_wbl_ctx, &rec) != 0) {
         hifs_err("hive_segmentation: unable to append WBL stripe persisted record for seg=%llu: %s",
                  (unsigned long long)seg_id,
@@ -755,11 +1193,17 @@ static void hive_seg_log_stripe_reclaimable_record(uint64_t seg_id,
     if (seg_id == 0)
         return;
 
+    char txn_uuid[HIVE_SEG_UUID_TEXT_LEN];
+    char stripe_uuid[HIVE_SEG_UUID_TEXT_LEN];
+    if (!hive_seg_seg_txn_uuid_fill(seg_id, txn_uuid) ||
+        !hive_seg_seg_stripe_uuid_fill(seg_id, stripe_uuid))
+        return;
+
     struct hifs_wbl_reclaimable_rec rec = {
-        .txn_id = seg_id,
-        .stripe_id = seg_id,
         .flags = unchanged ? HIFS_WBL_RECLAIMABLE_F_UNCHANGED : 0u,
     };
+    memcpy(rec.txn_id, txn_uuid, sizeof(rec.txn_id));
+    memcpy(rec.stripe_id, stripe_uuid, sizeof(rec.stripe_id));
     if (hifs_wbl_mark_reclaimable(&g_hive_guard_wbl_ctx, &rec) != 0) {
         hifs_err("hive_segmentation: unable to append WBL stripe reclaimable record for seg=%llu: %s",
                  (unsigned long long)seg_id,
@@ -776,6 +1220,7 @@ static void hive_seg_finalize_persisting(uint32_t node_id,
     hive_seg_publish_segment_persisted(node_id, seg_id);
     hive_seg_log_stripe_persisted_record(seg_id, persist_bitmap);
     hive_seg_log_stripe_reclaimable_record(seg_id, false);
+    hive_seg_seg_identity_drop(seg_id);
 }
 static void hive_seg_cache_drop_remote_fragment(uint32_t node_id,
                                                 uint64_t seg_id)
@@ -831,12 +1276,18 @@ static void hive_seg_log_remote_fragment_acked(uint64_t seg_id,
                                                uint32_t frag_idx,
                                                uint32_t node_id)
 {
+    char txn_uuid[HIVE_SEG_UUID_TEXT_LEN];
+    char stripe_uuid[HIVE_SEG_UUID_TEXT_LEN];
+    if (!hive_seg_seg_txn_uuid_fill(seg_id, txn_uuid) ||
+        !hive_seg_seg_stripe_uuid_fill(seg_id, stripe_uuid))
+        return;
+
     struct hifs_wbl_fragment_event_rec rec = {
-        .txn_id = seg_id,
-        .stripe_id = seg_id,
         .frag_idx = frag_idx,
         .node_id = node_id,
     };
+    memcpy(rec.txn_id, txn_uuid, sizeof(rec.txn_id));
+    memcpy(rec.stripe_id, stripe_uuid, sizeof(rec.stripe_id));
     if (hifs_wbl_mark_fragment_acked(&g_hive_guard_wbl_ctx, &rec) != 0) {
         hifs_err("hive_segmentation: unable to append WBL fragment acked record for seg=%llu frag=%u node=%u: %s",
                  (unsigned long long)seg_id,
@@ -874,7 +1325,7 @@ static void hive_seg_outbound_path(char *out,
         return;
     snprintf(out,
              out_sz,
-             HIVE_GUARD_SEGMT_OUTBOUND "/node-%u-seg-%llu.seg",
+             HIVE_GUARD_SEGMT_PROC_SEG "/node-%u-seg-%llu.seg",
              node_id,
              (unsigned long long)seg_id);
 }
@@ -1073,12 +1524,18 @@ static void hive_seg_log_segment_received_audit(uint32_t src_node_id,
 static void hive_seg_log_remote_fragment_received(uint64_t seg_id,
                                                   uint32_t frag_idx)
 {
+    char txn_uuid[HIVE_SEG_UUID_TEXT_LEN];
+    char stripe_uuid[HIVE_SEG_UUID_TEXT_LEN];
+    if (!hive_seg_seg_txn_uuid_fill(seg_id, txn_uuid) ||
+        !hive_seg_seg_stripe_uuid_fill(seg_id, stripe_uuid))
+        return;
+
     struct hifs_wbl_fragment_event_rec rec = {
-        .txn_id = seg_id,
-        .stripe_id = seg_id,
         .frag_idx = frag_idx,
         .node_id = storage_node_id,
     };
+    memcpy(rec.txn_id, txn_uuid, sizeof(rec.txn_id));
+    memcpy(rec.stripe_id, stripe_uuid, sizeof(rec.stripe_id));
     if (hifs_wbl_mark_fragment_received(&g_hive_guard_wbl_ctx, &rec) != 0) {
         hifs_err("hive_segmentation: unable to append WBL fragment received record for seg=%llu frag=%u: %s",
                  (unsigned long long)seg_id,
@@ -1198,43 +1655,24 @@ static int hive_seg_cache_lock_outbound(uint64_t txn_id,
                                                 blk->block_no,
                                                 node_id,
                                                 loc->offset);
-    bool existing = (rec != NULL);
-    if (!existing) {
-        struct hive_seg_index_disk_rec tmp = {
-            .seg_id = loc->seg_id,
-            .volume_id = blk->volume_id,
-            .block_no = blk->block_no,
-            .txn_id = txn_id,
-            .generation = generation,
-            .state = HIFS_STRIPE_OUTBOUND_QUEUED,
-            .offset = loc->offset,
-            .length = loc->length,
-            .reserved = node_id,
-        };
-        if (!hive_seg_index_mem_append(&g_seg_cache.outbound_idx, &tmp)) {
-            pthread_mutex_unlock(&g_seg_cache.mu);
-            return -ENOMEM;
-        }
-        rec = &g_seg_cache.outbound_idx.entries[g_seg_cache.outbound_idx.count - 1];
-    } else {
-        rec->txn_id = txn_id;
-        rec->generation = generation;
-        rec->state = HIFS_STRIPE_OUTBOUND_QUEUED;
-        rec->length = loc->length;
+    if (!rec) {
+        pthread_mutex_unlock(&g_seg_cache.mu);
+        return -ENOENT;
     }
+
+    rec->txn_id = txn_id;
+    rec->generation = generation;
+    rec->state = HIFS_STRIPE_OUTBOUND_QUEUED;
+    rec->length = loc->length;
 
     int fd = g_seg_cache.outbound_idx_fd;
     int rc = 0;
     if (fd >= 0) {
-        if (existing) {
-            size_t idx = (size_t)(rec - g_seg_cache.outbound_idx.entries);
-            rc = hive_seg_pwrite_all(fd,
-                                     rec,
-                                     sizeof(*rec),
-                                     (off_t)idx * (off_t)sizeof(*rec));
-        } else {
-            rc = hive_seg_write_all(fd, rec, sizeof(*rec));
-        }
+        size_t idx = (size_t)(rec - g_seg_cache.outbound_idx.entries);
+        rc = hive_seg_pwrite_all(fd,
+                                 rec,
+                                 sizeof(*rec),
+                                 (off_t)idx * (off_t)sizeof(*rec));
     }
 
     pthread_mutex_unlock(&g_seg_cache.mu);
@@ -1249,12 +1687,18 @@ static inline void hive_seg_log_outbound_queued(const struct hive_seg_block_inpu
     if (!blk || !loc || node_id == 0)
         return;
 
+    char txn_uuid[HIVE_SEG_UUID_TEXT_LEN];
+    char stripe_uuid[HIVE_SEG_UUID_TEXT_LEN];
+    if (!hive_seg_txn_uuid_fill(txn_id, txn_uuid) ||
+        !hive_seg_stripe_uuid_fill(txn_id, stripe_uuid))
+        return;
+
     struct hifs_wbl_outbound_queued_rec rec = {
-        .txn_id = txn_id,
-        .stripe_id = blk->block_no,
         .node_id = node_id,
         .frag_loc = *loc,
     };
+    memcpy(rec.txn_id, txn_uuid, sizeof(rec.txn_id));
+    memcpy(rec.stripe_id, stripe_uuid, sizeof(rec.stripe_id));
     if (hifs_wbl_mark_outbound_queued(&g_hive_guard_wbl_ctx, &rec) != 0) {
         hifs_err("hive_segmentation: unable to append WBL outbound queued record for %llu:%llu node=%u: %s",
                  (unsigned long long)blk->volume_id,
@@ -1328,12 +1772,18 @@ static inline void hive_seg_log_fragment_sent(const struct hive_seg_block_input 
     if (!blk || node_id == 0)
         return;
 
+    char txn_uuid[HIVE_SEG_UUID_TEXT_LEN];
+    char stripe_uuid[HIVE_SEG_UUID_TEXT_LEN];
+    if (!hive_seg_txn_uuid_fill(txn_id, txn_uuid) ||
+        !hive_seg_stripe_uuid_fill(txn_id, stripe_uuid))
+        return;
+
     struct hifs_wbl_fragment_event_rec rec = {
-        .txn_id = txn_id,
-        .stripe_id = blk->block_no,
         .frag_idx = frag_idx,
         .node_id = node_id,
     };
+    memcpy(rec.txn_id, txn_uuid, sizeof(rec.txn_id));
+    memcpy(rec.stripe_id, stripe_uuid, sizeof(rec.stripe_id));
 
     if (hifs_wbl_mark_fragment_sent(&g_hive_guard_wbl_ctx, &rec) != 0) {
         hifs_err("hive_segmentation: unable to append WBL fragment sent record for %llu:%llu frag=%u node=%u: %s",
@@ -1553,10 +2003,15 @@ static void hive_seg_log_wbl_placement_assigned(uint64_t txn_id,
     if (!blk || !targets || target_count == 0)
         return;
 
-    struct hifs_wbl_placement_rec rec = {
-        .txn_id = txn_id,
-        .stripe_id = blk->block_no,
-    };
+    char txn_uuid[HIVE_SEG_UUID_TEXT_LEN];
+    char stripe_uuid[HIVE_SEG_UUID_TEXT_LEN];
+    if (!hive_seg_txn_uuid_fill(txn_id, txn_uuid) ||
+        !hive_seg_stripe_uuid_fill(txn_id, stripe_uuid))
+        return;
+
+    struct hifs_wbl_placement_rec rec = {0};
+    memcpy(rec.txn_id, txn_uuid, sizeof(rec.txn_id));
+    memcpy(rec.stripe_id, stripe_uuid, sizeof(rec.stripe_id));
 
     if (target_count > HIFS_EC_TOTAL_SRIPES)
         target_count = HIFS_EC_TOTAL_SRIPES;
@@ -1792,8 +2247,8 @@ static int hive_seg_cache_init(void)
     const char *dirs[] = {
         HIVE_DATA_DIR,
         HIVE_GUARD_SEGMT_DIR,
-        HIVE_GUARD_SEGMT_LANDING,
-        HIVE_GUARD_SEGMT_OUTBOUND,
+        HIVE_GUARD_SEGMT_RECV_NEW,
+        HIVE_GUARD_SEGMT_PROC_SEG,
         HIVE_GUARD_SEGMT_READ_RETURN,
     };
     for (size_t i = 0; i < sizeof(dirs) / sizeof(dirs[0]); ++i) {
@@ -1802,12 +2257,12 @@ static int hive_seg_cache_init(void)
             goto fail;
     }
 
-    g_seg_cache.landing_idx_fd = hive_seg_open_index(HIVE_GUARD_SEGMT_LAND_INDX);
+    g_seg_cache.landing_idx_fd = hive_seg_open_index(HIVE_GUARD_SEGMT_RECV_NEW_INDX);
     if (g_seg_cache.landing_idx_fd < 0) {
         rc = g_seg_cache.landing_idx_fd;
         goto fail;
     }
-    g_seg_cache.outbound_idx_fd = hive_seg_open_index(HIVE_GUARD_SEGMT_OUTB_INDX);
+    g_seg_cache.outbound_idx_fd = hive_seg_open_index(HIVE_GUARD_SEGMT_PROC_SEG_INDX);
     if (g_seg_cache.outbound_idx_fd < 0) {
         rc = g_seg_cache.outbound_idx_fd;
         goto fail;
@@ -1903,12 +2358,12 @@ static void hive_seg_landing_path(const struct hive_seg_block_input *blk,
     if (!out || out_sz == 0)
         return;
     if (!blk || !blk->has_landing_loc) {
-        snprintf(out, out_sz, HIVE_GUARD_SEGMT_LANDING "/pending.seg");
+        snprintf(out, out_sz, HIVE_GUARD_SEGMT_RECV_NEW "/pending.seg");
         return;
     }
     snprintf(out,
              out_sz,
-             HIVE_GUARD_SEGMT_LANDING "/seg-%llu-%u.seg",
+             HIVE_GUARD_SEGMT_RECV_NEW "/seg-%llu-%u.seg",
              (unsigned long long)blk->landing_loc.seg_id,
              blk->landing_loc.offset);
 }
@@ -2036,10 +2491,15 @@ static inline void hive_seg_log_landing_eccoded(const struct hive_seg_block_inpu
 {
     if (!blk)
         return;
-    struct hifs_wbl_landing_rec landing = {
-        .txn_id = txn_id,
-        .stripe_id = blk->block_no,
-    };
+    char txn_uuid[HIVE_SEG_UUID_TEXT_LEN];
+    char stripe_uuid[HIVE_SEG_UUID_TEXT_LEN];
+    if (!hive_seg_txn_uuid_fill(txn_id, txn_uuid) ||
+        !hive_seg_stripe_uuid_fill(txn_id, stripe_uuid))
+        return;
+
+    struct hifs_wbl_landing_rec landing = {0};
+    memcpy(landing.txn_id, txn_uuid, sizeof(landing.txn_id));
+    memcpy(landing.stripe_id, stripe_uuid, sizeof(landing.stripe_id));
     if (blk->has_landing_loc)
         landing.landing_loc = blk->landing_loc;
     else {
@@ -2176,7 +2636,7 @@ static void hive_seg_fragment_path(char *out,
         return;
     snprintf(out,
              out_sz,
-             HIVE_GUARD_SEGMT_LANDING "/node-%u-seg-%llu.seg",
+             HIVE_GUARD_SEGMT_RECV_NEW "/node-%u-seg-%llu.seg",
              node_id,
              (unsigned long long)seg_id);
 }
@@ -2290,11 +2750,17 @@ static int hive_seg_log_stripe_prepared(uint64_t txn_id,
                                         const struct hifs_seg_loc *frag_locs,
                                         size_t frag_count)
 {
+    char txn_uuid[HIVE_SEG_UUID_TEXT_LEN];
+    char stripe_uuid[HIVE_SEG_UUID_TEXT_LEN];
+    if (!hive_seg_txn_uuid_fill(txn_id, txn_uuid) ||
+        !hive_seg_stripe_uuid_fill(txn_id, stripe_uuid))
+        return -EIO;
+
     struct hifs_wbl_prepared_rec rec = {
-        .txn_id = txn_id,
-        .stripe_id = stripe_id,
         .generation = generation,
     };
+    memcpy(rec.txn_id, txn_uuid, sizeof(rec.txn_id));
+    memcpy(rec.stripe_id, stripe_uuid, sizeof(rec.stripe_id));
     if (frag_locs && frag_count > 0) {
         if (frag_count > HIFS_EC_TOTAL_SRIPES)
             frag_count = HIFS_EC_TOTAL_SRIPES;
@@ -2304,7 +2770,7 @@ static int hive_seg_log_stripe_prepared(uint64_t txn_id,
     }
     if (hifs_wbl_mark_stripe_prepared(&g_hive_guard_wbl_ctx, &rec) != 0) {
         int err = errno ? -errno : -EIO;
-        hifs_err("hive_segmentation: unable to append WBL stripe prepared record for txn=%llu: %s",
+        hifs_crit("hive_segmentation: unable to append WBL stripe prepared record for txn=%llu: %s",
                  (unsigned long long)txn_id,
                  strerror(errno));
         return err;
@@ -2466,12 +2932,18 @@ static inline void hive_seg_log_write_intent(const struct hive_seg_block_input *
     if (!blk)
         return;
 
+    char txn_uuid[HIVE_SEG_UUID_TEXT_LEN];
+    char stripe_uuid[HIVE_SEG_UUID_TEXT_LEN];
+    if (!hive_seg_txn_uuid_fill(txn_id, txn_uuid) ||
+        !hive_seg_stripe_uuid_fill(txn_id, stripe_uuid))
+        return;
+
     struct hifs_wbl_write_intent_rec rec = {
-        .txn_id = txn_id,
-        .stripe_id = blk->block_no,
         .inode_id = blk->volume_id,
         .generation = generation,
     };
+    memcpy(rec.txn_id, txn_uuid, sizeof(rec.txn_id));
+    memcpy(rec.stripe_id, stripe_uuid, sizeof(rec.stripe_id));
     rec.range.inode_id = blk->volume_id;
     rec.range.lba_start = blk->block_no;
     rec.range.block_count = 1;
@@ -2558,6 +3030,7 @@ static void hive_seg_process_task(struct hive_seg_task *task)
                      (unsigned long long)task->u.single.block_no,
                      rc);
         }
+        hive_seg_txn_identity_forget(resolved_txn);
         return;
     }
 
@@ -2578,6 +3051,7 @@ static void hive_seg_process_task(struct hive_seg_task *task)
     }
     atomic_fetch_add(&g_stats.contig_write_calls, 1);
     atomic_fetch_add(&g_stats.contig_write_bytes, total_bytes);
+    hive_seg_txn_identity_forget(resolved_txn);
 }
 
 static bool hive_seg_queue_pop(struct hive_seg_task *out)

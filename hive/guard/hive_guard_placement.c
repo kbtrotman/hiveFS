@@ -345,7 +345,7 @@ static void hg_init_seed_from_entry(const struct hifs_wbl_mem_entry *entry,
     seed->fs_id = fs_id ? fs_id :
                   (entry->range.inode_id ? entry->range.inode_id : entry->inode_id);
     seed->inode_id = entry->inode_id ? entry->inode_id : entry->range.inode_id;
-    seed->stripe_id = entry->stripe_id[0];
+    seed->stripe_id = entry->stripe_id;
     seed->txn_id = entry->curr_txn_id;
     seed->lba_start = entry->range.lba_start;
     seed->block_count = entry->range.block_count;

@@ -24,10 +24,35 @@
 
 struct hifs_wbl_ctx g_hive_guard_wbl_ctx = {
     .fd = -1,
+    .mu = PTHREAD_MUTEX_INITIALIZER,
+    .mu_inited = true,
 };
 
 static pthread_mutex_t g_wbl_rotate_mu = PTHREAD_MUTEX_INITIALIZER;
 static uint32_t g_wbl_next_slot;
+
+static int hifs_wbl_ctx_ensure_mutex(struct hifs_wbl_ctx *ctx)
+{
+    int rc;
+
+    if (!ctx) {
+        errno = EINVAL;
+        return -1;
+    }
+
+    if (ctx->mu_inited) {
+        return 0;
+    }
+
+    rc = pthread_mutex_init(&ctx->mu, NULL);
+    if (rc != 0) {
+        errno = rc;
+        return -1;
+    }
+
+    ctx->mu_inited = true;
+    return 0;
+}
 
 static inline uint64_t hifs_wbl_next_seqno(struct hifs_wbl_ctx *ctx)
 {
@@ -195,6 +220,10 @@ int hifs_wbl_open(struct hifs_wbl_ctx *ctx, const char *path, bool create)
         return -1;
     }
 
+    if (hifs_wbl_ctx_ensure_mutex(ctx) < 0) {
+        return -1;
+    }
+
     flags = O_WRONLY | O_APPEND;
 #ifdef O_CLOEXEC
     flags |= O_CLOEXEC;
@@ -268,14 +297,22 @@ int hifs_wbl_append(struct hifs_wbl_ctx *ctx,
         return -1;
     }
 
+    clock_gettime(CLOCK_REALTIME, &ts);
+
+    if (hifs_wbl_ctx_ensure_mutex(ctx) < 0) {
+        return -1;
+    }
+
+    pthread_mutex_lock(&ctx->mu);
+
     rc = hifs_wbl_rotate_if_needed(ctx,
                                    sizeof(struct hifs_wbl_hdr) +
                                    (size_t)payload_len);
     if (rc < 0) {
+        pthread_mutex_unlock(&ctx->mu);
         return -1;
     }
 
-    clock_gettime(CLOCK_REALTIME, &ts);
     seqno = hifs_wbl_next_seqno(ctx);
 
     hdr.magic = HIFS_WBL_MAGIC_VALUE;
@@ -295,13 +332,17 @@ int hifs_wbl_append(struct hifs_wbl_ctx *ctx,
 
     n = writev(ctx->fd, iov, 2);
     if (n < 0) {
+        pthread_mutex_unlock(&ctx->mu);
         return -1;
     }
 
     if ((size_t)n != sizeof(hdr) + payload_len) {
         errno = EIO;
+        pthread_mutex_unlock(&ctx->mu);
         return -1;
     }
+
+    pthread_mutex_unlock(&ctx->mu);
 
     return 0;
 }
@@ -348,7 +389,7 @@ int hifs_wbl_mark_write_intent(struct hifs_wbl_ctx *ctx,
                                const struct hifs_wbl_write_intent_rec *rec)
 {
     return hifs_wbl_emit(ctx,
-                         HIFS_WBL_REC_WRITE_INTENT,
+                         HIFS_WBL_REC_WRITE_RECV,
                          rec,
                          sizeof(*rec));
 }
@@ -357,7 +398,7 @@ int hifs_wbl_mark_landing_eccoded(struct hifs_wbl_ctx *ctx,
                                   const struct hifs_wbl_landing_rec *rec)
 {
     return hifs_wbl_emit(ctx,
-                         HIFS_WBL_REC_LANDING_ECCODED,
+                         HIFS_WBL_REC_LANDING_WRITTEN,
                          rec,
                          sizeof(*rec));
 }
@@ -402,7 +443,7 @@ int hifs_wbl_mark_fragment_received(struct hifs_wbl_ctx *ctx,
                                     const struct hifs_wbl_fragment_event_rec *rec)
 {
     return hifs_wbl_emit(ctx,
-                         HIFS_WBL_REC_FRAGMENT_RECEIVED,
+                         HIFS_WBL_REC_FRAGMENT_WRITE_INDX,
                          rec,
                          sizeof(*rec));
 }
@@ -438,7 +479,7 @@ int hifs_wbl_mark_persisted(struct hifs_wbl_ctx *ctx,
                              const struct hifs_wbl_persisted_rec *rec)
 {
     return hifs_wbl_emit(ctx,
-                         HIFS_WBL_REC_STRIPE_PERSISTED,
+                         HIFS_WBL_REC_STRIPE_REMOVE_CACHE,
                          rec,
                          sizeof(*rec));
 }
