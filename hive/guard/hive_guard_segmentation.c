@@ -2962,7 +2962,8 @@ static inline void hive_seg_log_write_intent(const struct hive_seg_block_input *
 // TODO: Now that we have the incoming data on permanent disk, we can 
 
 static inline void hive_seg_log_metadata(const struct hive_seg_block_input *blk,
-                                         uint64_t txn_id)
+                                         uint64_t txn_id,
+                                         uint32_t generation)
 {
     if (!blk)
         return;
@@ -2970,18 +2971,18 @@ static inline void hive_seg_log_metadata(const struct hive_seg_block_input *blk,
         .volume_id = blk->volume_id,
         .block_no = blk->block_no,
         .hash_algo = blk->hash_algo,
+        .stripe_algo = blk->stripe_algo,
         .block_bytes = blk->len,
         .placement_epoch = blk->placement_epoch,
     };
     memcpy(entry.hash, blk->hash, sizeof(entry.hash));
     memcpy(entry.stripe_id, blk->stripe_id, sizeof(entry.stripe_id));
-    if (hifs_mcl_append(&g_hive_guard_mcl_ctx,
-                        CHANGE_STRIPE_INFO,
-                        HIFS_MCL_NEW,
-                        &entry,
-                        sizeof(entry),
-                        txn_id,
-                        blk->block_no) != 0) {
+
+    const uint64_t inode_key = blk->block_no;
+    if (hive_seg_emit_mcl_map_delta(&entry,
+                                    txn_id,
+                                    generation,
+                                    inode_key) != 0) {
         hifs_err("hive_segmentation: unable to append MCL record for %llu:%llu: %s",
                  (unsigned long long)blk->volume_id,
                  (unsigned long long)blk->block_no,
@@ -3002,7 +3003,7 @@ static int hive_seg_apply_block(struct hive_seg_block_input *blk,
     int rc = hive_seg_stage_landing_eccoded(blk, txn_id, generation);
     if (rc != 0)
         return rc;
-    hive_seg_log_metadata(blk, txn_id);
+    hive_seg_log_metadata(blk, txn_id, generation);
 
     return hifs_put_block(blk->volume_id,
                           blk->block_no,

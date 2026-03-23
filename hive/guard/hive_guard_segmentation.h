@@ -76,6 +76,7 @@ struct hive_seg_mcl_block_entry {
     uint64_t volume_id;
     uint64_t block_no;
     enum hifs_hash_algorithm hash_algo;
+    enum hifs_stripe_id_algorithm stripe_algo;
     uint32_t block_bytes;
     uint32_t placement_epoch;
     uint8_t hash[HIFS_BLOCK_HASH_SIZE];

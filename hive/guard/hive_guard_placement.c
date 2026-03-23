@@ -19,6 +19,7 @@
 #include "hive_guard_wbl.h"
 #include "hive_guard_sql.h"
 
+
 static inline uint64_t hg_mix64(uint64_t x)
 {
     x += 0x9e3779b97f4a7c15ULL;

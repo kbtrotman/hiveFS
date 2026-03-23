@@ -12,6 +12,8 @@
 #include "hive_guard_erasure_code.h"
 #include "../common/hive_common.h"
 #include "../../linux_lkm/hifs_shared_defs.h"
+#include "hive_guard_meta.h"
+#include "hive_guard_segmentation.h"
 
 #define HIVE_MCLFILE HIVE_MCL_DIR "/mcl-%llu.log"
 #define HIVE_MCL_DIR HIVE_DATA_DIR "/hive_mcl"
@@ -43,23 +45,45 @@ enum hifs_meta_change_item {
     CHANGE_DIRENTRY,
     CHANGE_STRIPE_INFO,
     CHANGE_ROOT_DIRENTRY,
-    CHANGE_VOLUME_SUPERBLOCK
+    CHANGE_VOLUME_SUPERBLOCK,
+    CHANGE_MAP_DELTA,
 };
 
 enum hifs_mcl_change_type {
+    HIFS_MCL_NEW = 0,
     HIFS_MCL_UPDATE = 1,
-    HIFS_MCL_NEW,
-    HIFS_MCL_DELETE,
-    HIFS_MCL_STRIPE_ADD,
-    HIFS_MCL_STATE_UPDATE,
-    HIFS_MCL_TIME_UPDATE,
-    HIFS_MCL_CHECKPOINT
+    HIFS_MCL_DELETE = 2,
+};
+
+enum hifs_mcl_delta_kind {
+    HIFS_MCL_DELTA_MAP_APPEND = 1,
+    HIFS_MCL_DELTA_STRIPE_REF,
+    HIFS_MCL_DELTA_INODE_SIZE,
+    HIFS_MCL_DELTA_PERSIST_STATE,
+    HIFS_MCL_DELTA_DIR_APPEND
 };
 
 struct hifs_mcl_record_prefix {
     uint8_t item;
     uint8_t change_type;
-}
+};
+
+struct hifs_mcl_map_delta_rec {
+    uint64_t txn_id;
+    uint64_t volume_id;
+    uint64_t inode_key;        /* or object/inode id once wired in */
+    uint64_t block_no;
+    uint32_t generation;
+    uint32_t block_bytes;
+    uint32_t placement_epoch;
+
+    uint8_t  hash_algo;
+    uint8_t  stripe_algo;
+    uint8_t  reserved[6];
+
+    uint8_t  content_hash[HIFS_BLOCK_HASH_SIZE];
+    uint8_t  stripe_id[HIFS_STRIPE_ID_SIZE];
+};
 
 struct hifs_mcl_mem_entry {
     enum hifs_mcl_change_type type;
@@ -96,3 +120,6 @@ int hifs_mcl_append(struct hifs_mcl_ctx *ctx,
                     size_t entry_len,
                     uint64_t txn_id,
                     uint64_t object_id);
+
+void hifs_mcl_coalescer_run(struct hifs_mcl_ctx *mcl,
+                            struct hifs_meta_ctx *meta);
