@@ -67,6 +67,13 @@ void hifs_meta_make_volume_root_id(uint64_t volume_id,
                                    const hifs_object_id_t *policy_hash,
                                    hifs_object_id_t *out);
 
+void hifs_meta_make_volume_id(uint64_t volume_id,
+                              uint64_t sb_epoch,
+                              const hifs_object_id_t *root_inode_id,
+                              const hifs_object_id_t *root_dir_node_id,
+                              const hifs_object_id_t *policy_hash,
+                              hifs_object_id_t *out);
+
 void hifs_meta_make_dir_node_id(uint64_t volume_id,
                                 uint64_t dir_inode_key,
                                 uint64_t dir_epoch,

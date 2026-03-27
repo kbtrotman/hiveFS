@@ -2959,8 +2959,6 @@ static inline void hive_seg_log_write_intent(const struct hive_seg_block_input *
     }
 }
 
-// TODO: Now that we have the incoming data on permanent disk, we can 
-
 static inline void hive_seg_log_metadata(const struct hive_seg_block_input *blk,
                                          uint64_t txn_id,
                                          uint32_t generation)

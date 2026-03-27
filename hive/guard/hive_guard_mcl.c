@@ -22,10 +22,44 @@
 #include <unistd.h>
 
 #include "hive_guard_mcl.h"
+#include "hive_guard_raft.h"
 
-#define HIFS_MCL_MEM_MAX_RECORDS 1000u
 
-#define HIFS_MCL_MEM_TABLE_SIZE 2048u
+
+static pthread_mutex_t g_mcl_async_mu = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t g_mcl_async_cv = PTHREAD_COND_INITIALIZER;
+static pthread_cond_t g_mcl_async_space_cv = PTHREAD_COND_INITIALIZER;
+static pthread_cond_t g_mcl_async_idle_cv = PTHREAD_COND_INITIALIZER;
+static struct hive_mcl_write_req g_mcl_async_pool[HIVE_MCL_ASYNC_QUEUE_MAX];
+static struct hive_mcl_write_req *g_mcl_async_free_list;
+static struct hive_mcl_write_req *g_mcl_async_head;
+static struct hive_mcl_write_req *g_mcl_async_tail;
+static size_t g_mcl_async_depth;
+static size_t g_mcl_async_inflight;
+static int g_mcl_async_fatal_err;
+static pthread_once_t g_mcl_async_once = PTHREAD_ONCE_INIT;
+static pthread_t g_mcl_async_thread;
+static bool g_mcl_async_thread_started;
+static int g_mcl_async_thread_err;
+
+static void hive_mcl_async_start_once(void);
+static int hive_mcl_async_ensure_thread(void);
+static void *hive_mcl_async_worker(void *arg);
+static int hive_mcl_async_queue_record(struct hifs_mcl_ctx *ctx,
+                                       enum hifs_meta_change_item item,
+                                       enum hifs_mcl_change_type change_type,
+                                       const void *entry,
+                                       size_t entry_len,
+                                       uint64_t txn_id,
+                                       uint64_t object_id);
+static void hive_mcl_async_wait_idle(void);
+static int hive_mcl_write_record(struct hifs_mcl_ctx *ctx,
+                                 enum hifs_meta_change_item item,
+                                 enum hifs_mcl_change_type change_type,
+                                 const void *entry,
+                                 size_t entry_len,
+                                 uint64_t txn_id,
+                                 uint64_t object_id);
 
 enum hive_mcl_index_kind {
     HIVE_MCL_KEY_MAP_DELTA,
@@ -72,7 +106,6 @@ struct hive_mcl_mem_table_entry {
     union hive_mcl_mem_payload payload;
     enum hifs_meta_change_item item;
     enum hifs_mcl_change_type change_type;
-    enum hifs_mcl_delta_kind delta_kind;
     uint64_t txn_id;
     uint32_t generation;
     uint64_t last_update_ns;
@@ -95,6 +128,493 @@ struct hifs_mcl_pending_delta {
     uint8_t stripe_id[HIFS_STRIPE_ID_SIZE];
 };
 
+struct hive_mcl_metadata_packet {
+    struct hive_seg_mcl_block_entry block;
+    uint64_t inode_key;
+    uint64_t dir_inode_key;
+    uint64_t root_dentry_id;
+    uint64_t volume_sb_epoch;
+    uint64_t txn_id;
+    uint32_t generation;
+    bool has_delta;
+    struct hifs_mcl_map_delta_rec delta;
+    hifs_object_id_t block_id;
+    hifs_object_id_t map_id;
+    hifs_object_id_t direntry_id;
+    hifs_object_id_t inode_id;
+    hifs_object_id_t root_id;
+    hifs_object_id_t volume_id;
+};
+
+static void hive_mcl_async_start_once(void)
+{
+    for (size_t i = 0; i < HIVE_MCL_ASYNC_QUEUE_MAX; i++) {
+        g_mcl_async_pool[i].next = g_mcl_async_free_list;
+        g_mcl_async_free_list = &g_mcl_async_pool[i];
+    }
+
+    int rc = pthread_create(&g_mcl_async_thread, NULL, hive_mcl_async_worker, NULL);
+    if (rc == 0) {
+        g_mcl_async_thread_started = true;
+        g_mcl_async_thread_err = 0;
+    } else {
+        g_mcl_async_thread_started = false;
+        g_mcl_async_thread_err = rc;
+    }
+}
+
+static int hive_mcl_async_ensure_thread(void)
+{
+    pthread_once(&g_mcl_async_once, hive_mcl_async_start_once);
+    if (!g_mcl_async_thread_started) {
+        errno = g_mcl_async_thread_err ? g_mcl_async_thread_err : EFAULT;
+        return -1;
+    }
+    return 0;
+}
+
+static void *hive_mcl_async_worker(void *arg)
+{
+    (void)arg;
+
+    for (;;) {
+        pthread_mutex_lock(&g_mcl_async_mu);
+        while (!g_mcl_async_head) {
+            pthread_cond_wait(&g_mcl_async_cv, &g_mcl_async_mu);
+        }
+
+        struct hive_mcl_write_req *req = g_mcl_async_head;
+        g_mcl_async_head = req->next;
+        if (!g_mcl_async_head) {
+            g_mcl_async_tail = NULL;
+        }
+        g_mcl_async_depth--;
+        g_mcl_async_inflight++;
+        pthread_mutex_unlock(&g_mcl_async_mu);
+
+        int rc = hive_mcl_write_record(req->ctx,
+                                       req->item,
+                                       req->change_type,
+                                       req->payload,
+                                       req->entry_len,
+                                       req->txn_id,
+                                       req->object_id);
+        int err = (rc == 0) ? 0 : (errno ? errno : EIO);
+
+        pthread_mutex_lock(&g_mcl_async_mu);
+        g_mcl_async_inflight--;
+        req->next = g_mcl_async_free_list;
+        g_mcl_async_free_list = req;
+        pthread_cond_signal(&g_mcl_async_space_cv);
+        if (g_mcl_async_depth == 0 && g_mcl_async_inflight == 0) {
+            pthread_cond_broadcast(&g_mcl_async_idle_cv);
+        }
+        if (rc != 0 && g_mcl_async_fatal_err == 0) {
+            g_mcl_async_fatal_err = err ? err : EIO;
+        }
+        pthread_mutex_unlock(&g_mcl_async_mu);
+    }
+
+    return NULL;
+}
+
+static int hive_mcl_async_queue_record(struct hifs_mcl_ctx *ctx,
+                                       enum hifs_meta_change_item item,
+                                       enum hifs_mcl_change_type change_type,
+                                       const void *entry,
+                                       size_t entry_len,
+                                       uint64_t txn_id,
+                                       uint64_t object_id)
+{
+    struct hive_mcl_write_req *req;
+
+    if (entry_len > HIVE_MCL_MAX_PAYLOAD_SIZE) {
+        errno = EOVERFLOW;
+        return -1;
+    }
+
+    pthread_mutex_lock(&g_mcl_async_mu);
+    while (!g_mcl_async_free_list && g_mcl_async_fatal_err == 0) {
+        pthread_cond_wait(&g_mcl_async_space_cv, &g_mcl_async_mu);
+    }
+
+    if (g_mcl_async_fatal_err != 0) {
+        errno = g_mcl_async_fatal_err;
+        pthread_mutex_unlock(&g_mcl_async_mu);
+        return -1;
+    }
+
+    req = g_mcl_async_free_list;
+    g_mcl_async_free_list = req->next;
+    pthread_mutex_unlock(&g_mcl_async_mu);
+
+    req->ctx = ctx;
+    req->item = item;
+    req->change_type = change_type;
+    req->entry_len = entry_len;
+    req->txn_id = txn_id;
+    req->object_id = object_id;
+    if (entry_len) {
+        memcpy(req->payload, entry, entry_len);
+    }
+    req->next = NULL;
+
+    pthread_mutex_lock(&g_mcl_async_mu);
+    if (g_mcl_async_fatal_err != 0) {
+        req->next = g_mcl_async_free_list;
+        g_mcl_async_free_list = req;
+        pthread_cond_signal(&g_mcl_async_space_cv);
+        errno = g_mcl_async_fatal_err;
+        pthread_mutex_unlock(&g_mcl_async_mu);
+        return -1;
+    }
+
+    if (g_mcl_async_tail) {
+        g_mcl_async_tail->next = req;
+    } else {
+        g_mcl_async_head = req;
+    }
+    g_mcl_async_tail = req;
+    g_mcl_async_depth++;
+    pthread_cond_signal(&g_mcl_async_cv);
+    pthread_mutex_unlock(&g_mcl_async_mu);
+
+    return 0;
+}
+
+static void hive_mcl_async_wait_idle(void)
+{
+    if (!g_mcl_async_thread_started) {
+        return;
+    }
+
+    pthread_mutex_lock(&g_mcl_async_mu);
+    while (g_mcl_async_depth > 0 || g_mcl_async_inflight > 0) {
+        pthread_cond_wait(&g_mcl_async_idle_cv, &g_mcl_async_mu);
+    }
+    pthread_mutex_unlock(&g_mcl_async_mu);
+}
+
+static inline uint64_t hive_mcl_mix64(uint64_t x);
+static inline uint64_t hive_mcl_hash_bytes(const void *data, size_t len, uint64_t seed);
+static struct hive_mcl_mem_table_entry *
+hive_mcl_mem_index_lookup_slot_locked(const struct hive_mcl_index_key *key,
+                                      bool create,
+                                      bool *is_new);
+static inline struct hive_mcl_index_key hive_mcl_make_map_key(uint64_t inode_key, uint64_t block_no);
+
+static void hive_mcl_fill_object_id(uint64_t seed, hifs_object_id_t *out)
+{
+    for (size_t i = 0; i < HIFS_META_OBJECT_ID_SIZE; i += sizeof(seed)) {
+        seed = hive_mcl_mix64(seed + (uint64_t)i);
+        memcpy(out->bytes + i, &seed, sizeof(seed));
+    }
+}
+
+static uint64_t hive_mcl_seed_from_components(uint64_t a,
+                                              uint64_t b,
+                                              const void *extra,
+                                              size_t extra_len)
+{
+    uint64_t seed = 0x768f543fa32b19d7ull;
+
+    seed = hive_mcl_hash_bytes(&a, sizeof(a), seed);
+    seed = hive_mcl_hash_bytes(&b, sizeof(b), seed);
+    if (extra && extra_len) {
+        seed = hive_mcl_hash_bytes(extra, extra_len, seed);
+    }
+
+    return seed;
+}
+
+static void hive_mcl_build_ids_from_block(const struct hive_mcl_segment_block_ref *ref,
+                                          struct hive_mcl_metadata_packet *pkt)
+{
+    const struct hive_seg_mcl_block_entry *blk = &ref->block;
+    const char *name = ref->direntry_name ? ref->direntry_name : "";
+    const size_t name_len = ref->direntry_name ? ref->direntry_name_len : 0u;
+
+    uint64_t seed;
+
+    seed = hive_mcl_seed_from_components(blk->volume_id,
+                                         blk->block_no,
+                                         &ref->inode_key,
+                                         sizeof(ref->inode_key));
+    hive_mcl_fill_object_id(seed, &pkt->block_id);
+
+    seed = hive_mcl_seed_from_components(ref->inode_key,
+                                         blk->block_no,
+                                         &ref->volume_sb_epoch,
+                                         sizeof(ref->volume_sb_epoch));
+    hive_mcl_fill_object_id(seed, &pkt->map_id);
+
+    seed = hive_mcl_seed_from_components(ref->dir_inode_key,
+                                         ref->inode_key,
+                                         name,
+                                         name_len);
+    hive_mcl_fill_object_id(seed, &pkt->direntry_id);
+
+    seed = hive_mcl_seed_from_components(ref->inode_key,
+                                         pkt->generation,
+                                         blk->hash,
+                                         sizeof(blk->hash));
+    hive_mcl_fill_object_id(seed, &pkt->inode_id);
+
+    seed = hive_mcl_seed_from_components(ref->root_dentry_id,
+                                         ref->dir_inode_key,
+                                         &ref->volume_sb_epoch,
+                                         sizeof(ref->volume_sb_epoch));
+    hive_mcl_fill_object_id(seed, &pkt->root_id);
+
+    seed = hive_mcl_seed_from_components(blk->volume_id,
+                                         ref->volume_sb_epoch,
+                                         blk->stripe_id,
+                                         sizeof(blk->stripe_id));
+    hive_mcl_fill_object_id(seed, &pkt->volume_id);
+}
+
+static void hive_mcl_capture_map_delta_locked(uint64_t inode_key,
+                                              uint64_t block_no,
+                                              struct hive_mcl_metadata_packet *pkt)
+{
+    struct hive_mcl_index_key key = hive_mcl_make_map_key(inode_key, block_no);
+    struct hive_mcl_mem_table_entry *entry =
+        hive_mcl_mem_index_lookup_slot_locked(&key, false, NULL);
+
+    if (!entry || entry->item != CHANGE_MAP_DELTA) {
+        pkt->has_delta = false;
+        memset(&pkt->delta, 0, sizeof(pkt->delta));
+        return;
+    }
+
+    pkt->delta = entry->payload.map_delta;
+    pkt->has_delta = true;
+}
+
+static int hive_mcl_metadata_batch_write(const struct hive_mcl_metadata_packet *packets,
+                                         size_t packet_count)
+{
+    (void)packets;
+    (void)packet_count;
+
+    /* Placeholder for future hive_guard_kv.c integration. */
+    return 0;
+}
+
+static int hive_mcl_dispatch_metadata_to_cluster(const struct hive_mcl_metadata_packet *packets,
+                                                 size_t packet_count)
+{
+    (void)packets;
+    (void)packet_count;
+
+    /* Future: send packets via hive_guard_sn_tcp.c to peers and await ACKs. */
+    return 0;
+}
+
+static int hive_mcl_publish_metadata_finalized(uint64_t segment_id,
+                                               uint64_t txn_id,
+                                               uint32_t generation,
+                                               size_t block_count)
+{
+    struct RaftCmd cmd = {0};
+    struct RaftClusterAudit *audit = &cmd.u.cluster_audit;
+    struct timespec ts;
+
+    cmd.op_type = HG_OP_PUT_CLUSTER_AUDIT;
+    audit->cluster_id = hbc.cluster_id;
+    audit->node_id = hbc.storage_node_id;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    audit->timestamp_ns = (uint64_t)ts.tv_sec * 1000000000ull +
+                          (uint64_t)ts.tv_nsec;
+    snprintf(audit->message,
+             sizeof(audit->message),
+             "metadata-finalized seg=%llu txn=%llu gen=%u blocks=%zu",
+             (unsigned long long)segment_id,
+             (unsigned long long)txn_id,
+             generation,
+             block_count);
+
+    if (hg_raft_submit_cmd_sync(&cmd, NULL) != 0) {
+        errno = EIO;
+        return -1;
+    }
+
+    return 0;
+}
+
+int hive_mcl_segment_persist_metadata(const struct hive_mcl_segment_persist_ctx *ctx)
+{
+    struct hive_mcl_metadata_packet *packets = NULL;
+    int rc = -1;
+
+    if (!ctx || !ctx->blocks || ctx->block_count == 0) {
+        errno = EINVAL;
+        return -1;
+    }
+
+    packets = calloc(ctx->block_count, sizeof(*packets));
+    if (!packets) {
+        return -1;
+    }
+
+    for (size_t i = 0; i < ctx->block_count; i++) {
+        const struct hive_mcl_segment_block_ref *ref = &ctx->blocks[i];
+        struct hive_mcl_metadata_packet *pkt = &packets[i];
+
+        pkt->block = ref->block;
+        pkt->inode_key = ref->inode_key;
+        pkt->dir_inode_key = ref->dir_inode_key;
+        pkt->root_dentry_id = ref->root_dentry_id;
+        pkt->volume_sb_epoch = ref->volume_sb_epoch;
+        pkt->txn_id = ctx->txn_id;
+        pkt->generation = ctx->generation;
+
+        hive_mcl_build_ids_from_block(ref, pkt);
+    }
+
+    pthread_mutex_lock(&g_mcl_mem_mu);
+    for (size_t i = 0; i < ctx->block_count; i++) {
+        hive_mcl_capture_map_delta_locked(ctx->blocks[i].inode_key,
+                                          ctx->blocks[i].block.block_no,
+                                          &packets[i]);
+    }
+    pthread_mutex_unlock(&g_mcl_mem_mu);
+
+    rc = hive_mcl_metadata_batch_write(packets, ctx->block_count);
+    if (rc == 0) {
+        rc = hive_mcl_dispatch_metadata_to_cluster(packets, ctx->block_count);
+    }
+    if (rc == 0) {
+        rc = hive_mcl_publish_metadata_finalized(ctx->segment_id,
+                                                 ctx->txn_id,
+                                                 ctx->generation,
+                                                 ctx->block_count);
+    }
+
+    free(packets);
+    return rc;
+}
+
+static int hive_mcl_append_change_record(struct hifs_mcl_ctx *ctx,
+                                         enum hifs_meta_change_item item,
+                                         enum hifs_mcl_change_type change_type,
+                                         uint64_t txn_id,
+                                         uint64_t object_id,
+                                         const void *record,
+                                         size_t record_len)
+{
+    if (!record) {
+        errno = EINVAL;
+        return -1;
+    }
+
+    if (!ctx) {
+        ctx = &g_hive_guard_mcl_ctx;
+    }
+
+    return hifs_mcl_append(ctx,
+                           item,
+                           change_type,
+                           record,
+                           record_len,
+                           txn_id,
+                           object_id);
+}
+
+int hifs_mcl_append_inode_change(struct hifs_mcl_ctx *ctx,
+                                 enum hifs_mcl_change_type change_type,
+                                 uint64_t txn_id,
+                                 const struct change_inode *change)
+{
+    if (!change) {
+        errno = EINVAL;
+        return -1;
+    }
+
+    return hive_mcl_append_change_record(ctx,
+                                         CHANGE_INODE,
+                                         change_type,
+                                         txn_id,
+                                         change->inode_id,
+                                         change,
+                                         sizeof(*change));
+}
+
+int hifs_mcl_append_direntry_change(struct hifs_mcl_ctx *ctx,
+                                    enum hifs_mcl_change_type change_type,
+                                    uint64_t txn_id,
+                                    const struct change_direntry *change)
+{
+    if (!change) {
+        errno = EINVAL;
+        return -1;
+    }
+
+    return hive_mcl_append_change_record(ctx,
+                                         CHANGE_DIRENTRY,
+                                         change_type,
+                                         txn_id,
+                                         change->direntry_id,
+                                         change,
+                                         sizeof(*change));
+}
+
+int hifs_mcl_append_root_dentry_change(struct hifs_mcl_ctx *ctx,
+                                       enum hifs_mcl_change_type change_type,
+                                       uint64_t txn_id,
+                                       const struct change_root_dentry *change)
+{
+    if (!change) {
+        errno = EINVAL;
+        return -1;
+    }
+
+    return hive_mcl_append_change_record(ctx,
+                                         CHANGE_ROOT_DIRENTRY,
+                                         change_type,
+                                         txn_id,
+                                         change->root_dentry_id,
+                                         change,
+                                         sizeof(*change));
+}
+
+int hifs_mcl_append_volume_change(struct hifs_mcl_ctx *ctx,
+                                  enum hifs_mcl_change_type change_type,
+                                  uint64_t txn_id,
+                                  const struct change_volume *change)
+{
+    if (!change) {
+        errno = EINVAL;
+        return -1;
+    }
+
+    return hive_mcl_append_change_record(ctx,
+                                         CHANGE_VOLUME_SUPERBLOCK,
+                                         change_type,
+                                         txn_id,
+                                         change->volume_id,
+                                         change,
+                                         sizeof(*change));
+}
+
+int hifs_mcl_append_stripe_info_change(struct hifs_mcl_ctx *ctx,
+                                       enum hifs_mcl_change_type change_type,
+                                       uint64_t txn_id,
+                                       const struct change_stripe_info_array *change)
+{
+    if (!change) {
+        errno = EINVAL;
+        return -1;
+    }
+
+    return hive_mcl_append_change_record(ctx,
+                                         CHANGE_STRIPE_INFO,
+                                         change_type,
+                                         txn_id,
+                                         change->stripe_info_array_id,
+                                         change,
+                                         sizeof(*change));
+}
 static bool hive_mcl_entry_is_pending_map_delta(const struct hive_mcl_mem_table_entry *entry)
 {
     if (!entry || entry->slot_state != HIVE_MCL_SLOT_OCCUPIED) {
@@ -335,9 +855,7 @@ int hifs_mcl_replay_record(const struct hifs_mcl_hdr *hdr,
         rec = (const void *)rec_bytes;
         change_type = (enum hifs_mcl_change_type)prefix->change_type;
 
-        hive_mcl_mem_index_track_map_delta(rec,
-                                           change_type,
-                                           HIFS_MCL_DELTA_MAP_APPEND);
+        hive_mcl_mem_index_track_map_delta(rec, change_type);
         break;
     }
     default:
@@ -584,8 +1102,7 @@ static void hive_mcl_mem_index_update_flags(const struct hive_mcl_index_key *key
 }
 
 static void hive_mcl_mem_index_track_map_delta(const struct hifs_mcl_map_delta_rec *rec,
-                                               enum hifs_mcl_change_type change_type,
-                                               enum hifs_mcl_delta_kind delta_kind)
+                                               enum hifs_mcl_change_type change_type)
 {
     struct hive_mcl_index_key key = hive_mcl_make_map_key(rec->inode_key, rec->block_no);
     bool is_new = false;
@@ -603,7 +1120,6 @@ static void hive_mcl_mem_index_track_map_delta(const struct hifs_mcl_map_delta_r
 
     entry->item = CHANGE_MAP_DELTA;
     entry->change_type = change_type;
-    entry->delta_kind = delta_kind;
     entry->txn_id = rec->txn_id;
     entry->generation = rec->generation;
     entry->payload.map_delta = *rec;
@@ -681,7 +1197,7 @@ int hive_seg_emit_mcl_map_delta(const struct hive_seg_mcl_block_entry *blk,
 
     return hifs_mcl_append(&g_hive_guard_mcl_ctx,
                            CHANGE_MAP_DELTA,
-                           HIFS_MCL_NEW,
+                           HIFS_MCL_DELTA_MAP_APPEND,
                            &rec,
                            sizeof(rec),
                            txn_id,
@@ -720,15 +1236,15 @@ static inline size_t hifs_mcl_payload_len(enum hifs_meta_change_item item)
 {
     switch (item) {
     case CHANGE_INODE:
-        return sizeof(struct hifs_inode);
+        return sizeof(struct change_inode);
     case CHANGE_DIRENTRY:
-        return sizeof(struct hifs_dir_entry);
+        return sizeof(struct change_direntry);
     case CHANGE_STRIPE_INFO:
-        return sizeof(struct HifsEstripeLocations);
+        return sizeof(struct change_stripe_info_array);
     case CHANGE_ROOT_DIRENTRY:
-        return sizeof(struct hifs_volume_root_dentry);
+        return sizeof(struct change_root_dentry);
     case CHANGE_VOLUME_SUPERBLOCK:
-        return sizeof(struct hifs_volume_superblock);
+        return sizeof(struct change_volume);
     case CHANGE_MAP_DELTA:
         return sizeof(struct hifs_mcl_map_delta_rec);
     default:
@@ -913,6 +1429,8 @@ int hifs_mcl_close(struct hifs_mcl_ctx *ctx)
         return 0;
     }
 
+    hive_mcl_async_wait_idle();
+
     rc = close(ctx->fd);
     if (rc < 0) {
         return -1;
@@ -925,13 +1443,13 @@ int hifs_mcl_close(struct hifs_mcl_ctx *ctx)
     return 0;
 }
 
-int hifs_mcl_append(struct hifs_mcl_ctx *ctx,
-                    enum hifs_meta_change_item item,
-                    enum hifs_mcl_change_type change_type,
-                    const void *entry,
-                    size_t entry_len,
-                    uint64_t txn_id,
-                    uint64_t object_id)
+static int hive_mcl_write_record(struct hifs_mcl_ctx *ctx,
+                                 enum hifs_meta_change_item item,
+                                 enum hifs_mcl_change_type change_type,
+                                 const void *entry,
+                                 size_t entry_len,
+                                 uint64_t txn_id,
+                                 uint64_t object_id)
 {
     struct hifs_mcl_hdr hdr;
     struct hifs_mcl_record_prefix prefix;
@@ -1008,4 +1526,65 @@ int hifs_mcl_append(struct hifs_mcl_ctx *ctx,
     }
 
     return 0;
+}
+
+int hifs_mcl_append(struct hifs_mcl_ctx *ctx,
+                    enum hifs_meta_change_item item,
+                    enum hifs_mcl_change_type change_type,
+                    const void *entry,
+                    size_t entry_len,
+                    uint64_t txn_id,
+                    uint64_t object_id)
+{
+    size_t expected_len;
+
+    if (!entry) {
+        errno = EINVAL;
+        return -1;
+    }
+
+    if (!ctx) {
+        ctx = &g_hive_guard_mcl_ctx;
+    }
+
+    if (ctx->fd < 0) {
+        errno = EBADF;
+        return -1;
+    }
+
+    expected_len = hifs_mcl_payload_len(item);
+    if (expected_len == 0) {
+        errno = EINVAL;
+        return -1;
+    }
+
+    if (entry_len == 0) {
+        entry_len = expected_len;
+    } else if (entry_len != expected_len) {
+        errno = EINVAL;
+        return -1;
+    }
+
+    if (entry_len > HIVE_MCL_MAX_PAYLOAD_SIZE) {
+        errno = EOVERFLOW;
+        return -1;
+    }
+
+    if (hive_mcl_async_ensure_thread() != 0) {
+        return hive_mcl_write_record(ctx,
+                                     item,
+                                     change_type,
+                                     entry,
+                                     entry_len,
+                                     txn_id,
+                                     object_id);
+    }
+
+    return hive_mcl_async_queue_record(ctx,
+                                       item,
+                                       change_type,
+                                       entry,
+                                       entry_len,
+                                       txn_id,
+                                       object_id);
 }

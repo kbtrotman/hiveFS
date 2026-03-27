@@ -6,6 +6,7 @@
 #include <time.h>
 
 #include "hive_guard_meta.h"
+#include "hive_guard_mcl.h"
 
 struct hifs_meta_committed_map {
     uint64_t volume_id;
@@ -19,6 +20,72 @@ static void hifs_meta_sha256_begin_tagged(SHA256_CTX *ctx, const char *tag);
 static void hifs_meta_sha256_finish(SHA256_CTX *ctx, hifs_object_id_t *out);
 static void hifs_meta_sha256_finish_bytes(SHA256_CTX *ctx, uint8_t *out_bytes);
 static void hifs_meta_sha256_update_id(SHA256_CTX *ctx, const hifs_object_id_t *id);
+static void hifs_meta_sha256_update_u64(SHA256_CTX *ctx, uint64_t value);
+static void hifs_meta_sha256_update_u32(SHA256_CTX *ctx, uint32_t value);
+
+static void hifs_meta_make_volume_identity(uint64_t volume_id,
+                                           uint64_t sb_epoch,
+                                           const hifs_object_id_t *root_inode_id,
+                                           const hifs_object_id_t *root_dir_node_id,
+                                           const hifs_object_id_t *policy_hash,
+                                           hifs_object_id_t *root_id_out,
+                                           hifs_object_id_t *volume_id_out)
+{
+    SHA256_CTX ctx;
+    hifs_object_id_t digest;
+
+    hifs_meta_sha256_begin_tagged(&ctx, "VOLROOT");
+    hifs_meta_sha256_update_u64(&ctx, volume_id);
+    hifs_meta_sha256_update_u64(&ctx, sb_epoch);
+    hifs_meta_sha256_update_id(&ctx, root_inode_id);
+    hifs_meta_sha256_update_id(&ctx, root_dir_node_id);
+    hifs_meta_sha256_update_id(&ctx, policy_hash);
+    hifs_meta_sha256_finish(&ctx, &digest);
+
+    if (root_id_out) {
+        *root_id_out = digest;
+    }
+    if (volume_id_out) {
+        *volume_id_out = digest;
+    }
+}
+
+static int hifs_meta_log_deltas_to_mcl(const struct hifs_meta_map_builder *bld,
+                                       uint64_t txn_base)
+{
+    struct hifs_mcl_map_delta_rec rec;
+
+    if (!bld || !bld->deltas || bld->delta_count == 0) {
+        errno = EINVAL;
+        return -1;
+    }
+
+    for (size_t i = 0; i < bld->delta_count; i++) {
+        const struct hifs_meta_map_delta *delta = &bld->deltas[i];
+
+        memset(&rec, 0, sizeof(rec));
+        rec.txn_id = txn_base + (uint64_t)i;
+        rec.volume_id = bld->volume_id;
+        rec.inode_key = bld->inode_key;
+        rec.block_no = delta->block_no;
+        rec.generation = delta->generation;
+        memcpy(rec.content_hash, delta->content_hash, HIFS_BLOCK_HASH_SIZE);
+        memcpy(rec.stripe_id, delta->stripe_id, HIFS_STRIPE_ID_SIZE);
+
+        if (hifs_mcl_append(&g_hive_guard_mcl_ctx,
+                             CHANGE_MAP_DELTA,
+                             HIFS_MCL_DELTA_MAP_APPEND,
+                             &rec,
+                             sizeof(rec),
+                             rec.txn_id,
+                             bld->inode_key) != 0) {
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
 static uint64_t hifs_meta_now_ns(void)
 {
     struct timespec ts;
@@ -247,7 +314,6 @@ int hifs_meta_map_apply_delta(struct hifs_meta_map_builder *bld,
 
     return 0;
 }
-
 int hifs_meta_map_commit(struct hifs_meta_ctx *ctx,
                          struct hifs_meta_map_builder *bld,
                          hifs_object_id_t *new_map_root_id)
@@ -283,7 +349,13 @@ int hifs_meta_map_commit(struct hifs_meta_ctx *ctx,
         memset(&ctx->maps[idx].map_root_id, 0, sizeof(ctx->maps[idx].map_root_id));
         ctx->maps[idx].commit_count = 0;
     }
+    pthread_mutex_unlock(&ctx->mu);
 
+    if (hifs_meta_log_deltas_to_mcl(bld, now_ns) < 0) {
+        return -1;
+    }
+
+    pthread_mutex_lock(&ctx->mu);
     ctx->maps[idx].map_root_id = root_id;
     ctx->maps[idx].last_commit_ns = now_ns;
     ctx->maps[idx].commit_count++;
@@ -335,15 +407,29 @@ void hifs_meta_make_volume_root_id(uint64_t volume_id,
                                    const hifs_object_id_t *policy_hash,
                                    hifs_object_id_t *out)
 {
-    SHA256_CTX ctx;
+    hifs_meta_make_volume_identity(volume_id,
+                                   sb_epoch,
+                                   root_inode_id,
+                                   root_dir_node_id,
+                                   policy_hash,
+                                   out,
+                                   NULL);
+}
 
-    hifs_meta_sha256_begin_tagged(&ctx, "VOLROOT");
-    hifs_meta_sha256_update_u64(&ctx, volume_id);
-    hifs_meta_sha256_update_u64(&ctx, sb_epoch);
-    hifs_meta_sha256_update_id(&ctx, root_inode_id);
-    hifs_meta_sha256_update_id(&ctx, root_dir_node_id);
-    hifs_meta_sha256_update_id(&ctx, policy_hash);
-    hifs_meta_sha256_finish(&ctx, out);
+void hifs_meta_make_volume_id(uint64_t volume_id,
+                              uint64_t sb_epoch,
+                              const hifs_object_id_t *root_inode_id,
+                              const hifs_object_id_t *root_dir_node_id,
+                              const hifs_object_id_t *policy_hash,
+                              hifs_object_id_t *out)
+{
+    hifs_meta_make_volume_identity(volume_id,
+                                   sb_epoch,
+                                   root_inode_id,
+                                   root_dir_node_id,
+                                   policy_hash,
+                                   NULL,
+                                   out);
 }
 
 void hifs_meta_make_dir_node_id(uint64_t volume_id,

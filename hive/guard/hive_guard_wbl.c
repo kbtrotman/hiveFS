@@ -16,11 +16,200 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
-#include <sys/uio.h>
 #include <time.h>
 #include <unistd.h>
 
 #include "hive_guard_wbl.h"
+
+static int hifs_wbl_rotate_if_needed(struct hifs_wbl_ctx *ctx, size_t next_write);
+
+struct hifs_wbl_async_req {
+    struct hifs_wbl_async_req *next;
+    struct hifs_wbl_ctx *ctx;
+    size_t len;
+    uint8_t data[];
+};
+
+static pthread_mutex_t g_wbl_queue_mu = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t g_wbl_queue_cv = PTHREAD_COND_INITIALIZER;
+static struct hifs_wbl_async_req *g_wbl_queue_head;
+static struct hifs_wbl_async_req *g_wbl_queue_tail;
+static uint64_t g_wbl_pending;
+static unsigned int g_wbl_active_ctx;
+static pthread_t g_wbl_worker;
+static bool g_wbl_worker_running;
+static bool g_wbl_worker_stop;
+static int g_wbl_worker_errno;
+
+static void hifs_wbl_worker_note_error(int err)
+{
+    pthread_mutex_lock(&g_wbl_queue_mu);
+    if (g_wbl_worker_errno == 0) {
+        g_wbl_worker_errno = err ? err : EIO;
+        g_wbl_worker_stop = true;
+    }
+    pthread_cond_broadcast(&g_wbl_queue_cv);
+    pthread_mutex_unlock(&g_wbl_queue_mu);
+}
+
+static void *hifs_wbl_worker_main(void *arg)
+{
+    (void)arg;
+
+    for (;;) {
+        struct hifs_wbl_async_req *req = NULL;
+        int pending_err;
+
+        pthread_mutex_lock(&g_wbl_queue_mu);
+        while (!g_wbl_worker_stop && !g_wbl_queue_head) {
+            pthread_cond_wait(&g_wbl_queue_cv, &g_wbl_queue_mu);
+        }
+        if (g_wbl_worker_stop && !g_wbl_queue_head) {
+            pthread_mutex_unlock(&g_wbl_queue_mu);
+            break;
+        }
+        req = g_wbl_queue_head;
+        g_wbl_queue_head = req->next;
+        if (!g_wbl_queue_head) {
+            g_wbl_queue_tail = NULL;
+        }
+        pending_err = g_wbl_worker_errno;
+        pthread_mutex_unlock(&g_wbl_queue_mu);
+
+        if (!req) {
+            continue;
+        }
+
+        if (pending_err == 0 && req->ctx && req->ctx->fd >= 0) {
+            if (hifs_wbl_rotate_if_needed(req->ctx, req->len) < 0) {
+                hifs_wbl_worker_note_error(errno);
+            } else {
+                size_t written = 0;
+                while (written < req->len) {
+                    ssize_t n = write(req->ctx->fd,
+                                      req->data + written,
+                                      req->len - written);
+                    if (n < 0) {
+                        hifs_wbl_worker_note_error(errno);
+                        break;
+                    }
+                    written += (size_t)n;
+                }
+                if (written != req->len) {
+                    hifs_wbl_worker_note_error(EIO);
+                }
+            }
+        }
+
+        free(req);
+
+        pthread_mutex_lock(&g_wbl_queue_mu);
+        if (g_wbl_pending > 0) {
+            g_wbl_pending--;
+            if (g_wbl_pending == 0) {
+                pthread_cond_broadcast(&g_wbl_queue_cv);
+            }
+        }
+        pthread_mutex_unlock(&g_wbl_queue_mu);
+    }
+
+    pthread_mutex_lock(&g_wbl_queue_mu);
+    if (g_wbl_pending == 0) {
+        pthread_cond_broadcast(&g_wbl_queue_cv);
+    }
+    pthread_mutex_unlock(&g_wbl_queue_mu);
+
+    return NULL;
+}
+
+static int hifs_wbl_worker_start(void)
+{
+    int rc = 0;
+
+    pthread_mutex_lock(&g_wbl_queue_mu);
+    if (!g_wbl_worker_running) {
+        g_wbl_worker_stop = false;
+        g_wbl_worker_errno = 0;
+        rc = pthread_create(&g_wbl_worker, NULL, hifs_wbl_worker_main, NULL);
+        if (rc != 0) {
+            errno = rc;
+        } else {
+            g_wbl_worker_running = true;
+        }
+    }
+    pthread_mutex_unlock(&g_wbl_queue_mu);
+
+    return rc == 0 ? 0 : -1;
+}
+
+static void hifs_wbl_worker_shutdown(void)
+{
+    struct hifs_wbl_async_req *req;
+
+    pthread_mutex_lock(&g_wbl_queue_mu);
+    if (!g_wbl_worker_running) {
+        pthread_mutex_unlock(&g_wbl_queue_mu);
+        return;
+    }
+    g_wbl_worker_stop = true;
+    pthread_cond_broadcast(&g_wbl_queue_cv);
+    pthread_mutex_unlock(&g_wbl_queue_mu);
+
+    pthread_join(g_wbl_worker, NULL);
+
+    pthread_mutex_lock(&g_wbl_queue_mu);
+    g_wbl_worker_running = false;
+    g_wbl_worker_stop = false;
+    g_wbl_worker_errno = 0;
+    g_wbl_pending = 0;
+    while ((req = g_wbl_queue_head) != NULL) {
+        g_wbl_queue_head = req->next;
+        free(req);
+    }
+    g_wbl_queue_tail = NULL;
+    pthread_mutex_unlock(&g_wbl_queue_mu);
+}
+
+static int hifs_wbl_async_submit(struct hifs_wbl_async_req *req)
+{
+    int err = 0;
+
+    pthread_mutex_lock(&g_wbl_queue_mu);
+    if (!g_wbl_worker_running || g_wbl_worker_stop || g_wbl_worker_errno != 0) {
+        err = g_wbl_worker_errno ? g_wbl_worker_errno : EPIPE;
+        errno = err;
+        pthread_mutex_unlock(&g_wbl_queue_mu);
+        return -1;
+    }
+
+    if (!g_wbl_queue_head) {
+        g_wbl_queue_head = req;
+    } else {
+        g_wbl_queue_tail->next = req;
+    }
+    g_wbl_queue_tail = req;
+    g_wbl_pending++;
+    pthread_cond_signal(&g_wbl_queue_cv);
+    pthread_mutex_unlock(&g_wbl_queue_mu);
+
+    return 0;
+}
+
+static int hifs_wbl_wait_for_idle(void)
+{
+    pthread_mutex_lock(&g_wbl_queue_mu);
+    while (g_wbl_pending > 0 && g_wbl_worker_errno == 0) {
+        pthread_cond_wait(&g_wbl_queue_cv, &g_wbl_queue_mu);
+    }
+    int err = g_wbl_worker_errno;
+    pthread_mutex_unlock(&g_wbl_queue_mu);
+
+    if (err != 0) {
+        errno = err;
+        return -1;
+    }
+    return 0;
+}
 
 struct hifs_wbl_ctx g_hive_guard_wbl_ctx = {
     .fd = -1,
@@ -214,6 +403,7 @@ int hifs_wbl_open(struct hifs_wbl_ctx *ctx, const char *path, bool create)
 {
     int flags;
     int fd;
+    bool need_worker = false;
 
     if (!ctx || !path) {
         errno = EINVAL;
@@ -237,6 +427,25 @@ int hifs_wbl_open(struct hifs_wbl_ctx *ctx, const char *path, bool create)
         return -1;
     }
 
+    pthread_mutex_lock(&g_wbl_queue_mu);
+    if (g_wbl_active_ctx == 0) {
+        need_worker = true;
+    }
+    g_wbl_active_ctx++;
+    pthread_mutex_unlock(&g_wbl_queue_mu);
+
+    if (need_worker && hifs_wbl_worker_start() < 0) {
+        int saved = errno;
+        pthread_mutex_lock(&g_wbl_queue_mu);
+        if (g_wbl_active_ctx > 0) {
+            g_wbl_active_ctx--;
+        }
+        pthread_mutex_unlock(&g_wbl_queue_mu);
+        close(fd);
+        errno = saved;
+        return -1;
+    }
+
     ctx->fd = fd;
     ctx->next_seqno = 0;
     strncpy(ctx->path, path, sizeof(ctx->path) - 1);
@@ -247,25 +456,62 @@ int hifs_wbl_open(struct hifs_wbl_ctx *ctx, const char *path, bool create)
 
 int hifs_wbl_close(struct hifs_wbl_ctx *ctx)
 {
-    int rc;
+    int close_rc = 0;
+    int flush_rc = 0;
+    int saved_flush_errno = 0;
+    bool stop_worker = false;
 
     if (!ctx) {
         errno = EINVAL;
         return -1;
     }
 
-    if (ctx->fd < 0) {
-        return 0;
-    }
-
-    rc = close(ctx->fd);
-    if (rc < 0) {
+    if (hifs_wbl_ctx_ensure_mutex(ctx) < 0) {
         return -1;
     }
 
+    pthread_mutex_lock(&ctx->mu);
+    if (ctx->fd < 0) {
+        pthread_mutex_unlock(&ctx->mu);
+        return 0;
+    }
+
+    flush_rc = hifs_wbl_wait_for_idle();
+    if (flush_rc < 0) {
+        saved_flush_errno = errno;
+    }
+
+    int fd = ctx->fd;
     ctx->fd = -1;
     ctx->next_seqno = 0;
     ctx->path[0] = '\0';
+    pthread_mutex_unlock(&ctx->mu);
+
+    if (close(fd) < 0) {
+        close_rc = -1;
+    }
+
+    pthread_mutex_lock(&g_wbl_queue_mu);
+    if (g_wbl_active_ctx > 0) {
+        g_wbl_active_ctx--;
+        if (g_wbl_active_ctx == 0) {
+            stop_worker = true;
+        }
+    }
+    pthread_mutex_unlock(&g_wbl_queue_mu);
+
+    if (stop_worker) {
+        hifs_wbl_worker_shutdown();
+    }
+
+    if (close_rc < 0) {
+        return -1;
+    }
+
+    if (flush_rc < 0) {
+        errno = saved_flush_errno;
+        return -1;
+    }
 
     return 0;
 }
@@ -275,14 +521,13 @@ int hifs_wbl_append(struct hifs_wbl_ctx *ctx,
                     uint32_t payload_len)
 {
     struct hifs_wbl_hdr hdr;
-    struct iovec iov[2];
+    struct hifs_wbl_async_req *req;
     struct timespec ts;
-    ssize_t n;
     uint64_t seqno;
     uint32_t crc;
-    int rc;
+    size_t total_len;
 
-    if (!ctx || ctx->fd < 0) {
+    if (!ctx) {
         errno = EINVAL;
         return -1;
     }
@@ -304,16 +549,13 @@ int hifs_wbl_append(struct hifs_wbl_ctx *ctx,
     }
 
     pthread_mutex_lock(&ctx->mu);
-
-    rc = hifs_wbl_rotate_if_needed(ctx,
-                                   sizeof(struct hifs_wbl_hdr) +
-                                   (size_t)payload_len);
-    if (rc < 0) {
+    if (ctx->fd < 0) {
         pthread_mutex_unlock(&ctx->mu);
+        errno = EINVAL;
         return -1;
     }
-
     seqno = hifs_wbl_next_seqno(ctx);
+    pthread_mutex_unlock(&ctx->mu);
 
     hdr.magic = HIFS_WBL_MAGIC_VALUE;
     hdr.version = HIFS_WBL_VERSION;
@@ -325,24 +567,26 @@ int hifs_wbl_append(struct hifs_wbl_ctx *ctx,
     crc = payload_len ? hifs_wbl_calc_crc32(payload, payload_len) : 0;
     hdr.crc32 = crc;
 
-    iov[0].iov_base = &hdr;
-    iov[0].iov_len = sizeof(hdr);
-    iov[1].iov_base = (void *)(payload_len ? payload : NULL);
-    iov[1].iov_len = payload_len;
-
-    n = writev(ctx->fd, iov, 2);
-    if (n < 0) {
-        pthread_mutex_unlock(&ctx->mu);
+    total_len = sizeof(hdr) + (size_t)payload_len;
+    req = malloc(sizeof(*req) + total_len);
+    if (!req) {
+        errno = ENOMEM;
         return -1;
     }
-
-    if ((size_t)n != sizeof(hdr) + payload_len) {
-        errno = EIO;
-        pthread_mutex_unlock(&ctx->mu);
-        return -1;
+    req->ctx = ctx;
+    req->len = total_len;
+    req->next = NULL;
+    memcpy(req->data, &hdr, sizeof(hdr));
+    if (payload_len) {
+        memcpy(req->data + sizeof(hdr), payload, payload_len);
     }
 
-    pthread_mutex_unlock(&ctx->mu);
+    if (hifs_wbl_async_submit(req) < 0) {
+        int saved = errno;
+        free(req);
+        errno = saved;
+        return -1;
+    }
 
     return 0;
 }
