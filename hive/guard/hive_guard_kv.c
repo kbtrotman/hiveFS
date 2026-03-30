@@ -15,8 +15,10 @@
  * Simple KV store interface using high-speed SSD-optimized RocksDB key/value store
  */
 
- #include <string.h>
+#include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <endian.h>
 #include <rocksdb/c.h>
 
 #include "hive_guard_kv.h"
@@ -24,6 +26,291 @@
 #include "hive_guard_stats.h"
 
 static rocksdb_t *g_db = NULL;
+
+#define HG_KV_OBJ_KEY_LEN      (2u + HIFS_META_OBJECT_ID_SIZE)
+#define HG_KV_VP_KEY_LEN       (2u + sizeof(uint64_t))
+#define HG_KV_IP_KEY_LEN       (2u + (sizeof(uint64_t) * 2u))
+#define HG_KV_DP_KEY_LEN       (2u + (sizeof(uint64_t) * 3u))
+
+static inline char *hg_kv_store_u64(char *dst, uint64_t value)
+{
+    uint64_t le = htole64(value);
+    memcpy(dst, &le, sizeof(le));
+    return dst + sizeof(le);
+}
+
+static size_t hg_kv_make_obj_key(char a, char b,
+                                 const uint8_t obj_id[HIFS_META_OBJECT_ID_SIZE],
+                                 char key_out[HG_KV_OBJ_KEY_LEN])
+{
+    key_out[0] = a;
+    key_out[1] = b;
+    memcpy(&key_out[2], obj_id, HIFS_META_OBJECT_ID_SIZE);
+    return HG_KV_OBJ_KEY_LEN;
+}
+
+static size_t hg_kv_make_vp_key(uint64_t volume_id, char key_out[HG_KV_VP_KEY_LEN])
+{
+    char *cursor = key_out;
+    *cursor++ = 'v';
+    *cursor++ = 'p';
+    cursor = hg_kv_store_u64(cursor, volume_id);
+    return (size_t)(cursor - key_out);
+}
+
+static size_t hg_kv_make_ip_key(uint64_t volume_id,
+                                uint64_t inode_key,
+                                char key_out[HG_KV_IP_KEY_LEN])
+{
+    char *cursor = key_out;
+    *cursor++ = 'i';
+    *cursor++ = 'p';
+    cursor = hg_kv_store_u64(cursor, volume_id);
+    cursor = hg_kv_store_u64(cursor, inode_key);
+    return (size_t)(cursor - key_out);
+}
+
+static size_t hg_kv_make_dp_key(uint64_t volume_id,
+                                uint64_t parent_inode_key,
+                                uint64_t name_hash,
+                                char key_out[HG_KV_DP_KEY_LEN])
+{
+    char *cursor = key_out;
+    *cursor++ = 'd';
+    *cursor++ = 'p';
+    cursor = hg_kv_store_u64(cursor, volume_id);
+    cursor = hg_kv_store_u64(cursor, parent_inode_key);
+    cursor = hg_kv_store_u64(cursor, name_hash);
+    return (size_t)(cursor - key_out);
+}
+
+static int hg_kv_put_value(const char *key,
+                           size_t key_len,
+                           const void *value,
+                           size_t value_len)
+{
+    if (!g_db || !key || !value || key_len == 0 || value_len == 0) {
+        return -1;
+    }
+    char *err = NULL;
+    rocksdb_writeoptions_t *wopt = rocksdb_writeoptions_create();
+    rocksdb_put(g_db, wopt,
+                key, key_len,
+                (const char *)value, value_len,
+                &err);
+    rocksdb_writeoptions_destroy(wopt);
+    if (err != NULL) {
+        fprintf(stderr, "rocksdb_put error: %s\n", err);
+        free(err);
+        return -1;
+    }
+    return 0;
+}
+
+static int hg_kv_delete_key(const char *key, size_t key_len)
+{
+    if (!g_db || !key || key_len == 0) {
+        return -1;
+    }
+    char *err = NULL;
+    rocksdb_writeoptions_t *wopt = rocksdb_writeoptions_create();
+    rocksdb_delete(g_db, wopt, key, key_len, &err);
+    rocksdb_writeoptions_destroy(wopt);
+    if (err != NULL) {
+        fprintf(stderr, "rocksdb_delete error: %s\n", err);
+        free(err);
+        return -1;
+    }
+    return 0;
+}
+
+static int hg_kv_get_value(const char *key,
+                           size_t key_len,
+                           void *out_buf,
+                           size_t expected_len)
+{
+    if (!g_db || !key || !out_buf || key_len == 0 || expected_len == 0) {
+        return -1;
+    }
+    char *err = NULL;
+    size_t vlen = 0;
+    rocksdb_readoptions_t *ropt = rocksdb_readoptions_create();
+    char *val = rocksdb_get(g_db, ropt,
+                            key, key_len,
+                            &vlen, &err);
+    rocksdb_readoptions_destroy(ropt);
+
+    if (err != NULL) {
+        fprintf(stderr, "rocksdb_get error: %s\n", err);
+        free(err);
+        return -1;
+    }
+
+    if (!val) {
+        return -1;
+    }
+
+    if (vlen != expected_len) {
+        fprintf(stderr, "rocksdb_get size mismatch (%zu != %zu)\n",
+                vlen, expected_len);
+        free(val);
+        return -1;
+    }
+
+    memcpy(out_buf, val, expected_len);
+    free(val);
+    return 0;
+}
+
+static int hg_kv_put_meta_obj(char prefix_a, char prefix_b,
+                              const uint8_t obj_id[HIFS_META_OBJECT_ID_SIZE],
+                              const void *obj,
+                              size_t obj_size)
+{
+    if (!obj_id || !obj) {
+        return -1;
+    }
+    char key[HG_KV_OBJ_KEY_LEN];
+    size_t key_len = hg_kv_make_obj_key(prefix_a, prefix_b, obj_id, key);
+    return hg_kv_put_value(key, key_len, obj, obj_size);
+}
+
+static int hg_kv_get_meta_obj(char prefix_a, char prefix_b,
+                              const uint8_t obj_id[HIFS_META_OBJECT_ID_SIZE],
+                              void *out_obj,
+                              size_t obj_size)
+{
+    if (!obj_id || !out_obj) {
+        return -1;
+    }
+    char key[HG_KV_OBJ_KEY_LEN];
+    size_t key_len = hg_kv_make_obj_key(prefix_a, prefix_b, obj_id, key);
+    return hg_kv_get_value(key, key_len, out_obj, obj_size);
+}
+
+int hg_kv_put_superblock(const struct hg_meta_superblock_obj *obj)
+{
+    if (!obj) {
+        return -1;
+    }
+    return hg_kv_put_meta_obj('s', 'b', obj->hdr.self_id, obj, sizeof(*obj));
+}
+
+int hg_kv_get_superblock(const uint8_t superblock_id[HIFS_META_OBJECT_ID_SIZE],
+                         struct hg_meta_superblock_obj *out)
+{
+    return hg_kv_get_meta_obj('s', 'b', superblock_id, out, sizeof(*out));
+}
+
+int hg_kv_put_volume_root(const struct hg_meta_volume_root_obj *vr)
+{
+    if (!vr) {
+        return -1;
+    }
+    return hg_kv_put_meta_obj('v', 'r', vr->hdr.self_id, vr, sizeof(*vr));
+}
+
+int hg_kv_get_volume_root(const uint8_t volume_root_id[HIFS_META_OBJECT_ID_SIZE],
+                          struct hg_meta_volume_root_obj *out)
+{
+    return hg_kv_get_meta_obj('v', 'r', volume_root_id, out, sizeof(*out));
+}
+
+int hg_kv_put_volume_root_ptr(uint64_t volume_id,
+                              const uint8_t volume_root_id[HIFS_META_OBJECT_ID_SIZE])
+{
+    if (!volume_root_id) {
+        return -1;
+    }
+    char key[HG_KV_VP_KEY_LEN];
+    size_t key_len = hg_kv_make_vp_key(volume_id, key);
+    return hg_kv_put_value(key, key_len, volume_root_id, HIFS_META_OBJECT_ID_SIZE);
+}
+
+int hg_kv_get_volume_root_ptr(uint64_t volume_id,
+                              uint8_t volume_root_id[HIFS_META_OBJECT_ID_SIZE])
+{
+    char key[HG_KV_VP_KEY_LEN];
+    size_t key_len = hg_kv_make_vp_key(volume_id, key);
+    return hg_kv_get_value(key, key_len, volume_root_id, HIFS_META_OBJECT_ID_SIZE);
+}
+
+int hg_kv_put_dentry(const struct hg_meta_dentry_obj *de)
+{
+    if (!de) {
+        return -1;
+    }
+    return hg_kv_put_meta_obj('d', 'e', de->hdr.self_id, de, sizeof(*de));
+}
+
+int hg_kv_get_dentry(const uint8_t dentry_id[HIFS_META_OBJECT_ID_SIZE],
+                     struct hg_meta_dentry_obj *out)
+{
+    return hg_kv_get_meta_obj('d', 'e', dentry_id, out, sizeof(*out));
+}
+
+int hg_kv_put_dentry_ptr(uint64_t volume_id,
+                         uint64_t parent_inode_key,
+                         uint64_t name_hash,
+                         const uint8_t dentry_id[HIFS_META_OBJECT_ID_SIZE])
+{
+    if (!dentry_id) {
+        return -1;
+    }
+    char key[HG_KV_DP_KEY_LEN];
+    size_t key_len = hg_kv_make_dp_key(volume_id, parent_inode_key, name_hash, key);
+    return hg_kv_put_value(key, key_len, dentry_id, HIFS_META_OBJECT_ID_SIZE);
+}
+
+int hg_kv_delete_dentry_ptr(uint64_t volume_id,
+                            uint64_t parent_inode_key,
+                            uint64_t name_hash)
+{
+    char key[HG_KV_DP_KEY_LEN];
+    size_t key_len = hg_kv_make_dp_key(volume_id, parent_inode_key, name_hash, key);
+    return hg_kv_delete_key(key, key_len);
+}
+
+int hg_kv_put_inode_obj(const struct hg_meta_inode_obj *obj)
+{
+    if (!obj) {
+        return -1;
+    }
+    return hg_kv_put_meta_obj('i', 'n', obj->hdr.self_id, obj, sizeof(*obj));
+}
+
+int hg_kv_get_inode_obj(const uint8_t inode_obj_id[HIFS_META_OBJECT_ID_SIZE],
+                        struct hg_meta_inode_obj *out)
+{
+    return hg_kv_get_meta_obj('i', 'n', inode_obj_id, out, sizeof(*out));
+}
+
+int hg_kv_put_inode_ptr(uint64_t volume_id,
+                        uint64_t inode_key,
+                        const uint8_t inode_obj_id[HIFS_META_OBJECT_ID_SIZE])
+{
+    if (!inode_obj_id) {
+        return -1;
+    }
+    char key[HG_KV_IP_KEY_LEN];
+    size_t key_len = hg_kv_make_ip_key(volume_id, inode_key, key);
+    return hg_kv_put_value(key, key_len, inode_obj_id, HIFS_META_OBJECT_ID_SIZE);
+}
+
+int hg_kv_get_inode_ptr(uint64_t volume_id,
+                        uint64_t inode_key,
+                        uint8_t inode_obj_id[HIFS_META_OBJECT_ID_SIZE])
+{
+    char key[HG_KV_IP_KEY_LEN];
+    size_t key_len = hg_kv_make_ip_key(volume_id, inode_key, key);
+    return hg_kv_get_value(key, key_len, inode_obj_id, HIFS_META_OBJECT_ID_SIZE);
+}
+
+int hg_kv_get_raw(const char *key, size_t key_len,
+                  void *out_buf, size_t buf_len)
+{
+    return hg_kv_get_value(key, key_len, out_buf, buf_len);
+}
 
 int hg_kv_init(const char *path)
 {

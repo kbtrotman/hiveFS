@@ -33,6 +33,54 @@ mkdir -p /etc/hivefs
 mkdir -p /etc/hivefs/pki
 mkdir -p /etc/hivefs/cluster
 
+/hive
+├── hive_guard_raft
+├── hive_kv
+├── logs
+├── metadata
+├── wblogs
+│   ├── hive_mcl
+│   └── hive_wbl
+└── writeback_cache
+    ├── landing
+    ├── outbound
+    └── read_return
+
+mkdir -p /hive/hive_guard_raft
+mkdir -p /hive/hive_kv
+mkdir -p /hive/logs
+mkdir -p /hive/metadata
+mkdir -p /hive/wblogs/hive_mcl
+mkdir -p /hive/wblogs/hive_wbl
+mkdir -p /hive/writeback_cache/landing
+mkdir -p /hive/writeback_cache/outbound
+mkdir -p /hive/writeback_cache/read_return   
+
+touch /hive/wblogs/hive_mcl/mcl.log
+touch /hive/wblogs/hive_wbl/wbl.log
+touch /hive/logs/hive_guard_log
+touch /hive/logs/hive_guard_sql_log
+touch /hive/logs/hive_bootstrap_log
+
+chown -R hive:hive /hive
+chmod 755 /hive
+chmod 755 /hive/hive_guard_raft
+chmod 755 /hive/hive_kv
+chmod 755 /hive/logs
+chmod 755 /hive/metadata
+chmod 755 /hive/wblogs
+chmod 755 /hive/wblogs/hive_mcl
+chmod 755 /hive/wblogs/hive_wbl
+chmod 755 /hive/writeback_cache
+chmod 755 /hive/writeback_cache/landing
+chmod 755 /hive/writeback_cache/outbound
+chmod 755 /hive/writeback_cache/read_return
+chmod 644 /hive/wblogs/hive_mcl/mcl.log
+chmod 644 /hive/wblogs/hive_wbl/wbl.log
+chmod 644 /hive/logs/hive_guard_log
+chmod 644 /hive/logs/hive_guard_sql_log
+chmod 644 /hive/logs/hive_bootstrap_log
+
 sudo apt install chrony
 sudo timedatectl set-ntp no # Disables systemd-timesyncd
 sudo systemctl enable chronyd
@@ -49,4 +97,8 @@ pool 2.ubuntu.pool.ntp.org iburst nts
 # Step the clock if the error is larger than 1 second, but only for the first 3 updates
 makestep 1.0 3
 
+sudo cp /mnt/data/hive_log_rotate.py /usr/local/sbin/hive_log_rotate.py
+sudo chmod 755 /usr/local/sbin/hive_log_rotate.py
 
+cron -e
+5 0 * * * /usr/bin/python3 /usr/local/sbin/hive_log_rotate.py >> /var/log/hive_log_rotate.log 2>&1
