@@ -56,6 +56,14 @@ struct stripe_msg_header {
 #define HG_TOKEN_METADATA_CMD_STORE 1
 #define HG_TOKEN_METADATA_TIMEOUT_MS 3000
 
+#define HG_SETTING_MSG_MAGIC 0x48535455u
+#define HG_SETTING_MSG_VERSION 1
+#define HG_SETTING_MSG_CMD_UPDATE 1
+#define HG_SETTING_TIMEOUT_MS 3000
+#define HG_SETTING_RETRY_MIN_SECONDS 90
+#define HG_SETTING_RETRY_JITTER_SECONDS 30
+#define HG_SETTING_RETRY_MAX_ENTRIES 64
+
 struct hg_token_metadata_header {
 	uint32_t magic;
 	uint16_t version;
@@ -84,6 +92,32 @@ struct hg_token_metadata_response {
 	int32_t status;
 } __attribute__((packed));
 
+struct hg_setting_msg_header {
+	uint32_t magic;
+	uint16_t version;
+	uint16_t command;
+	uint32_t payload_len;
+} __attribute__((packed));
+
+struct hg_setting_msg_payload {
+	char key[HG_CLUSTER_SETTING_KEY_MAX];
+	char value[HG_CLUSTER_SETTING_VALUE_MAX];
+} __attribute__((packed));
+
+struct hg_setting_msg_response {
+	uint32_t magic;
+	int32_t status;
+} __attribute__((packed));
+
+struct hg_setting_retry_entry {
+	uint32_t node_id;
+	char key[HG_CLUSTER_SETTING_KEY_MAX];
+	char value[HG_CLUSTER_SETTING_VALUE_MAX];
+	uint64_t next_attempt_ns;
+	unsigned attempts;
+	bool active;
+};
+
 static pthread_t sn_thread;
 static int sn_listen_fd = -1;
 static volatile bool sn_running = false;
@@ -94,6 +128,11 @@ extern const char *g_snapshot_dir;
 extern const char *g_mysqldump_path;
 extern const char *g_mysql_defaults_file;
 extern const char *g_mysql_db_name;
+static pthread_mutex_t g_setting_retry_mu = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t g_setting_retry_cv = PTHREAD_COND_INITIALIZER;
+static pthread_t g_setting_retry_thread;
+static bool g_setting_retry_thread_started;
+static struct hg_setting_retry_entry g_setting_retries[HG_SETTING_RETRY_MAX_ENTRIES];
 
 static uint64_t htonll(uint64_t v)
 {
@@ -107,6 +146,17 @@ static uint64_t htonll(uint64_t v)
 static uint64_t ntohll(uint64_t v)
 {
 	return htonll(v);
+}
+
+static void hg_setting_copy_field(char *dst, size_t dst_len, const char *src)
+{
+	if (!dst || dst_len == 0)
+		return;
+	if (!src)
+		src = "";
+	size_t len = strnlen(src, dst_len - 1);
+	memcpy(dst, src, len);
+	dst[len] = '\0';
 }
 
 static void hg_token_metadata_payload_from_meta(
@@ -267,6 +317,12 @@ static int hg_send_join_request_to_peer(const struct hive_storage_node *peer,
 int hg_ask_to_join_cluster(unsigned int storage_node_id, uint32_t join_flags);
 int hg_acept_request_to_join_cluster(unsigned int storage_node_id,
 				     uint32_t join_flags);
+static const struct hive_storage_node *
+hg_find_storage_node(unsigned int storage_node_id);
+static void handle_setting_update_request(int fd);
+static int hg_sn_send_setting_update_to_peer(const struct hive_storage_node *peer,
+					     const char *key,
+					     const char *value);
 
 static int parse_host_port_string(const char *addr,
 				  char *host_out,
@@ -786,6 +842,53 @@ static void handle_token_metadata_request(int fd)
 	close(fd);
 }
 
+static void handle_setting_update_request(int fd)
+{
+	if (fd < 0)
+		return;
+
+	struct hg_setting_msg_header hdr;
+	struct hg_setting_msg_response resp = {
+		.magic = htonl(HG_SETTING_MSG_MAGIC),
+		.status = htonl(-EPROTO),
+	};
+
+	if (read_full(fd, &hdr, sizeof(hdr)) != (ssize_t)sizeof(hdr)) {
+		close(fd);
+		return;
+	}
+
+	uint32_t magic = ntohl(hdr.magic);
+	uint16_t version = ntohs(hdr.version);
+	uint32_t payload_len = ntohl(hdr.payload_len);
+	uint16_t command = ntohs(hdr.command);
+
+	if (magic != HG_SETTING_MSG_MAGIC ||
+	    version != HG_SETTING_MSG_VERSION ||
+	    payload_len != sizeof(struct hg_setting_msg_payload) ||
+	    command != HG_SETTING_MSG_CMD_UPDATE) {
+		write_full(fd, &resp, sizeof(resp));
+		close(fd);
+		return;
+	}
+
+	struct hg_setting_msg_payload payload;
+	if (read_full(fd, &payload, sizeof(payload)) !=
+	    (ssize_t)sizeof(payload)) {
+		close(fd);
+		return;
+	}
+	payload.key[sizeof(payload.key) - 1] = '\0';
+	payload.value[sizeof(payload.value) - 1] = '\0';
+
+	int rc = hive_guard_apply_setting_update(payload.key,
+						 payload.value,
+						 false);
+	resp.status = htonl((uint32_t)rc);
+	write_full(fd, &resp, sizeof(resp));
+	close(fd);
+}
+
 static void handle_join_cluster_request(int fd)
 {
 	if (fd < 0) {
@@ -853,6 +956,10 @@ static void *sn_listener_thread(void *arg)
 			}
 			if (magic == HG_TOKEN_METADATA_MAGIC) {
 				handle_token_metadata_request(fd);
+				continue;
+			}
+			if (magic == HG_SETTING_MSG_MAGIC) {
+				handle_setting_update_request(fd);
 				continue;
 			}
 		}
@@ -1600,6 +1707,223 @@ static int hg_send_token_metadata_to_peer(
 	return status;
 }
 
+static int hg_sn_send_setting_update_to_peer(const struct hive_storage_node *peer,
+					     const char *key,
+					     const char *value)
+{
+	if (!peer || !key || !value)
+		return -EINVAL;
+
+	char host[256];
+	bool have_host = false;
+	uint16_t port = peer->stripe_port
+		? peer->stripe_port
+		: HIFS_STRIPE_TCP_DEFAULT_PORT;
+
+	if (peer->address[0]) {
+		uint16_t parsed_port = port;
+		if (parse_host_port_string(peer->address,
+					   host,
+					   sizeof(host),
+					   &parsed_port) == 0) {
+			if (parsed_port)
+				port = parsed_port;
+			have_host = true;
+		}
+	}
+	if (!have_host) {
+		const char *fallback = peer->address[0]
+			? peer->address
+			: "127.0.0.1";
+		snprintf(host, sizeof(host), "%s", fallback);
+	}
+
+	int fd = connect_to_host_port(host, port);
+	if (fd < 0)
+		return -EHOSTUNREACH;
+
+	struct hg_setting_msg_payload payload;
+	memset(&payload, 0, sizeof(payload));
+	hg_setting_copy_field(payload.key, sizeof(payload.key), key);
+	hg_setting_copy_field(payload.value, sizeof(payload.value), value);
+
+	struct hg_setting_msg_header hdr = {
+		.magic = htonl(HG_SETTING_MSG_MAGIC),
+		.version = htons(HG_SETTING_MSG_VERSION),
+		.command = htons(HG_SETTING_MSG_CMD_UPDATE),
+		.payload_len = htonl((uint32_t)sizeof(payload)),
+	};
+
+	if (write_full(fd, &hdr, sizeof(hdr)) != (ssize_t)sizeof(hdr) ||
+	    write_full(fd, &payload, sizeof(payload)) != (ssize_t)sizeof(payload)) {
+		close(fd);
+		return -EIO;
+	}
+
+	int wait_rc = hg_wait_for_fd(fd, POLLIN, HG_SETTING_TIMEOUT_MS);
+	if (wait_rc != 0) {
+		close(fd);
+		return wait_rc;
+	}
+
+	struct hg_setting_msg_response resp;
+	if (read_full(fd, &resp, sizeof(resp)) != (ssize_t)sizeof(resp)) {
+		close(fd);
+		return -EIO;
+	}
+	close(fd);
+
+	if (ntohl(resp.magic) != HG_SETTING_MSG_MAGIC)
+		return -EPROTO;
+
+	int32_t status = (int32_t)ntohl((uint32_t)resp.status);
+	return status;
+}
+
+static uint64_t hg_setting_now_ns(void)
+{
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
+}
+
+static uint64_t hg_setting_retry_delay_ns(void)
+{
+	unsigned jitter = (unsigned)(rand() %
+		(HG_SETTING_RETRY_JITTER_SECONDS + 1));
+	unsigned delay = HG_SETTING_RETRY_MIN_SECONDS + jitter;
+	return (uint64_t)delay * 1000000000ull;
+}
+
+static void hg_setting_retry_start_thread_locked(void);
+
+static void hg_setting_retry_wake_locked(void)
+{
+	pthread_cond_signal(&g_setting_retry_cv);
+}
+
+static void hg_setting_retry_schedule_locked(uint32_t node_id,
+					     const char *key,
+					     const char *value)
+{
+	if (!node_id || !key || !value)
+		return;
+
+	struct hg_setting_retry_entry *slot = NULL;
+	for (size_t i = 0; i < HG_SETTING_RETRY_MAX_ENTRIES; ++i) {
+		if (g_setting_retries[i].active &&
+		    g_setting_retries[i].node_id == node_id &&
+		    strncmp(g_setting_retries[i].key, key,
+			    sizeof(g_setting_retries[i].key)) == 0) {
+			slot = &g_setting_retries[i];
+			break;
+		}
+		if (!g_setting_retries[i].active && !slot)
+			slot = &g_setting_retries[i];
+	}
+	if (!slot)
+		return;
+
+	slot->node_id = node_id;
+	hg_setting_copy_field(slot->key, sizeof(slot->key), key);
+	hg_setting_copy_field(slot->value, sizeof(slot->value), value);
+	slot->next_attempt_ns = hg_setting_now_ns() + hg_setting_retry_delay_ns();
+	if (slot->active)
+		slot->attempts++;
+	else
+		slot->attempts = 1;
+	slot->active = true;
+	hg_setting_retry_start_thread_locked();
+	hg_setting_retry_wake_locked();
+}
+
+static void hg_setting_retry_schedule(uint32_t node_id,
+				      const char *key,
+				      const char *value)
+{
+	pthread_mutex_lock(&g_setting_retry_mu);
+	hg_setting_retry_schedule_locked(node_id, key, value);
+	pthread_mutex_unlock(&g_setting_retry_mu);
+}
+
+static void *hg_setting_retry_thread_main(void *arg)
+{
+	(void)arg;
+	pthread_mutex_lock(&g_setting_retry_mu);
+	for (;;) {
+		uint64_t now = hg_setting_now_ns();
+		size_t ready_idx = HG_SETTING_RETRY_MAX_ENTRIES;
+		uint64_t min_wait = UINT64_MAX;
+		for (size_t i = 0; i < HG_SETTING_RETRY_MAX_ENTRIES; ++i) {
+			if (!g_setting_retries[i].active)
+				continue;
+			if (g_setting_retries[i].next_attempt_ns <= now) {
+				ready_idx = i;
+				break;
+			}
+			uint64_t wait_ns = g_setting_retries[i].next_attempt_ns - now;
+			if (wait_ns < min_wait)
+				min_wait = wait_ns;
+		}
+
+		if (ready_idx == HG_SETTING_RETRY_MAX_ENTRIES) {
+			if (min_wait == UINT64_MAX) {
+				pthread_cond_wait(&g_setting_retry_cv,
+						  &g_setting_retry_mu);
+				continue;
+			}
+			struct timespec ts;
+			clock_gettime(CLOCK_REALTIME, &ts);
+			uint64_t add = min_wait;
+			ts.tv_sec += (time_t)(add / 1000000000ull);
+			ts.tv_nsec += (long)(add % 1000000000ull);
+			if (ts.tv_nsec >= 1000000000L) {
+				ts.tv_sec++;
+				ts.tv_nsec -= 1000000000L;
+			}
+			pthread_cond_timedwait(&g_setting_retry_cv,
+					       &g_setting_retry_mu,
+					       &ts);
+			continue;
+		}
+
+		struct hg_setting_retry_entry job = g_setting_retries[ready_idx];
+		g_setting_retries[ready_idx].active = false;
+		pthread_mutex_unlock(&g_setting_retry_mu);
+
+		const struct hive_storage_node *peer =
+			hg_find_storage_node(job.node_id);
+		int rc = -ENOENT;
+		if (peer)
+			rc = hg_sn_send_setting_update_to_peer(peer,
+							       job.key,
+							       job.value);
+
+		pthread_mutex_lock(&g_setting_retry_mu);
+		if (rc != 0) {
+			job.next_attempt_ns = hg_setting_now_ns() +
+					      hg_setting_retry_delay_ns();
+			job.attempts++;
+			job.active = true;
+			g_setting_retries[ready_idx] = job;
+			hg_setting_retry_wake_locked();
+		}
+	}
+}
+
+static void hg_setting_retry_start_thread_locked(void)
+{
+	if (g_setting_retry_thread_started)
+		return;
+	pthread_t tid;
+	if (pthread_create(&tid, NULL, hg_setting_retry_thread_main, NULL) == 0) {
+		pthread_detach(tid);
+		g_setting_retry_thread = tid;
+		g_setting_retry_thread_started = true;
+	}
+}
+
+
 int hg_ask_to_join_cluster(unsigned int storage_node_id, uint32_t join_flags)
 {
 	int validate_rc = hg_validate_join_request(storage_node_id);
@@ -1773,4 +2097,27 @@ int hg_send_token_metadata_to_leader(
 		rc = send_rc;
 	}
 	return rc;
+}
+
+int hg_sn_broadcast_setting_update(const char *key, const char *value)
+{
+	if (!key || !value || !*key)
+		return -EINVAL;
+
+	size_t count = 0;
+	const struct hive_storage_node *nodes = hifs_get_storage_nodes(&count);
+	if ((!nodes || count == 0) && hifs_load_storage_nodes())
+		nodes = hifs_get_storage_nodes(&count);
+	if (!nodes || count == 0)
+		return 0;
+
+	for (size_t i = 0; i < count; ++i) {
+		const struct hive_storage_node *peer = &nodes[i];
+		if (!peer->id || peer->id == storage_node_id)
+			continue;
+		int rc = hg_sn_send_setting_update_to_peer(peer, key, value);
+		if (rc != 0)
+			hg_setting_retry_schedule(peer->id, key, value);
+	}
+	return 0;
 }

@@ -31,6 +31,8 @@ static rocksdb_t *g_db = NULL;
 #define HG_KV_VP_KEY_LEN       (2u + sizeof(uint64_t))
 #define HG_KV_IP_KEY_LEN       (2u + (sizeof(uint64_t) * 2u))
 #define HG_KV_DP_KEY_LEN       (2u + (sizeof(uint64_t) * 3u))
+#define HG_KV_MISC_KEY_LEN     (2u + (sizeof(uint64_t) * 2u))
+#define HG_KV_MB_KEY_LEN       (2u + (sizeof(uint64_t) * 3u))
 
 static inline char *hg_kv_store_u64(char *dst, uint64_t value)
 {
@@ -81,6 +83,34 @@ static size_t hg_kv_make_dp_key(uint64_t volume_id,
     cursor = hg_kv_store_u64(cursor, volume_id);
     cursor = hg_kv_store_u64(cursor, parent_inode_key);
     cursor = hg_kv_store_u64(cursor, name_hash);
+    return (size_t)(cursor - key_out);
+}
+
+static size_t hg_kv_make_misc_key(char a,
+                                  char b,
+                                  uint64_t volume_id,
+                                  uint64_t extra,
+                                  char key_out[HG_KV_MISC_KEY_LEN])
+{
+    char *cursor = key_out;
+    *cursor++ = a;
+    *cursor++ = b;
+    cursor = hg_kv_store_u64(cursor, volume_id);
+    cursor = hg_kv_store_u64(cursor, extra);
+    return (size_t)(cursor - key_out);
+}
+
+static size_t hg_kv_make_mb_key(uint64_t volume_id,
+                                uint64_t inode_key,
+                                uint64_t block_no,
+                                char key_out[HG_KV_MB_KEY_LEN])
+{
+    char *cursor = key_out;
+    *cursor++ = 'm';
+    *cursor++ = 'b';
+    cursor = hg_kv_store_u64(cursor, volume_id);
+    cursor = hg_kv_store_u64(cursor, inode_key);
+    cursor = hg_kv_store_u64(cursor, block_no);
     return (size_t)(cursor - key_out);
 }
 
@@ -304,6 +334,168 @@ int hg_kv_get_inode_ptr(uint64_t volume_id,
     char key[HG_KV_IP_KEY_LEN];
     size_t key_len = hg_kv_make_ip_key(volume_id, inode_key, key);
     return hg_kv_get_value(key, key_len, inode_obj_id, HIFS_META_OBJECT_ID_SIZE);
+}
+
+int hg_kv_put_volume_super(uint64_t volume_id,
+                           const struct hifs_volume_superblock *vsb)
+{
+    if (!vsb) {
+        return -1;
+    }
+    char key[HG_KV_MISC_KEY_LEN];
+    size_t key_len = hg_kv_make_misc_key('s', 'u', volume_id, 0, key);
+    return hg_kv_put_value(key, key_len, vsb, sizeof(*vsb));
+}
+
+int hg_kv_get_volume_super(uint64_t volume_id,
+                           struct hifs_volume_superblock *out)
+{
+    if (!out) {
+        return -1;
+    }
+    char key[HG_KV_MISC_KEY_LEN];
+    size_t key_len = hg_kv_make_misc_key('s', 'u', volume_id, 0, key);
+    return hg_kv_get_value(key, key_len, out, sizeof(*out));
+}
+
+int hg_kv_put_root_dentry(uint64_t volume_id,
+                          const struct hifs_volume_root_dentry *root)
+{
+    if (!root) {
+        return -1;
+    }
+    char key[HG_KV_MISC_KEY_LEN];
+    size_t key_len = hg_kv_make_misc_key('r', 'd', volume_id, 0, key);
+    return hg_kv_put_value(key, key_len, root, sizeof(*root));
+}
+
+int hg_kv_get_root_dentry(uint64_t volume_id,
+                          struct hifs_volume_root_dentry *out)
+{
+    if (!out) {
+        return -1;
+    }
+    char key[HG_KV_MISC_KEY_LEN];
+    size_t key_len = hg_kv_make_misc_key('r', 'd', volume_id, 0, key);
+    return hg_kv_get_value(key, key_len, out, sizeof(*out));
+}
+
+int hg_kv_put_volume_dentry(uint64_t volume_id,
+                            uint64_t inode_key,
+                            uint64_t parent_inode_key,
+                            uint64_t name_hash,
+                            const struct hifs_volume_dentry *dent)
+{
+    if (!dent) {
+        return -1;
+    }
+    char inode_key_buf[HG_KV_MISC_KEY_LEN];
+    size_t inode_key_len = hg_kv_make_misc_key('d', 'i', volume_id,
+                                               inode_key, inode_key_buf);
+    int rc = hg_kv_put_value(inode_key_buf, inode_key_len, dent, sizeof(*dent));
+    if (rc != 0) {
+        return rc;
+    }
+
+    char name_key[HG_KV_DP_KEY_LEN];
+    size_t name_key_len = hg_kv_make_dp_key(volume_id,
+                                            parent_inode_key,
+                                            name_hash,
+                                            name_key);
+    return hg_kv_put_value(name_key, name_key_len, dent, sizeof(*dent));
+}
+
+int hg_kv_get_volume_dentry_by_inode(uint64_t volume_id,
+                                     uint64_t inode_key,
+                                     struct hifs_volume_dentry *out)
+{
+    if (!out) {
+        return -1;
+    }
+    char key[HG_KV_MISC_KEY_LEN];
+    size_t key_len = hg_kv_make_misc_key('d', 'i', volume_id, inode_key, key);
+    return hg_kv_get_value(key, key_len, out, sizeof(*out));
+}
+
+int hg_kv_get_volume_dentry_by_name(uint64_t volume_id,
+                                    uint64_t parent_inode_key,
+                                    uint64_t name_hash,
+                                    struct hifs_volume_dentry *out)
+{
+    if (!out) {
+        return -1;
+    }
+    char key[HG_KV_DP_KEY_LEN];
+    size_t key_len = hg_kv_make_dp_key(volume_id, parent_inode_key, name_hash, key);
+    return hg_kv_get_value(key, key_len, out, sizeof(*out));
+}
+
+int hg_kv_put_volume_inode(uint64_t volume_id,
+                           const struct hifs_inode_wire *inode)
+{
+    if (!inode) {
+        return -1;
+    }
+    uint64_t ino_host = le64toh(inode->i_ino);
+    char key[HG_KV_MISC_KEY_LEN];
+    size_t key_len = hg_kv_make_misc_key('i', 'w', volume_id, ino_host, key);
+    return hg_kv_put_value(key, key_len, inode, sizeof(*inode));
+}
+
+int hg_kv_get_volume_inode(uint64_t volume_id,
+                           uint64_t inode_key,
+                           struct hifs_inode_wire *out)
+{
+    if (!out) {
+        return -1;
+    }
+    char key[HG_KV_MISC_KEY_LEN];
+    size_t key_len = hg_kv_make_misc_key('i', 'w', volume_id, inode_key, key);
+    return hg_kv_get_value(key, key_len, out, sizeof(*out));
+}
+
+int hg_kv_put_block_metadata_batch(const struct hifs_meta_block_record *records,
+                                   size_t record_count)
+{
+    if (!records || record_count == 0) {
+        return 0;
+    }
+    if (!g_db) {
+        return -1;
+    }
+
+    rocksdb_writebatch_t *wb = rocksdb_writebatch_create();
+    if (!wb) {
+        return -1;
+    }
+
+    char key[HG_KV_MB_KEY_LEN];
+    for (size_t i = 0; i < record_count; i++) {
+        const struct hifs_meta_block_record *rec = &records[i];
+        size_t key_len = hg_kv_make_mb_key(rec->volume_id,
+                                           rec->inode_key,
+                                           rec->block_no,
+                                           key);
+        rocksdb_writebatch_put(wb,
+                               key,
+                               key_len,
+                               (const char *)rec,
+                               sizeof(*rec));
+    }
+
+    char *err = NULL;
+    rocksdb_writeoptions_t *wopt = rocksdb_writeoptions_create();
+    rocksdb_write(g_db, wopt, wb, &err);
+    rocksdb_writeoptions_destroy(wopt);
+    rocksdb_writebatch_destroy(wb);
+
+    if (err != NULL) {
+        fprintf(stderr, "hg_kv_put_block_metadata_batch: rocksdb_write error: %s\n", err);
+        free(err);
+        return -1;
+    }
+
+    return 0;
 }
 
 int hg_kv_get_raw(const char *key, size_t key_len,

@@ -391,14 +391,56 @@ static void hive_mcl_capture_map_delta_locked(uint64_t inode_key,
     pkt->has_delta = true;
 }
 
+/* Todo:
+The metadata batch write below needs to run every 5 mins.
+*/
+
 static int hive_mcl_metadata_batch_write(const struct hive_mcl_metadata_packet *packets,
                                          size_t packet_count)
 {
-    (void)packets;
-    (void)packet_count;
+    struct hifs_meta_block_record *records = NULL;
+    size_t record_count = 0;
+    int rc = 0;
 
-    /* Placeholder for future hive_guard_kv.c integration. */
-    return 0;
+    if (!packets || packet_count == 0) {
+        errno = EINVAL;
+        return -1;
+    }
+
+    records = calloc(packet_count, sizeof(*records));
+    if (!records) {
+        return -1;
+    }
+
+    for (size_t i = 0; i < packet_count; i++) {
+        const struct hive_mcl_metadata_packet *pkt = &packets[i];
+
+        if (!pkt->has_delta) {
+            continue;
+        }
+
+        struct hifs_meta_block_record *rec = &records[record_count++];
+        rec->volume_id = pkt->block.volume_id;
+        rec->inode_key = pkt->inode_key;
+        rec->block_no = pkt->block.block_no;
+        rec->generation = pkt->generation;
+        rec->block_bytes = pkt->block.block_bytes;
+        rec->placement_epoch = pkt->block.placement_epoch;
+        rec->hash_algo = (uint8_t)pkt->block.hash_algo;
+        rec->stripe_algo = (uint8_t)pkt->block.stripe_algo;
+        memcpy(rec->content_hash, pkt->block.hash, sizeof(rec->content_hash));
+        memcpy(rec->stripe_id, pkt->block.stripe_id, sizeof(rec->stripe_id));
+        rec->block_id = pkt->block_id;
+    }
+
+    if (record_count > 0) {
+        if (!hifs_meta_block_store_batch(records, record_count)) {
+            rc = -1;
+        }
+    }
+
+    free(records);
+    return rc;
 }
 
 static int hive_mcl_dispatch_metadata_to_cluster(const struct hive_mcl_metadata_packet *packets,

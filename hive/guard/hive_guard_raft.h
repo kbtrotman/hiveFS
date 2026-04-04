@@ -422,6 +422,8 @@ void hg_raft_shutdown(void);
 
 /* Helper: is this node currently the Raft leader? */
 bool hg_guard_local_can_write(void);
+bool hg_guard_setting_key_is_valid(const char *key);
+bool hg_guard_setting_value_is_valid(const char *value);
 
 /* Local scaffold until libraft is fully wired:
  * propose -> mark committed -> apply in log order.

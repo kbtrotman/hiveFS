@@ -27,6 +27,7 @@
 #include "hive_guard_sql.h"
 #include "hive_guard_kv.h"
 #include "hive_guard_erasure_code.h"
+#include "hive_guard_meta.h"
 #include "hive_guard_sn_tcp.h"
 #include "hive_guard_raft.h"
 #include "../common/hive_common_sql.h"
@@ -73,29 +74,6 @@ static int hex_nibble(char c)
 	return -1;
 }
 
-static bool hex_to_bytes(const char *hex, size_t hex_len, uint8_t *dst, size_t dst_len)
-{
-	size_t i;
-
-	if (!hex || !dst)
-		return false;
-	if (hex_len % 2 != 0)
-		return false;
-	if (dst_len < hex_len / 2)
-		return false;
-
-	for (i = 0; i < hex_len / 2; ++i) {
-		int hi = hex_nibble(hex[i * 2]);
-		int lo = hex_nibble(hex[i * 2 + 1]);
-		if (hi < 0 || lo < 0)
-			return false;
-		dst[i] = (uint8_t)((hi << 4) | lo);
-	}
-	if (dst_len > hex_len / 2)
-		memset(dst + hex_len / 2, 0, dst_len - hex_len / 2);
-	return true;
-}
-
 static uint32_t sql_to_u32(const char *s)
 {
 	return s ? (uint32_t)strtoul(s, NULL, 10) : 0;
@@ -117,32 +95,6 @@ static MYSQL_RES *hifs_execute_sql(const char *sql_string)
 	if (!hifs_execute_query(sql_string, &res))
 		return NULL;
 	return res;
-}
-
-MYSQL_RES *hifs_get_hive_host_data(char *machine_id)
-{
-	char sql_query[MAX_QUERY_SIZE];
-	MYSQL_RES *res;
-
-snprintf(sql_query, sizeof(sql_query), SQL_HOST_SELECT_BY_SERIAL,
-	 safe_str(machine_id));
-res = hifs_execute_sql(sql_query);
-
-	if (!res) {
-		sqldb.rows = 0;
-		return NULL;
-	}
-
-	sqldb.last_query = res;
-	sqldb.rows = (int)mysql_num_rows(res);
-
-	return res;
-}
-static long str_to_long(const char *s)
-{
-	if (!s)
-		return 0;
-	return strtol(s, NULL, 10);
 }
 
 struct metadata_sql_job {
@@ -384,169 +336,6 @@ void hifs_metadata_async_shutdown(void)
 	pthread_mutex_unlock(&g_metadata_mu);
 }
 
-int get_host_info(void)
-{
-	char ip_address[64] = {0};
-	char *hive_mach_id = NULL;
-	long hive_host_id = 0;
-	struct hostent *host_entry;
-	struct in_addr addr;
-	struct utsname uts;
-
-	char name[100] = {0};
-	if (gethostname(name, sizeof(name)) != 0) {
-		hifs_err("gethostname failed: %s\n", strerror(errno));
-		return 0;
-	}
-	hifs_debug("Host name is [%s]\n", name);
-
-	host_entry = gethostbyname(name);
-	if (!host_entry) {
-		hifs_crit("gethostbyname failed: %s\n", hstrerror(h_errno));
-		return 0;
-	}
-
-	memcpy(&addr.s_addr, host_entry->h_addr_list[0], host_entry->h_length);
-	snprintf(ip_address, sizeof(ip_address), "%s", inet_ntoa(addr));
-	hifs_debug("IP address is [%s]\n", ip_address);
-
-	if (uname(&uts) != 0) {
-		hifs_err("uname failed: %s\n", strerror(errno));
-		return 0;
-	}
-
-	hive_mach_id = hifs_get_machine_id();
-	hive_host_id = hifs_get_host_id();
-	if (hive_mach_id)
-		hifs_safe_strcpy(storage_node_uid, sizeof(storage_node_uid), hive_mach_id);
-	snprintf(storage_node_serial, sizeof(storage_node_serial), "%ld", hive_host_id);
-	hifs_safe_strcpy(storage_node_name, sizeof(storage_node_name), name);
-	hifs_safe_strcpy(storage_node_address, sizeof(storage_node_address), ip_address);
-
-	hifs_info("Hive machine ID is [%s] and host ID is [%ld]\n",
-		  hive_mach_id ? hive_mach_id : "unknown", hive_host_id);
-	return 1;
-}
-
-bool get_hive_host_data(void)
-{
-
-	char sql_query[MAX_QUERY_SIZE];
-	char ip_address[64] = {0};
-	char *hive_mach_id = hifs_get_machine_id();
-	long hive_host_id = hifs_get_host_id();
-	struct hostent *host_entry;
-	struct in_addr addr;
-	struct utsname uts;
-	char name[100] = {0};
-	MYSQL_RES *res = hifs_get_hive_host_data(hive_mach_id);
-	if (!res) {
-		hifs_err("Failed to query hive host data\n");
-		return 0;
-	}
-
-	MYSQL_ROW row;
-	unsigned int row_count = 0;
-	mysql_data_seek(res, 0);
-	while ((row = mysql_fetch_row(res)) != NULL) {
-		row_count++;
-		sqldb.host.serial = row[0];
-		sqldb.host.name = row[1];
-		sqldb.host.host_id = row[2] ? str_to_long(row[2]) : 0;
-		sqldb.host.os_name = row[3];
-		sqldb.host.os_version = row[4];
-		sqldb.host.create_time = row[5];
-
-		hifs_debug("serial: %s, name: %s, host_id: %ld, os: %s %s, created: %s",
-			   safe_str(sqldb.host.serial), safe_str(sqldb.host.name),
-			   sqldb.host.host_id,
-			   safe_str(sqldb.host.os_name),
-			   safe_str(sqldb.host.os_version),
-			   safe_str(sqldb.host.create_time));
-	}
-
-	if (row_count > 0)
-		return 1;
-
-	if (gethostname(name, sizeof(name)) != 0) {
-		hifs_err("gethostname failed: %s\n", strerror(errno));
-		return 0;
-	}
-
-	host_entry = gethostbyname(name);
-	if (!host_entry) {
-		hifs_err("gethostbyname failed: %s\n", hstrerror(h_errno));
-		return 0;
-	}
-
-	memcpy(&addr.s_addr, host_entry->h_addr_list[0], host_entry->h_length);
-	snprintf(ip_address, sizeof(ip_address), "%s", inet_ntoa(addr));
-
-	if (uname(&uts) != 0) {
-		hifs_err("uname failed: %s\n", strerror(errno));
-		return 0;
-	}
-
-	hive_mach_id = hifs_get_machine_id();
-	hive_host_id = hifs_get_host_id();
-
-	hifs_notice("This host does not exist in the hive. Filesystems cannot be mounted without a hive connection.");
-	hifs_notice("Would you like to add this host to the hive? [y/n]\n");
-
-	char response = 'n';
-	if (scanf(" %c", &response) != 1 || (response != 'y' && response != 'Y')) {
-		hifs_notice("Not registering host to Hive.");
-		return 0;
-	}
-
-	sqldb.host.serial = hive_mach_id;
-	sqldb.host.name = name;
-	sqldb.host.host_id = hive_host_id;
-	sqldb.host.os_name = uts.sysname;
-	sqldb.host.os_version = uts.release;
-	sqldb.host.create_time = NULL;
-
-	char *serial_q = hifs_get_quoted_value(hive_mach_id);
-	char *name_q = hifs_get_quoted_value(name);
-	char *addr_q = hifs_get_quoted_value(ip_address);
-	char *os_name_q = hifs_get_quoted_value(uts.sysname);
-	char *os_version_q = hifs_get_quoted_value(uts.release);
-	if (!serial_q || !name_q || !addr_q || !os_name_q || !os_version_q) {
-		free(serial_q);
-		free(name_q);
-		free(addr_q);
-		free(os_name_q);
-		free(os_version_q);
-		hifs_err("Out of memory while preparing host registration query");
-		return 0;
-	}
-
-	unsigned int hicom_port = hifs_local_guard_port();
-	uint64_t epoch = (uint64_t)time(NULL);
-	unsigned int fenced = 0;
-
-	snprintf(sql_query, sizeof(sql_query), SQL_HOST_UPSERT,
-		 safe_str(serial_q), safe_str(name_q), hive_host_id,
-		 safe_str(addr_q), safe_str(os_name_q), safe_str(os_version_q),
-		 hicom_port, (unsigned long long)epoch, fenced);
-
-	free(serial_q);
-	free(name_q);
-	free(addr_q);
-	free(os_name_q);
-	free(os_version_q);
-
-	hifs_notice("Registering host to Hive.");
-	if (!hifs_insert_sql(sql_query))
-		return 0;
-
-	hifs_info("Registered host to hive: name [%s] machine ID [%s] host ID [%ld] "
-		  "IP address [%s] OS [%s %s]",
-		  name, hive_mach_id, hive_host_id, ip_address,
-		  uts.sysname, uts.release);
-	return 1;
-}
-
 bool hifs_persist_cluster_record(uint64_t cluster_id,
 				 const char *cluster_name,
 				 const char *cluster_desc,
@@ -632,21 +421,6 @@ char *hifs_get_quoted_value(const char *in_str)
 	return escaped;
 }
 
-char *hifs_get_unquoted_value(const char *in_str)
-{
-	if (!in_str)
-		return NULL;
-	return strdup(in_str);
-}
-
-void hifs_release_query(void)
-{
-	if (sqldb.last_query) {
-		mysql_free_result(sqldb.last_query);
-		sqldb.last_query = NULL;
-	}
-}
-
 bool hifs_insert_data(const char *q_string)
 {
 	if (!q_string)
@@ -718,8 +492,8 @@ bool hifs_store_fs_stat(uint64_t node_id,
 
 
 bool hifs_store_disk_stat(uint64_t node_id,
-		  uint64_t ts_unix,
-			  const char *disk_name,
+	  uint64_t ts_unix,
+		  const char *disk_name,
 			  const char *disk_path,
 			  uint64_t disk_size_bytes,
 			  unsigned int disk_rotational,
@@ -784,7 +558,7 @@ bool hifs_store_disk_stat(uint64_t node_id,
 	if (written <= 0 || written >= (int)sizeof(sql_query))
 		return false;
 
-	return hifs_metadata_async_execute(sql_query);
+	  return hifs_metadata_async_execute(sql_query);
 }
 
 bool hg_sql_disk_status_upsert(uint64_t node_id, const hg_disk_status_row_t *row)
@@ -813,26 +587,26 @@ bool hg_sql_disk_status_upsert(uint64_t node_id, const hg_disk_status_row_t *row
 	const char *reason_use = reason_q ? reason_q : "NULL";
 	char sql_query[MAX_QUERY_SIZE];
 	int written = snprintf(sql_query, sizeof(sql_query),
-			      "INSERT INTO disk_status (node_id, disk_name, disk_serial, disk_path, "
-			      "disk_model, disk_vendor, disk_firmware, disk_capacity_bytes, media_type, interface_type, "
-			      "smart_health, status_reason) VALUES (%llu, '%s', '%s', '%s', %s, %s, %s, %llu, '%s', '%s', '%s', %s) "
-			      "ON DUPLICATE KEY UPDATE disk_path=VALUES(disk_path), disk_model=VALUES(disk_model), "
-			      "disk_vendor=VALUES(disk_vendor), disk_firmware=VALUES(disk_firmware), "
-			      "disk_capacity_bytes=VALUES(disk_capacity_bytes), media_type=VALUES(media_type), "
-			      "interface_type=VALUES(interface_type), smart_health=VALUES(smart_health), "
-			      "status_reason=VALUES(status_reason), last_seen_ts=NOW(), updated_at=NOW()",
-			      (unsigned long long)node_id,
-			      name_use,
-			      serial_use,
-			      path_use,
-			      model_use,
-			      vendor_use,
-			      fw_use,
-			      (unsigned long long)row->capacity_bytes,
-			      media_use,
-			      iface_use,
-			      health_use,
-			      reason_use);
+		      "INSERT INTO disk_status (node_id, disk_name, disk_serial, disk_path, "
+		      "disk_model, disk_vendor, disk_firmware, disk_capacity_bytes, media_type, interface_type, "
+		      "smart_health, status_reason) VALUES (%llu, '%s', '%s', '%s', %s, %s, %s, %llu, '%s', '%s', '%s', %s) "
+		      "ON DUPLICATE KEY UPDATE disk_path=VALUES(disk_path), disk_model=VALUES(disk_model), "
+		      "disk_vendor=VALUES(disk_vendor), disk_firmware=VALUES(disk_firmware), "
+		      "disk_capacity_bytes=VALUES(disk_capacity_bytes), media_type=VALUES(media_type), "
+		      "interface_type=VALUES(interface_type), smart_health=VALUES(smart_health), "
+		      "status_reason=VALUES(status_reason), last_seen_ts=NOW(), updated_at=NOW()",
+		      (unsigned long long)node_id,
+		      name_use,
+		      serial_use,
+		      path_use,
+		      model_use,
+		      vendor_use,
+		      fw_use,
+		      (unsigned long long)row->capacity_bytes,
+		      media_use,
+		      iface_use,
+		      health_use,
+		      reason_use);
 	free(name_q);
 	free(serial_q);
 	free(path_q);
@@ -849,7 +623,7 @@ bool hg_sql_disk_status_upsert(uint64_t node_id, const hg_disk_status_row_t *row
 }
 
 bool hg_sql_hw_status_upsert(uint64_t node_id, const hg_hw_component_row_t *row,
-				   const char *telemetry_json)
+		   const char *telemetry_json)
 {
 	if (!row || !sqldb.sql_init || !sqldb.conn)
 		return false;
@@ -873,23 +647,23 @@ bool hg_sql_hw_status_upsert(uint64_t node_id, const hg_hw_component_row_t *row,
 	const char *telemetry_use = telemetry_q ? telemetry_q : "NULL";
 	char sql_query[MAX_QUERY_SIZE];
 	int written = snprintf(sql_query, sizeof(sql_query),
-			      "INSERT INTO hardware_status (node_id, component_type, component_slot, component_serial, "
-			      "component_vendor, component_model, health_state, health_reason, status_flags, telemetry_json) "
-			      "VALUES (%llu, '%s', '%s', %s, %s, %s, '%s', %s, '%s', %s) "
-			      "ON DUPLICATE KEY UPDATE component_serial=VALUES(component_serial), "
-			      "component_vendor=VALUES(component_vendor), component_model=VALUES(component_model), "
-			      "health_state=VALUES(health_state), health_reason=VALUES(health_reason), "
-			      "status_flags=VALUES(status_flags), telemetry_json=VALUES(telemetry_json), last_seen_ts=NOW()",
-			      (unsigned long long)node_id,
-			      type_use,
-			      slot_use,
-			      serial_use,
-			      vendor_use,
-			      model_use,
-			      state_use,
-			      reason_use,
-			      flags_use,
-			      telemetry_use);
+		      "INSERT INTO hardware_status (node_id, component_type, component_slot, component_serial, "
+		      "component_vendor, component_model, health_state, health_reason, status_flags, telemetry_json) "
+		      "VALUES (%llu, '%s', '%s', %s, %s, %s, '%s', %s, '%s', %s) "
+		      "ON DUPLICATE KEY UPDATE component_serial=VALUES(component_serial), "
+		      "component_vendor=VALUES(component_vendor), component_model=VALUES(component_model), "
+		      "health_state=VALUES(health_state), health_reason=VALUES(health_reason), "
+		      "status_flags=VALUES(status_flags), telemetry_json=VALUES(telemetry_json), last_seen_ts=NOW()",
+		      (unsigned long long)node_id,
+		      type_use,
+		      slot_use,
+		      serial_use,
+		      vendor_use,
+		      model_use,
+		      state_use,
+		      reason_use,
+		      flags_use,
+		      telemetry_use);
 	free(type_q);
 	free(slot_q);
 	free(serial_q);
@@ -949,394 +723,69 @@ int hifs_get_hive_host_sbs(void)
 
 bool hifs_volume_super_get(uint64_t volume_id, struct hifs_volume_superblock *out)
 {
-	char sql_query[MAX_QUERY_SIZE];
-	MYSQL_RES *res;
-	MYSQL_ROW row;
-	unsigned long *lengths;
-	bool ok = false;
-
-	if (!sqldb.sql_init || !sqldb.conn || !out)
+	if (!out)
 		return false;
-
-	snprintf(sql_query, sizeof(sql_query), SQL_VOLUME_SUPER_SELECT,
-		 (unsigned long long)volume_id);
-
-	res = hifs_execute_sql(sql_query);
-	if (!res)
-		return false;
-
-	if (mysql_num_rows(res) == 0)
-		goto out;
-
-	row = mysql_fetch_row(res);
-	lengths = mysql_fetch_lengths(res);
-	if (!row || !lengths)
-		goto out;
-
-	memset(out, 0, sizeof(*out));
-	out->s_magic = row[0] ? (uint32_t)strtoul(row[0], NULL, 10) : 0;
-	out->s_blocksize = row[1] ? (uint32_t)strtoul(row[1], NULL, 10) : 0;
-	out->s_blocksize_bits = row[2] ? (uint32_t)strtoul(row[2], NULL, 10) : 0;
-	out->s_blocks_count = row[3] ? strtoull(row[3], NULL, 10) : 0;
-	out->s_free_blocks = row[4] ? strtoull(row[4], NULL, 10) : 0;
-	out->s_inodes_count = row[5] ? strtoull(row[5], NULL, 10) : 0;
-	out->s_free_inodes = row[6] ? strtoull(row[6], NULL, 10) : 0;
-	out->s_maxbytes = row[7] ? strtoull(row[7], NULL, 10) : 0;
-	out->s_feature_compat = row[8] ? (uint32_t)strtoul(row[8], NULL, 10) : 0;
-	out->s_feature_ro_compat = row[9] ? (uint32_t)strtoul(row[9], NULL, 10) : 0;
-	out->s_feature_incompat = row[10] ? (uint32_t)strtoul(row[10], NULL, 10) : 0;
-	out->s_rev_level = row[12] ? (uint32_t)strtoul(row[12], NULL, 10) : 0;
-	out->s_wtime = row[13] ? (uint32_t)strtoul(row[13], NULL, 10) : 0;
-	out->s_flags = row[14] ? (uint32_t)strtoul(row[14], NULL, 10) : 0;
-
-	if (!row[11] || !hex_to_bytes(row[11], lengths[11], out->s_uuid,
-				     sizeof(out->s_uuid)))
-		goto out;
-	if (row[15] && lengths[15] > 0) {
-		if (!hex_to_bytes(row[15], lengths[15],
-				 (uint8_t *)out->s_volume_name,
-				 sizeof(out->s_volume_name)))
-			goto out;
-	} else {
-		memset(out->s_volume_name, 0, sizeof(out->s_volume_name));
-	}
-
-	ok = true;
-
-out:
-	mysql_free_result(res);
-	sqldb.last_query = NULL;
-	return ok;
+	return hifs_meta_volume_super_get(volume_id, out);
 }
 
 bool hifs_volume_super_set(uint64_t volume_id, const struct hifs_volume_superblock *vsb)
 {
-	char sql_query[MAX_QUERY_SIZE];
-	char uuid_hex[sizeof(vsb->s_uuid) * 2 + 1];
-	char name_hex[sizeof(vsb->s_volume_name) * 2 + 1];
-
-	if (!sqldb.sql_init || !sqldb.conn || !vsb)
+	if (!vsb)
 		return false;
-
-	bytes_to_hex(vsb->s_uuid, sizeof(vsb->s_uuid), uuid_hex);
-	bytes_to_hex((const uint8_t *)vsb->s_volume_name,
-		     sizeof(vsb->s_volume_name), name_hex);
-
-	snprintf(sql_query, sizeof(sql_query), SQL_VOLUME_SUPER_UPSERT,
-		 (unsigned long long)volume_id,
-		 vsb->s_magic, vsb->s_blocksize, vsb->s_blocksize_bits,
-		 (unsigned long long)vsb->s_blocks_count,
-		 (unsigned long long)vsb->s_free_blocks,
-		 (unsigned long long)vsb->s_inodes_count,
-		 (unsigned long long)vsb->s_free_inodes,
-		 (unsigned long long)vsb->s_maxbytes,
-		 vsb->s_feature_compat, vsb->s_feature_ro_compat, vsb->s_feature_incompat,
-		 uuid_hex, vsb->s_rev_level, vsb->s_wtime, vsb->s_flags, name_hex);
-
-	return hifs_insert_sql(sql_query);
+	return hifs_meta_volume_super_set(volume_id, vsb);
 }
 
 bool hifs_root_dentry_load(uint64_t volume_id, struct hifs_volume_root_dentry *out)
 {
-	char sql_query[MAX_QUERY_SIZE];
-	MYSQL_RES *res;
-	MYSQL_ROW row;
-	unsigned long *lengths;
-	bool ok = false;
-
-	if (!sqldb.sql_init || !sqldb.conn || !out)
+	if (!out)
 		return false;
-
-	snprintf(sql_query, sizeof(sql_query), SQL_ROOT_DENTRY_SELECT,
-		 (unsigned long long)volume_id);
-
-	res = hifs_execute_sql(sql_query);
-	if (!res)
-		return false;
-
-	if (mysql_num_rows(res) == 0)
-		goto out;
-
-	row = mysql_fetch_row(res);
-	lengths = mysql_fetch_lengths(res);
-	if (!row || !lengths)
-		goto out;
-
-	memset(out, 0, sizeof(*out));
-	out->rd_inode = row[0] ? strtoull(row[0], NULL, 10) : 0;
-	out->rd_mode = row[1] ? (uint32_t)strtoul(row[1], NULL, 10) : 0;
-	out->rd_uid = row[2] ? (uint32_t)strtoul(row[2], NULL, 10) : 0;
-	out->rd_gid = row[3] ? (uint32_t)strtoul(row[3], NULL, 10) : 0;
-	out->rd_flags = row[4] ? (uint32_t)strtoul(row[4], NULL, 10) : 0;
-	out->rd_size = row[5] ? strtoull(row[5], NULL, 10) : 0;
-	out->rd_blocks = row[6] ? strtoull(row[6], NULL, 10) : 0;
-	out->rd_atime = row[7] ? (uint32_t)strtoul(row[7], NULL, 10) : 0;
-	out->rd_mtime = row[8] ? (uint32_t)strtoul(row[8], NULL, 10) : 0;
-	out->rd_ctime = row[9] ? (uint32_t)strtoul(row[9], NULL, 10) : 0;
-	out->rd_links = row[10] ? (uint32_t)strtoul(row[10], NULL, 10) : 0;
-	out->rd_name_len = row[11] ? (uint32_t)strtoul(row[11], NULL, 10) : 0;
-
-	if (row[12] && lengths[12] > 0) {
-		if (!hex_to_bytes(row[12], lengths[12],
-				  (uint8_t *)out->rd_name,
-				  sizeof(out->rd_name)))
-			goto out;
-	} else {
-		memset(out->rd_name, 0, sizeof(out->rd_name));
-	}
-
-	ok = true;
-
-out:
-	mysql_free_result(res);
-	sqldb.last_query = NULL;
-	return ok;
+	return hifs_meta_root_dentry_load(volume_id, out);
 }
 
 bool hifs_root_dentry_store(uint64_t volume_id, const struct hifs_volume_root_dentry *root)
 {
-	char sql_query[MAX_QUERY_SIZE];
-	char name_hex[HIFS_MAX_NAME_SIZE * 2 + 1];
-	uint32_t name_len;
-
-	if (!sqldb.sql_init || !sqldb.conn || !root)
+	if (!root)
 		return false;
-
-	name_len = root->rd_name_len;
-	if (name_len > HIFS_MAX_NAME_SIZE)
-		name_len = HIFS_MAX_NAME_SIZE;
-	bytes_to_hex((const uint8_t *)root->rd_name, name_len, name_hex);
-
-	snprintf(sql_query, sizeof(sql_query), SQL_ROOT_DENTRY_UPSERT,
-		 (unsigned long long)volume_id,
-		 (unsigned long long)root->rd_inode,
-		 root->rd_mode, root->rd_uid, root->rd_gid, root->rd_flags,
-		 (unsigned long long)root->rd_size,
-		 (unsigned long long)root->rd_blocks,
-		 root->rd_atime, root->rd_mtime, root->rd_ctime,
-		 root->rd_links, root->rd_name_len, name_hex);
-
-	return hifs_insert_sql(sql_query);
+	return hifs_meta_root_dentry_store(volume_id, root);
 }
 
 bool hifs_volume_dentry_load_by_inode(uint64_t volume_id, uint64_t inode,
 				 struct hifs_volume_dentry *out)
 {
-	char sql_query[MAX_QUERY_SIZE];
-	MYSQL_RES *res;
-	MYSQL_ROW row;
-	unsigned long *lengths;
-	bool ok = false;
-
-	if (!sqldb.sql_init || !sqldb.conn || !out)
+	if (!out)
 		return false;
-
-	snprintf(sql_query, sizeof(sql_query), SQL_DENTRY_BY_INODE,
-		 (unsigned long long)volume_id, (unsigned long long)inode);
-
-	res = hifs_execute_sql(sql_query);
-	if (!res)
-		return false;
-
-	if (mysql_num_rows(res) == 0)
-		goto out;
-
-	row = mysql_fetch_row(res);
-	lengths = mysql_fetch_lengths(res);
-	if (!row || !lengths)
-		goto out;
-
-	memset(out, 0, sizeof(*out));
-	out->de_parent = row[0] ? strtoull(row[0], NULL, 10) : 0;
-	out->de_inode = row[1] ? strtoull(row[1], NULL, 10) : 0;
-	out->de_epoch = row[2] ? (uint32_t)strtoul(row[2], NULL, 10) : 0;
-	out->de_type = row[3] ? (uint32_t)strtoul(row[3], NULL, 10) : 0;
-	out->de_name_len = row[4] ? (uint32_t)strtoul(row[4], NULL, 10) : 0;
-
-	if (row[5] && lengths[5] > 0) {
-		if (!hex_to_bytes(row[5], lengths[5],
-				 (uint8_t *)out->de_name,
-				 sizeof(out->de_name)))
-			goto out;
-	} else {
-		memset(out->de_name, 0, sizeof(out->de_name));
-	}
-
-	ok = true;
-
-out:
-	mysql_free_result(res);
-	sqldb.last_query = NULL;
-	return ok;
+	return hifs_meta_volume_dentry_load_by_inode(volume_id, inode, out);
 }
 
 bool hifs_volume_dentry_load_by_name(uint64_t volume_id, uint64_t parent,
 				 const char *name_hex, uint32_t name_hex_len,
 				 struct hifs_volume_dentry *out)
 {
-	char sql_query[MAX_QUERY_SIZE];
-	MYSQL_RES *res;
-	MYSQL_ROW row;
-	unsigned long *lengths;
-	bool ok = false;
-
-	if (!sqldb.sql_init || !sqldb.conn || !out || !name_hex)
+	if (!out || !name_hex)
 		return false;
-
-	snprintf(sql_query, sizeof(sql_query), SQL_DENTRY_BY_NAME,
-		 (unsigned long long)volume_id,
-		 (unsigned long long)parent,
-		 (int)name_hex_len,
-		 name_hex);
-
-	res = hifs_execute_sql(sql_query);
-	if (!res)
-		return false;
-
-	if (mysql_num_rows(res) == 0)
-		goto out;
-
-	row = mysql_fetch_row(res);
-	lengths = mysql_fetch_lengths(res);
-	if (!row || !lengths)
-		goto out;
-
-	memset(out, 0, sizeof(*out));
-	out->de_parent = row[0] ? strtoull(row[0], NULL, 10) : 0;
-	out->de_inode = row[1] ? strtoull(row[1], NULL, 10) : 0;
-	out->de_epoch = row[2] ? (uint32_t)strtoul(row[2], NULL, 10) : 0;
-	out->de_type = row[3] ? (uint32_t)strtoul(row[3], NULL, 10) : 0;
-	out->de_name_len = row[4] ? (uint32_t)strtoul(row[4], NULL, 10) : 0;
-	if (row[5] && lengths[5] > 0) {
-		if (!hex_to_bytes(row[5], lengths[5],
-				 (uint8_t *)out->de_name,
-				 sizeof(out->de_name)))
-			goto out;
-	} else {
-		memset(out->de_name, 0, sizeof(out->de_name));
-	}
-
-	ok = true;
-
-out:
-	mysql_free_result(res);
-	sqldb.last_query = NULL;
-	return ok;
+	return hifs_meta_volume_dentry_load_by_name(volume_id,
+						    parent,
+						    name_hex,
+						    name_hex_len,
+						    out);
 }
 
 bool hifs_volume_dentry_store(uint64_t volume_id,
 				 const struct hifs_volume_dentry *dent)
 {
-	char sql_query[MAX_QUERY_SIZE];
-	char delete_query[MAX_QUERY_SIZE];
-	char name_hex[HIFS_MAX_NAME_SIZE * 2 + 1];
-	uint32_t name_len;
-
-	if (!sqldb.sql_init || !sqldb.conn || !dent)
+	if (!dent)
 		return false;
-
-	name_len = dent->de_name_len;
-	if (name_len > HIFS_MAX_NAME_SIZE)
-		name_len = HIFS_MAX_NAME_SIZE;
-	bytes_to_hex((const uint8_t *)dent->de_name, name_len, name_hex);
-
-	hifs_debug("volume_dentry_store: vol=%llu parent=%llu inode=%llu epoch=%u "
-		   "type=%u name_len=%u name_hex=%s",
-		   (unsigned long long)volume_id,
-		   (unsigned long long)dent->de_parent,
-		   (unsigned long long)dent->de_inode,
-		   dent->de_epoch,
-		   dent->de_type,
-		   dent->de_name_len,
-		   name_hex);
-
-	snprintf(delete_query, sizeof(delete_query), SQL_DENTRY_DELETE_BY_NAME,
-		 (unsigned long long)volume_id,
-		 (unsigned long long)dent->de_parent,
-		 (int)(name_len * 2),
-		 name_hex);
-	hifs_insert_sql(delete_query);
-
-	snprintf(sql_query, sizeof(sql_query), SQL_DENTRY_UPSERT,
-		 (unsigned long long)volume_id,
-		 (unsigned long long)dent->de_parent,
-		 (unsigned long long)dent->de_inode,
-		 dent->de_epoch,
-		 dent->de_type,
-		 dent->de_name_len,
-		 name_hex);
-
-	bool ok = hifs_insert_sql(sql_query);
-	hifs_debug("volume_dentry_store: metadata write %s (affected=%llu last_id=%llu)",
-		   ok ? "succeeded" : "failed",
-		   (unsigned long long)sqldb.last_affected,
-		   (unsigned long long)sqldb.last_insert_id);
-	return ok;
+	return hifs_meta_volume_dentry_store(volume_id, dent);
 }
 
 bool hifs_volume_inode_load(uint64_t volume_id, uint64_t inode,
 				 struct hifs_inode_wire *out)
 {
-	char sql_query[MAX_QUERY_SIZE];
-	MYSQL_RES *res = NULL;
-	MYSQL_ROW row;
-	unsigned long *lengths;
-	bool ok = false;
-	int idx = 0;
-
-	if (!sqldb.sql_init || !sqldb.conn || !out)
+	if (!out)
+		return false;
+	if (!hifs_meta_volume_inode_get(volume_id, inode, out))
 		return false;
 
-	snprintf(sql_query, sizeof(sql_query), SQL_VOLUME_INODE_SELECT,
-		 (unsigned long long)volume_id,
-		 (unsigned long long)inode);
-
-	res = hifs_execute_sql(sql_query);
-	if (!res)
-		return false;
-
-	if (mysql_num_rows(res) == 0)
-		goto out;
-
-	row = mysql_fetch_row(res);
-	lengths = mysql_fetch_lengths(res);
-	if (!row || !lengths)
-		goto out;
-
-	memset(out, 0, sizeof(*out));
-
-	out->i_msg_flags = htole32(sql_to_u32(row[idx++]));
-	out->i_version = row[idx] ? (uint8_t)strtoul(row[idx], NULL, 10) : 0;
-	idx++;
-	out->i_flags = row[idx] ? (uint8_t)strtoul(row[idx], NULL, 10) : 0;
-	idx++;
-	out->i_mode = htole32(sql_to_u32(row[idx++]));
-	out->i_ino = htole64(sql_to_u64(row[idx++]));
-	out->i_uid = htole16((uint16_t)sql_to_u32(row[idx++]));
-	out->i_gid = htole16((uint16_t)sql_to_u32(row[idx++]));
-	out->i_hrd_lnk = htole16((uint16_t)sql_to_u32(row[idx++]));
-	out->i_atime = htole32(sql_to_u32(row[idx++]));
-	out->i_mtime = htole32(sql_to_u32(row[idx++]));
-	out->i_ctime = htole32(sql_to_u32(row[idx++]));
-	out->i_size = htole32(sql_to_u32(row[idx++]));
-
-	if (!row[idx] || !hex_to_bytes(row[idx], lengths[idx],
-				       out->i_name, sizeof(out->i_name)))
-		goto out;
-	idx++;
-
-	for (size_t i = 0; i < HIFS_INODE_TSIZE; ++i)
-		out->extents[i].block_start = htole32(sql_to_u32(row[idx++]));
-	for (size_t i = 0; i < HIFS_INODE_TSIZE; ++i)
-		out->extents[i].block_count = htole32(sql_to_u32(row[idx++]));
-	out->i_blocks = htole32(sql_to_u32(row[idx++]));
-	out->i_bytes = htole32(sql_to_u32(row[idx++]));
-	out->i_links = row[idx] ? (uint8_t)strtoul(row[idx], NULL, 10) : 0;
-	idx++;
-	out->i_hash_count = htole16((uint16_t)sql_to_u32(row[idx++]));
-	out->i_hash_reserved = htole16((uint16_t)sql_to_u32(row[idx++]));
-
-	/* Load fingerprints from RocksDB */
 	uint16_t hash_count_host = le16toh(out->i_hash_count);
 	for (uint16_t i = 0; i < hash_count_host && i < HIFS_MAX_BLOCK_HASHES; ++i) {
 		struct hifs_block_fingerprint_wire fp = {0};
@@ -1347,116 +796,24 @@ bool hifs_volume_inode_load(uint64_t volume_id, uint64_t inode,
 			       sizeof(out->i_block_fingerprints[i]));
 		}
 	}
-
-	ok = true;
-
-out:
-	if (res) {
-		mysql_free_result(res);
-		sqldb.last_query = NULL;
-	}
-	return ok;
+	return true;
 }
 
 bool hifs_volume_inode_store(uint64_t volume_id,
 			 const struct hifs_inode_wire *inode)
 {
-	char *sql_query = NULL;
-	char name_hex[HIFS_MAX_NAME_SIZE * 2 + 1];
-	uint32_t epoch;
-	uint64_t ino_host;
-	uint32_t msg_flags, mode, atime, mtime, ctime, size;
-	uint32_t extent_start[HIFS_INODE_TSIZE];
-	uint32_t extent_count[HIFS_INODE_TSIZE];
-	uint32_t blocks, bytes;
-	uint16_t uid, gid, hrd_lnk, hash_count, hash_reserved;
-	uint8_t version, flags, links;
+	if (!inode)
+		return false;
+	uint64_t ino_host = le64toh(inode->i_ino);
+	uint16_t hash_count = le16toh(inode->i_hash_count);
 
-	if (!sqldb.sql_init || !sqldb.conn || !inode)
+	if (!hifs_meta_volume_inode_put(volume_id, inode))
 		return false;
 
-	msg_flags = le32toh(inode->i_msg_flags);
-	version = inode->i_version;
-	flags = inode->i_flags;
-	mode = le32toh(inode->i_mode);
-	ino_host = le64toh(inode->i_ino);
-	uid = le16toh(inode->i_uid);
-	gid = le16toh(inode->i_gid);
-	hrd_lnk = le16toh(inode->i_hrd_lnk);
-	atime = le32toh(inode->i_atime);
-	mtime = le32toh(inode->i_mtime);
-	ctime = le32toh(inode->i_ctime);
-	size = le32toh(inode->i_size);
-	bytes_to_hex((const uint8_t *)inode->i_name, sizeof(inode->i_name), name_hex);
-	for (size_t i = 0; i < HIFS_INODE_TSIZE; ++i) {
-		extent_start[i] = le32toh(inode->extents[i].block_start);
-		extent_count[i] = le32toh(inode->extents[i].block_count);
-	}
-	blocks = le32toh(inode->i_blocks);
-	bytes = le32toh(inode->i_bytes);
-	links = inode->i_links;
-	hash_count = le16toh(inode->i_hash_count);
-	hash_reserved = le16toh(inode->i_hash_reserved);
-	epoch = ctime;
-
-	hifs_debug("volume_inode_store: vol=%llu ino=%llu mode=%#x uid=%u gid=%u "
-		   "size=%u blocks=%u bytes=%u links=%u hash_count=%u epoch=%u "
-		   "name_hex=%s extent_start=[%u,%u,%u,%u] extent_count=[%u,%u,%u,%u]",
-		   (unsigned long long)volume_id,
-		   (unsigned long long)ino_host,
-		   mode,
-		   uid,
-		   gid,
-		   size,
-		   blocks,
-		   bytes,
-		   links,
-		   hash_count,
-		   epoch,
-		   name_hex,
-		   extent_start[0], extent_start[1], extent_start[2], extent_start[3],
-		   extent_count[0], extent_count[1], extent_count[2], extent_count[3]);
-
-	size_t sql_len = snprintf(NULL, 0, SQL_VOLUME_INODE_UPSERT,
-				  (unsigned long long)volume_id,
-				  (unsigned long long)ino_host,
-				  msg_flags, version, flags, mode,
-				  (unsigned long long)ino_host, uid, gid,
-				  hrd_lnk, atime, mtime, ctime, size, name_hex,
-				  extent_start[0], extent_start[1], extent_start[2], extent_start[3],
-				  extent_count[0], extent_count[1], extent_count[2], extent_count[3],
-				  blocks, bytes, links, hash_count, hash_reserved, epoch) + 1;
-	sql_query = malloc(sql_len);
-	if (!sql_query)
-		return false;
-
-	snprintf(sql_query, sql_len, SQL_VOLUME_INODE_UPSERT,
-		 (unsigned long long)volume_id,
-		 (unsigned long long)ino_host,
-		 msg_flags, version, flags, mode,
-		 (unsigned long long)ino_host, uid, gid,
-		 hrd_lnk, atime, mtime, ctime, size, name_hex,
-		 extent_start[0], extent_start[1], extent_start[2], extent_start[3],
-		 extent_count[0], extent_count[1], extent_count[2], extent_count[3],
-		 blocks, bytes, links, hash_count, hash_reserved, epoch);
-
-	bool insert_ok = hifs_insert_sql(sql_query);
-	hifs_debug("volume_inode_store: metadata write %s (affected=%llu last_id=%llu)",
-		   insert_ok ? "succeeded" : "failed",
-		   (unsigned long long)sqldb.last_affected,
-		   (unsigned long long)sqldb.last_insert_id);
-	free(sql_query);
-	if (!insert_ok)
-		return false;
-
-	bool fp_ok = hifs_volume_inode_fp_sync(volume_id,
-					       ino_host,
-					       inode->i_block_fingerprints,
-					       hash_count);
-	hifs_debug("volume_inode_store: fingerprint sync %s (hash_count=%u)",
-		   fp_ok ? "succeeded" : "failed",
-		   hash_count);
-	if (!fp_ok)
+	if (!hifs_volume_inode_fp_sync(volume_id,
+				       ino_host,
+				       inode->i_block_fingerprints,
+				       hash_count))
 		return false;
 
 	return true;
@@ -1793,21 +1150,6 @@ fail_chunks:
 
     return ok;
 }
-
-static void __attribute__((unused))
-hash_bytes_to_hex(const uint8_t *src, size_t len, char *dst)
-{
-	bytes_to_hex(src, len, dst);
-}
-
-/*
-int save_binary_data(char *data_block, char *hash)
-{
-	(void)data_block;
-	(void)hash;
-	return 0;
-}
-*/
 
 bool hifs_store_block_to_stripe_locations(uint64_t volume_id, uint64_t block_no,
                                           uint8_t hash_algo, const uint8_t hash[HIFS_BLOCK_HASH_SIZE],

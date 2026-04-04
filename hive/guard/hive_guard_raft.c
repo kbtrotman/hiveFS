@@ -304,7 +304,7 @@ static int hg_guard_refresh_tokens_from_sql(void)
     return rc;
 }
 
-static bool hg_guard_setting_key_is_valid(const char *key)
+bool hg_guard_setting_key_is_valid(const char *key)
 {
     if (!key)
         return false;
@@ -324,7 +324,7 @@ static bool hg_guard_setting_key_is_valid(const char *key)
     return true;
 }
 
-static bool hg_guard_setting_value_is_valid(const char *value)
+bool hg_guard_setting_value_is_valid(const char *value)
 {
     if (!value)
         return false;

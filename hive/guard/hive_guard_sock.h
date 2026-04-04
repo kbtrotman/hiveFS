@@ -99,3 +99,6 @@ int hive_guard_request_node_cert(const struct hive_storage_node *node,
 				 const char *cert_path);
 int hive_guard_sock_start(void);
 void hive_guard_sock_stop(void);
+int hive_guard_apply_setting_update(const char *key,
+				    const char *value,
+				    bool via_raft);

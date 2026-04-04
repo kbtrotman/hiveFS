@@ -31,6 +31,20 @@ struct hifs_meta_map_delta {
     uint8_t stripe_id[HIFS_STRIPE_ID_SIZE];
 };
 
+struct hifs_meta_block_record {
+    uint64_t volume_id;
+    uint64_t inode_key;
+    uint64_t block_no;
+    uint32_t generation;
+    uint32_t block_bytes;
+    uint32_t placement_epoch;
+    uint8_t hash_algo;
+    uint8_t stripe_algo;
+    uint8_t content_hash[HIFS_BLOCK_HASH_SIZE];
+    uint8_t stripe_id[HIFS_STRIPE_ID_SIZE];
+    hifs_object_id_t block_id;
+};
+
 struct hifs_meta_map_builder {
     uint64_t volume_id;
     uint64_t inode_key;
@@ -122,3 +136,29 @@ void hifs_meta_make_shard_key(const uint8_t stripe_id[HIFS_STRIPE_ID_SIZE],
                               size_t codec_name_len,
                               uint32_t codec_version,
                               hifs_object_id_t *out);
+
+bool hifs_meta_volume_super_get(uint64_t volume_id,
+                                struct hifs_volume_superblock *out);
+bool hifs_meta_volume_super_set(uint64_t volume_id,
+                                const struct hifs_volume_superblock *vsb);
+bool hifs_meta_root_dentry_load(uint64_t volume_id,
+                                struct hifs_volume_root_dentry *out);
+bool hifs_meta_root_dentry_store(uint64_t volume_id,
+                                 const struct hifs_volume_root_dentry *root);
+bool hifs_meta_volume_dentry_load_by_inode(uint64_t volume_id,
+                                           uint64_t inode,
+                                           struct hifs_volume_dentry *out);
+bool hifs_meta_volume_dentry_load_by_name(uint64_t volume_id,
+                                          uint64_t parent,
+                                          const char *name_hex,
+                                          uint32_t name_hex_len,
+                                          struct hifs_volume_dentry *out);
+bool hifs_meta_volume_dentry_store(uint64_t volume_id,
+                                   const struct hifs_volume_dentry *dent);
+bool hifs_meta_volume_inode_get(uint64_t volume_id,
+                                uint64_t inode,
+                                struct hifs_inode_wire *out);
+bool hifs_meta_volume_inode_put(uint64_t volume_id,
+                                const struct hifs_inode_wire *inode);
+bool hifs_meta_block_store_batch(const struct hifs_meta_block_record *records,
+                                 size_t record_count);

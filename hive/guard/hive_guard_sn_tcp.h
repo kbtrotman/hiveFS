@@ -52,6 +52,7 @@ int tcp_send_file_to_new_node(const char *source_addr,
                               const char *new_node_addr);
 int hg_send_token_metadata_to_leader(
         const struct hive_guard_token_metadata *meta);
+int hg_sn_broadcast_setting_update(const char *key, const char *value);
 
 #include <stdlib.h>
 

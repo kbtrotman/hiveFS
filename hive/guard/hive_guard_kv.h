@@ -245,9 +245,17 @@ bool hifs_volume_inode_fp_sync(uint64_t volume_id,
 int hg_kv_put_superblock(const struct hg_meta_superblock_obj *obj);
 int hg_kv_get_superblock(const uint8_t superblock_id[HIFS_META_OBJECT_ID_SIZE],
                          struct hg_meta_superblock_obj *out);
+int hg_kv_put_volume_super(uint64_t volume_id,
+                           const struct hifs_volume_superblock *vsb);
+int hg_kv_get_volume_super(uint64_t volume_id,
+                           struct hifs_volume_superblock *out);
 int hg_kv_put_volume_root(const struct hg_meta_volume_root_obj *vr);
 int hg_kv_get_volume_root(const uint8_t volume_root_id[HIFS_META_OBJECT_ID_SIZE],
                           struct hg_meta_volume_root_obj *out);
+int hg_kv_put_root_dentry(uint64_t volume_id,
+                          const struct hifs_volume_root_dentry *root);
+int hg_kv_get_root_dentry(uint64_t volume_id,
+                          struct hifs_volume_root_dentry *out);
 int hg_kv_put_volume_root_ptr(uint64_t volume_id,
                               const uint8_t volume_root_id[HIFS_META_OBJECT_ID_SIZE]);
 int hg_kv_get_volume_root_ptr(uint64_t volume_id,
@@ -271,6 +279,25 @@ int hg_kv_put_inode_ptr(uint64_t volume_id,
 int hg_kv_get_inode_ptr(uint64_t volume_id,
                         uint64_t inode_key,
                         uint8_t inode_obj_id[HIFS_META_OBJECT_ID_SIZE]);
+int hg_kv_put_volume_dentry(uint64_t volume_id,
+                            uint64_t inode_key,
+                            uint64_t parent_inode_key,
+                            uint64_t name_hash,
+                            const struct hifs_volume_dentry *dent);
+int hg_kv_get_volume_dentry_by_inode(uint64_t volume_id,
+                                     uint64_t inode_key,
+                                     struct hifs_volume_dentry *out);
+int hg_kv_get_volume_dentry_by_name(uint64_t volume_id,
+                                    uint64_t parent_inode_key,
+                                    uint64_t name_hash,
+                                    struct hifs_volume_dentry *out);
+int hg_kv_put_volume_inode(uint64_t volume_id,
+                           const struct hifs_inode_wire *inode);
+int hg_kv_get_volume_inode(uint64_t volume_id,
+                           uint64_t inode_key,
+                           struct hifs_inode_wire *out);
+int hg_kv_put_block_metadata_batch(const struct hifs_meta_block_record *records,
+                                   size_t record_count);
 
 int hg_kv_get_raw(const char *key, size_t key_len,
                   void *out_buf, size_t buf_len);

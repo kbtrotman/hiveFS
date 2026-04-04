@@ -608,6 +608,7 @@ bool hifs_volume_block_store(uint64_t volume_id, uint64_t block_no,
 				     (unsigned long long)block_no);
 		}
 	}
+    
 
 	if (!hifs_volume_block_ec_encode(buf, len, algo, hash, &ec))
 		return false;
@@ -625,6 +626,7 @@ bool hifs_volume_block_store(uint64_t volume_id, uint64_t block_no,
 	hifs_volume_block_ec_free(&ec);
 	return ok;
 }
+
 
 int hifs_put_block(uint64_t volume_id, uint64_t block_no,
 		   const void *data, size_t len,
@@ -752,21 +754,4 @@ uint64_t hifs_alloc_estripe_id(void)
 {
     static uint64_t next_id = 1;
     return next_id++;
-}
-
-int hifs_recv_stripe_from_node(uint32_t storage_node_id,
-                               uint32_t shard_id,
-                               uint64_t estripe_id,
-                               const uint8_t *data,
-                               uint32_t len,
-                               uint64_t *out_block_offset)
-{
-    (void)storage_node_id;
-    (void)shard_id;
-    (void)estripe_id;
-    (void)data;
-    (void)len;
-    if (out_block_offset)
-        *out_block_offset = hifs_alloc_estripe_id();
-    return 0;
 }

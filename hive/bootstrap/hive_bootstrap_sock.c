@@ -42,6 +42,7 @@
 #define HIVE_GUARD_KV_MIN_BYTES (200ULL * BYTES_PER_GIB)
 #define HIVE_LOG_MIN_BYTES (50ULL * BYTES_PER_GIB)
 #define NEWTOKEN_TOKEN_LEN 43
+#define HIVE_SETTING_NAME_MAX 64
 
 static const char *const g_newtoken_required_fields[] = {
 	"\"command\"",
@@ -192,6 +193,16 @@ static bool send_guard_request_with_reply(const char *json_payload,
 					  char *response, size_t response_sz);
 static bool try_handle_newtoken_request(int fd, const char *json_payload);
 static bool validate_newtoken_request(const char *json_payload);
+static bool try_handle_update_setting_request(int fd,
+					      const char *json_payload);
+static bool hive_setting_name_is_valid(const char *name);
+static bool hive_json_key_has_value(const char *json, const char *key);
+static bool hive_json_payload_is_clean(const char *json);
+static bool try_handle_update_setting_request(int fd,
+				       const char *json_payload);
+static bool hive_setting_name_is_valid(const char *name);
+static bool hive_json_key_has_value(const char *json, const char *key);
+static bool hive_json_payload_is_clean(const char *json);
 
 enum bootstrap_request_type g_pending_request_type =
 	BOOTSTRAP_REQ_UNKNOWN;
@@ -484,6 +495,45 @@ static bool validate_newtoken_request(const char *json_payload)
 	return true;
 }
 
+static bool hive_json_payload_is_clean(const char *json)
+{
+	if (!json)
+		return false;
+	size_t len = strnlen(json, HIVE_BOOTSTRAP_MSG_MAX);
+
+	if (len == 0 || len >= HIVE_BOOTSTRAP_MSG_MAX)
+		return false;
+	for (size_t i = 0; i < len; ++i) {
+		unsigned char c = (unsigned char)json[i];
+
+		if (c == '\0')
+			return false;
+		if (c < 0x20 && c != '\n' && c != '\r' && c != '\t')
+			return false;
+	}
+	return true;
+}
+
+static bool hive_setting_name_is_valid(const char *name)
+{
+	if (!name)
+		return false;
+	size_t len = strnlen(name, HIVE_SETTING_NAME_MAX);
+
+	if (len == 0 || len >= HIVE_SETTING_NAME_MAX)
+		return false;
+	for (size_t i = 0; i < len; ++i) {
+		unsigned char c = (unsigned char)name[i];
+		bool alpha = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+		bool digit = (c >= '0' && c <= '9');
+		bool extra = (c == '_' || c == '.' || c == '-' || c == ':');
+
+		if (!alpha && !digit && !extra)
+			return false;
+	}
+	return true;
+}
+
 static bool parse_guard_newtoken_response(const char *response,
 					  char *token, size_t token_sz)
 {
@@ -541,6 +591,54 @@ static bool try_handle_newtoken_request(int fd, const char *json_payload)
 		return true;
 	}
 	hive_common_sock_respond(fd, reply);
+	return true;
+}
+
+static bool try_handle_update_setting_request(int fd, const char *json_payload)
+{
+	char command[32];
+	char setting_name[HIVE_SETTING_NAME_MAX];
+	char guard_resp[HIVE_BOOTSTRAP_MSG_MAX];
+
+	if (!json_payload)
+		return false;
+	if (!parse_json_string_value(json_payload, "command",
+				     command, sizeof(command)))
+		return false;
+	if (strcmp(command, "update_setting") != 0)
+		return false;
+	if (!hive_json_payload_is_clean(json_payload)) {
+		hive_common_sock_respond(fd, "ERR invalid setting payload\n");
+		return true;
+	}
+	if (!parse_json_string_value(json_payload, "setting_name",
+				     setting_name, sizeof(setting_name))) {
+		hive_common_sock_respond(fd, "ERR missing setting_name\n");
+		return true;
+	}
+	if (!hive_setting_name_is_valid(setting_name)) {
+		hive_common_sock_respond(fd, "ERR invalid setting_name\n");
+		return true;
+	}
+	if (!hive_json_key_has_value(json_payload, "setting_value")) {
+		hive_common_sock_respond(fd, "ERR missing setting_value\n");
+		return true;
+	}
+	if (!send_guard_request_with_reply(json_payload,
+					   guard_resp,
+					   sizeof(guard_resp))) {
+		hive_common_sock_respond(fd, "ERR hive_guard unavailable\n");
+		return true;
+	}
+	size_t resp_len = strlen(guard_resp);
+
+	if (resp_len == 0) {
+		hive_common_sock_respond(fd, "ERR hive_guard empty response\n");
+		return true;
+	}
+	hive_common_sock_respond(fd, guard_resp);
+	if (guard_resp[resp_len - 1] != '\n')
+		hive_common_sock_respond(fd, "\n");
 	return true;
 }
 
@@ -1079,6 +1177,21 @@ static const char *find_json_key(const char *json, const char *key,
 	if (needle_len_out)
 		*needle_len_out = (size_t)n;
 	return strstr(json, needle);
+}
+
+static bool hive_json_key_has_value(const char *json, const char *key)
+{
+	size_t needle_len = 0;
+	const char *p = find_json_key(json, key, &needle_len);
+
+	if (!p)
+		return false;
+	p += needle_len;
+	p = skip_ws(p);
+	if (*p != ':')
+		return false;
+	p = skip_ws(p + 1);
+	return *p != '\0';
 }
 
 static bool parse_json_string_value(const char *json, const char *key,
@@ -1688,6 +1801,8 @@ static bool process_client(int fd)
 	fprintf(stdout, "bootstrap_request: %s\n", buf);
 	fflush(stdout);
 	if (try_handle_newtoken_request(fd, buf))
+		return true;
+	if (try_handle_update_setting_request(fd, buf))
 		return true;
 	if (!parse_bootstrap_request(buf, &req)) {
 		hive_common_sock_respond(fd, "ERR invalid JSON\n");

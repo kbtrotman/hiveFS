@@ -7,6 +7,7 @@
 
 #include "hive_guard_meta.h"
 #include "hive_guard_mcl.h"
+#include "hive_guard_kv.h"
 
 struct hifs_meta_committed_map {
     uint64_t volume_id;
@@ -16,6 +17,11 @@ struct hifs_meta_committed_map {
     uint32_t commit_count;
 };
 
+static uint64_t hifs_meta_name_hash_bytes(const char *name, uint32_t name_len);
+static bool hifs_meta_decode_hex(const char *hex,
+                                 uint32_t hex_len,
+                                 char *out_bytes,
+                                 uint32_t *out_len);
 static void hifs_meta_sha256_begin_tagged(SHA256_CTX *ctx, const char *tag);
 static void hifs_meta_sha256_finish(SHA256_CTX *ctx, hifs_object_id_t *out);
 static void hifs_meta_sha256_finish_bytes(SHA256_CTX *ctx, uint8_t *out_bytes);
@@ -573,4 +579,193 @@ void hifs_meta_make_shard_key(const uint8_t stripe_id[HIFS_STRIPE_ID_SIZE],
     }
     hifs_meta_sha256_update_u32(&ctx, codec_version);
     hifs_meta_sha256_finish(&ctx, out);
+}
+
+static int hifs_meta_hex_value(char c)
+{
+    if (c >= '0' && c <= '9') {
+        return c - '0';
+    }
+    if (c >= 'a' && c <= 'f') {
+        return c - 'a' + 10;
+    }
+    if (c >= 'A' && c <= 'F') {
+        return c - 'A' + 10;
+    }
+    return -1;
+}
+
+static bool hifs_meta_decode_hex(const char *hex,
+                                 uint32_t hex_len,
+                                 char *out_bytes,
+                                 uint32_t *out_len)
+{
+    if (!hex || !out_bytes || !out_len) {
+        return false;
+    }
+    if ((hex_len & 1u) != 0) {
+        return false;
+    }
+    uint32_t total = hex_len / 2u;
+    if (total > HIFS_MAX_NAME_SIZE) {
+        return false;
+    }
+    for (uint32_t i = 0; i < total; ++i) {
+        int hi = hifs_meta_hex_value(hex[i * 2]);
+        int lo = hifs_meta_hex_value(hex[i * 2 + 1]);
+        if (hi < 0 || lo < 0) {
+            return false;
+        }
+        out_bytes[i] = (char)((hi << 4) | lo);
+    }
+    *out_len = total;
+    return true;
+}
+
+static uint64_t hifs_meta_name_hash_bytes(const char *name, uint32_t name_len)
+{
+    const uint8_t *bytes = (const uint8_t *)name;
+    uint64_t hash = 1469598103934665603ull;
+    for (uint32_t i = 0; i < name_len; ++i) {
+        hash ^= bytes[i];
+        hash *= 1099511628211ull;
+    }
+    hash ^= name_len;
+    hash *= 1099511628211ull;
+    return hash;
+}
+
+bool hifs_meta_volume_super_get(uint64_t volume_id,
+                                struct hifs_volume_superblock *out)
+{
+    if (!out) {
+        return false;
+    }
+    if (hg_kv_get_volume_super(volume_id, out) != 0) {
+        memset(out, 0, sizeof(*out));
+        return false;
+    }
+    return true;
+}
+
+bool hifs_meta_volume_super_set(uint64_t volume_id,
+                                const struct hifs_volume_superblock *vsb)
+{
+    if (!vsb) {
+        return false;
+    }
+    return hg_kv_put_volume_super(volume_id, vsb) == 0;
+}
+
+bool hifs_meta_root_dentry_load(uint64_t volume_id,
+                                struct hifs_volume_root_dentry *out)
+{
+    if (!out) {
+        return false;
+    }
+    if (hg_kv_get_root_dentry(volume_id, out) != 0) {
+        memset(out, 0, sizeof(*out));
+        return false;
+    }
+    return true;
+}
+
+bool hifs_meta_root_dentry_store(uint64_t volume_id,
+                                 const struct hifs_volume_root_dentry *root)
+{
+    if (!root) {
+        return false;
+    }
+    return hg_kv_put_root_dentry(volume_id, root) == 0;
+}
+
+bool hifs_meta_volume_dentry_load_by_inode(uint64_t volume_id,
+                                           uint64_t inode,
+                                           struct hifs_volume_dentry *out)
+{
+    if (!out) {
+        return false;
+    }
+    if (hg_kv_get_volume_dentry_by_inode(volume_id, inode, out) != 0) {
+        memset(out, 0, sizeof(*out));
+        return false;
+    }
+    return true;
+}
+
+bool hifs_meta_volume_dentry_load_by_name(uint64_t volume_id,
+                                          uint64_t parent,
+                                          const char *name_hex,
+                                          uint32_t name_hex_len,
+                                          struct hifs_volume_dentry *out)
+{
+    if (!out || !name_hex) {
+        return false;
+    }
+    char name_bytes[HIFS_MAX_NAME_SIZE];
+    uint32_t name_len = 0;
+    if (!hifs_meta_decode_hex(name_hex, name_hex_len, name_bytes, &name_len)) {
+        return false;
+    }
+    uint64_t name_hash = hifs_meta_name_hash_bytes(name_bytes, name_len);
+    if (hg_kv_get_volume_dentry_by_name(volume_id, parent, name_hash, out) != 0) {
+        memset(out, 0, sizeof(*out));
+        return false;
+    }
+    if (out->de_name_len != name_len ||
+        memcmp(out->de_name, name_bytes, name_len) != 0) {
+        memset(out, 0, sizeof(*out));
+        return false;
+    }
+    return true;
+}
+
+bool hifs_meta_volume_dentry_store(uint64_t volume_id,
+                                   const struct hifs_volume_dentry *dent)
+{
+    if (!dent) {
+        return false;
+    }
+    uint32_t name_len = dent->de_name_len;
+    if (name_len > HIFS_MAX_NAME_SIZE) {
+        name_len = HIFS_MAX_NAME_SIZE;
+    }
+    uint64_t name_hash = hifs_meta_name_hash_bytes(dent->de_name, name_len);
+    return hg_kv_put_volume_dentry(volume_id,
+                                   dent->de_inode,
+                                   dent->de_parent,
+                                   name_hash,
+                                   dent) == 0;
+}
+
+bool hifs_meta_volume_inode_get(uint64_t volume_id,
+                                uint64_t inode,
+                                struct hifs_inode_wire *out)
+{
+    if (!out) {
+        return false;
+    }
+    if (hg_kv_get_volume_inode(volume_id, inode, out) != 0) {
+        memset(out, 0, sizeof(*out));
+        return false;
+    }
+    return true;
+}
+
+bool hifs_meta_volume_inode_put(uint64_t volume_id,
+                                const struct hifs_inode_wire *inode)
+{
+    if (!inode) {
+        return false;
+    }
+    return hg_kv_put_volume_inode(volume_id, inode) == 0;
+}
+
+bool hifs_meta_block_store_batch(const struct hifs_meta_block_record *records,
+                                 size_t record_count)
+{
+    if (!records || record_count == 0) {
+        return true;
+    }
+    return hg_kv_put_block_metadata_batch(records, record_count) == 0;
 }

@@ -57,12 +57,5 @@ int hifs_send_stripe_to_node(uint32_t storage_node_id,
                              uint32_t len,
                              uint64_t *out_block_offset);
 
-int hifs_recv_stripe_from_node(uint32_t storage_node_id,
-                               uint32_t shard_id,
-                               uint64_t estripe_id,
-                               const uint8_t *data,
-                               uint32_t len,
-                               uint64_t *out_block_offset);
-
 /* Submit the Raft command (this calls cowsql/raft) */
 int hifs_raft_submit_put_block(const struct RaftPutBlock *cmd);

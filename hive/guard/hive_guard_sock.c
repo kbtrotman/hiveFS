@@ -26,6 +26,7 @@
 #include "hive_guard_sql.h"
 #include "hive_guard_raft.h"
 #include "hive_guard_auth.h"
+#include "hive_guard_sn_tcp.h"
 #include "../bootstrap/hive_bootstrap_sock.h"
 #include "../common/hive_common_sql.h"
 #include "../common/hive_common_sock.h"
@@ -88,6 +89,33 @@ void bootstrap_status_update(const char *message, unsigned int percent,
 	else if (!g_config_state[0])
 		guard_sock_copy_field(g_config_state, sizeof(g_config_state),
 				      "IDLE", "IDLE");
+}
+
+int hive_guard_apply_setting_update(const char *key,
+				    const char *value,
+				    bool via_raft)
+{
+	if (!hg_guard_setting_key_is_valid(key) ||
+	    !hg_guard_setting_value_is_valid(value)) {
+		return -EINVAL;
+	}
+
+	struct RaftClusterSetting setting = {
+		.cluster_id = hbc.cluster_id,
+		.flags = 0,
+	};
+	hifs_safe_strcpy(setting.key, sizeof(setting.key), key);
+	hifs_safe_strcpy(setting.value, sizeof(setting.value), value);
+
+	if (via_raft && hg_guard_local_can_write()) {
+		struct RaftCmd cmd = {
+			.op_type = HG_OP_PUT_SETTING,
+			.u.setting = setting,
+		};
+		return hg_raft_submit_cmd_sync(&cmd, NULL);
+	}
+
+	return hg_guard_setting_store(&setting);
 }
 
 static pthread_t g_guard_sock_thread;
@@ -1402,11 +1430,71 @@ static bool guard_sock_try_handle_token_request(int fd, const char *json)
 	return true;
 }
 
+static bool guard_sock_try_handle_setting_request(int fd, const char *json)
+{
+	char command[32];
+	char setting_name[HG_CLUSTER_SETTING_KEY_MAX];
+	char setting_value[HG_CLUSTER_SETTING_VALUE_MAX];
+
+	if (!guard_sock_parse_string_value(json, "command",
+					   command, sizeof(command)))
+		return false;
+	if (strcmp(command, "update_setting") != 0)
+		return false;
+
+	if (!guard_sock_parse_string_value(json, "setting_name",
+					   setting_name,
+					   sizeof(setting_name))) {
+		hive_common_sock_respond(fd, "ERR setting_name missing\n");
+		return true;
+	}
+	if (!hg_guard_setting_key_is_valid(setting_name)) {
+		hive_common_sock_respond(fd, "ERR invalid setting_name\n");
+		return true;
+	}
+
+	bool has_value = false;
+	if (!guard_sock_parse_string_or_null(json,
+					     "setting_value",
+					     setting_value,
+					     sizeof(setting_value),
+					     &has_value) ||
+	    !has_value) {
+		hive_common_sock_respond(fd, "ERR setting_value missing\n");
+		return true;
+	}
+	if (!hg_guard_setting_value_is_valid(setting_value)) {
+		hive_common_sock_respond(fd, "ERR invalid setting_value\n");
+		return true;
+	}
+
+	int bcast_rc = hg_sn_broadcast_setting_update(setting_name,
+						      setting_value);
+	if (bcast_rc != 0) {
+		hive_common_sock_respond(fd,
+					 "ERR unable to forward setting\n");
+		return true;
+	}
+
+	int rc = hive_guard_apply_setting_update(setting_name,
+						 setting_value,
+						 true);
+	if (rc != 0) {
+		hive_common_sock_respond(fd, "ERR setting apply failed\n");
+		return true;
+	}
+
+	hive_common_sock_respond(fd, "OK\n");
+	return true;
+}
+
 static bool guard_sock_dispatch_request(int fd, const char *json)
 {
 	struct hive_guard_sock_join_sec join_req;
 	struct hive_guard_sock_cluster_join cluster_req;
 
+	if (guard_sock_try_handle_setting_request(fd, json))
+		return true;
 	if (guard_sock_parse_join_request(json, &join_req)) {
 		if (guard_sock_handle_join_sec(&join_req) == 0) {
 			hive_common_sock_respond(fd, "OK\n");
